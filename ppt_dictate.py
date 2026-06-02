@@ -67,7 +67,7 @@ DEVICE       = "cuda"
 COMPUTE_TYPE = "float16"       # REQUIRED on Blackwell; do NOT use int8
 SAMPLE_RATE  = 16_000          # Whisper's native rate
 LANGUAGE     = "en"            # set None for autodetect
-HOTKEY_MODS  = ("ctrl", "alt") # the push-to-talk chord (pure modifiers)
+HOTKEY_MODS  = ("ctrl", "space") # the push-to-talk chord
 POLL_SEC     = 0.02            # 20 ms hotkey polling
 # ------------------------------------------------------------------------------
 
