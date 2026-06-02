@@ -23,6 +23,7 @@ import os
 import sys
 import time
 import threading
+import socket
 
 # --- Make pip-installed CUDA/cuDNN DLLs discoverable before importing CT2 -----
 def _add_nvidia_dll_dirs():
@@ -58,11 +59,13 @@ _add_nvidia_dll_dirs()
 import numpy as np
 import sounddevice as sd
 import keyboard
-import pyperclip
 from faster_whisper import WhisperModel
 
 # ----------------------------- Configuration ---------------------------------
-MODEL_SIZE   = "large-v3"      # swap "large-v3-turbo" (recent FW) for lower latency
+# Desktop (darklord) gets the full large-v3; laptops/other hosts get large-v3-turbo
+IS_DESKTOP   = socket.gethostname().lower() == "darklord"
+MODEL_SIZE   = "large-v3" if IS_DESKTOP else "large-v3-turbo"
+
 DEVICE       = "cuda"
 COMPUTE_TYPE = "float16"       # REQUIRED on Blackwell; do NOT use int8
 SAMPLE_RATE  = 16_000          # Whisper's native rate
