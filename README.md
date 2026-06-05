@@ -10,6 +10,9 @@ This repository includes both a **command-line developer version** and a **compi
 
 The application is fully portable and requires **no Python installation** on target PCs.
 
+> [!IMPORTANT]
+> **Smart App Control Note:** Because the compiled standalone executable (`ptt_dictate.exe`) is unsigned, Windows 11 Smart App Control may block it. If this happens, you must either disable Smart App Control on the target PC, or run the application natively via the trusted Python interpreter (see [Run Directions](#⚡-run-directions)).
+
 ### 1. Installation
 1. Copy the **`ptt_dictate_dist.zip`** archive to the target computer.
 2. Extract the ZIP file to a folder of your choice (e.g., `C:\Users\<Username>\Documents` or Desktop).
@@ -26,10 +29,14 @@ The application is fully portable and requires **no Python installation** on tar
 
 ## ⚡ Run Directions
 
-### 1. Launching
-1. Double-click the shortcut you created (or `ptt_dictate.exe` directly).
+### 1. Launching (Bypassing Smart App Control / Windows Block)
+Since the compiled standalone executable (`ptt_dictate.exe`) is unsigned, Windows Smart App Control may block it. To bypass this, we provide a native launcher script that runs the application directly via the trusted virtual environment:
+
+1. Double-click **`run_tray.bat`** in the project directory.
 2. Click **Yes** on the Windows User Account Control (UAC) elevation prompt.
-3. A **Teal Microphone** icon will appear in the Windows System Tray (notification area, usually bottom right).
+3. A **Teal Microphone** icon will appear in the Windows System Tray (notification area, bottom right).
+
+*Alternatively, if you do not have Smart App Control enabled, you can run the compiled `dist/ptt_dictate/ptt_dictate.exe` directly.*
 
 ### 2. Usage
 * **Record:** **Hold `Ctrl + Space`** to record audio. The tray icon will turn **Red**.
@@ -57,7 +64,11 @@ To run the original command-line utility from PowerShell:
 ### 2. Run the System Tray Script
 To run the tray icon script natively:
 1. Open PowerShell **as Administrator**.
-2. Run:
+2. Run headlessly (recommended):
+   ```powershell
+   .venv\Scripts\pythonw.exe app\ptt_tray.py
+   ```
+   *Or, if you want to see console print output for debugging, run:*
    ```powershell
    .venv\Scripts\python.exe app\ptt_tray.py
    ```

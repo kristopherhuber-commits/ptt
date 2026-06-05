@@ -16,6 +16,7 @@ import threading
 import socket
 import json
 import traceback
+import re
 
 # Determine application directory for saving config and finding local models
 if getattr(sys, 'frozen', False):
@@ -118,7 +119,7 @@ except Exception as e:
 
 # ----------------------------- Configuration ---------------------------------
 IS_DESKTOP   = socket.gethostname().lower() == "darklord"
-MODEL_SIZE   = "large-v3" if IS_DESKTOP else "large-v3-turbo"
+MODEL_SIZE   = "large-v3-turbo"
 SAMPLE_RATE  = 16_000
 LANGUAGE     = "en"
 HOTKEY_MODS  = ("ctrl", "space")
@@ -388,9 +389,14 @@ def transcription_loop(icon_obj):
                     log_debug("Starting transcription...")
                     t0 = time.time()
                     segments, _ = model.transcribe(
-                        audio, language=LANGUAGE, beam_size=5, vad_filter=True
+                        audio,
+                        language=LANGUAGE,
+                        beam_size=5,
+                        vad_filter=True,
+                        condition_on_previous_text=False
                     )
                     text = "".join(s.text for s in segments).strip()
+                    text = re.sub(r'\.{2,}', '', text).strip()
                     t1 = time.time()
                     log_debug(f"Transcription finished in {t1-t0:.2f}s. Result: '{text}'")
                     

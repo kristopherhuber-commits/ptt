@@ -1,7 +1,7 @@
 """
 ptt_dictate.py — Push-to-talk local dictation for Windows 11.
 
-Hold Ctrl+Alt -> records mic. Release -> transcribes on the GPU (faster-whisper,
+Hold Ctrl+Space -> records mic. Release -> transcribes on the GPU (faster-whisper,
 fp16) and pastes the text at the current cursor location.
 
 Built for an RTX 5090 (Blackwell / sm_120):
@@ -24,6 +24,7 @@ import sys
 import time
 import threading
 import socket
+import re
 
 # --- Make pip-installed CUDA/cuDNN DLLs discoverable before importing CT2 -----
 def _add_nvidia_dll_dirs():
@@ -64,7 +65,7 @@ from faster_whisper import WhisperModel
 # ----------------------------- Configuration ---------------------------------
 # Desktop (darklord) gets the full large-v3; laptops/other hosts get large-v3-turbo
 IS_DESKTOP   = socket.gethostname().lower() == "darklord"
-MODEL_SIZE   = "large-v3" if IS_DESKTOP else "large-v3-turbo"
+MODEL_SIZE   = "large-v3-turbo"
 
 DEVICE       = "cuda"
 COMPUTE_TYPE = "float16"       # REQUIRED on Blackwell; do NOT use int8
@@ -143,9 +144,14 @@ def main():
                     print("  (too short, skipped)")
                     continue
                 segments, _ = model.transcribe(
-                    audio, language=LANGUAGE, beam_size=5, vad_filter=True,
+                    audio,
+                    language=LANGUAGE,
+                    beam_size=5,
+                    vad_filter=True,
+                    condition_on_previous_text=False
                 )
                 text = "".join(s.text for s in segments).strip()
+                text = re.sub(r'\.{2,}', '', text).strip()
                 if text:
                     print(f"  -> {text}")
                     paste_text(text)
