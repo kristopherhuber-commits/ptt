@@ -1,27 +1,19 @@
-[2026-06-03 11:22:23] === App Started ===
-[2026-06-03 11:22:23] sys.frozen: False
-[2026-06-03 11:22:23] sys.executable: C:\Users\huber\git\ptt\.venv\Scripts\python.exe
-[2026-06-03 11:22:23] app_dir: C:\Users\huber\git\ptt\app
-[2026-06-03 11:22:23] nvidia package found via import. Paths: _NamespacePath(['C:\\Users\\huber\\git\\ptt\\.venv\\Lib\\site-packages\\nvidia'])
-[2026-06-03 11:22:23] Resolving CUDA DLLs for paths: ['C:\\Users\\huber\\git\\ptt\\.venv\\Lib\\site-packages\\nvidia']
-[2026-06-03 11:22:23] Checking directory: C:\Users\huber\git\ptt\.venv\Lib\site-packages\nvidia\cudnn\bin
-[2026-06-03 11:22:23] Added DLL directory: C:\Users\huber\git\ptt\.venv\Lib\site-packages\nvidia\cudnn\bin
-[2026-06-03 11:22:23] Checking directory: C:\Users\huber\git\ptt\.venv\Lib\site-packages\nvidia\cublas\bin
-[2026-06-03 11:22:23] Added DLL directory: C:\Users\huber\git\ptt\.venv\Lib\site-packages\nvidia\cublas\bin
-[2026-06-03 11:22:23] Checking directory: C:\Users\huber\git\ptt\.venv\Lib\site-packages\nvidia\cuda_nvrtc\bin
-[2026-06-03 11:22:23] Added DLL directory: C:\Users\huber\git\ptt\.venv\Lib\site-packages\nvidia\cuda_nvrtc\bin
-[2026-06-03 11:22:23] Importing system and audio libraries...
-[2026-06-03 11:22:23] Importing ctranslate2/faster-whisper...
-[2026-06-03 11:22:24] Importing GUI and tray libraries...
-[2026-06-03 11:22:24] Imports completed successfully.
-[2026-06-03 11:22:24] IS_DESKTOP: True
-[2026-06-03 11:22:24] MODEL_SIZE: large-v3
-[2026-06-03 11:22:24] CONFIG_FILE: C:\Users\huber\git\ptt\app\config.json
-[2026-06-03 11:22:24] ctranslate2 detected CUDA devices count: 1
-[2026-06-03 11:22:24] Initial check_cuda_availability: True
-[2026-06-03 11:22:24] config.json not found, using default (use_gpu=True)
-[2026-06-03 11:22:24] Starting tray icon event loop...
-[2026-06-03 11:22:24] System Tray icon made visible. Starting background thread...
-[2026-06-03 11:22:24] Using on-demand model name: large-v3
-[2026-06-03 11:22:24] Attempting to load model 'large-v3' on 'CUDA' (float16)...
-[2026-06-03 11:22:26] Model successfully loaded on 'CUDA'.
+[2026-06-05 07:58:27] === App Started ===
+[2026-06-05 07:58:27] sys.frozen: False
+[2026-06-05 07:58:27] sys.executable: C:\Users\huber\git\ptt\.venv\Scripts\python.exe
+[2026-06-05 07:58:27] app_dir: C:\Users\huber\git\ptt\app
+[2026-06-05 07:58:27] nvidia package found via import. Paths: _NamespacePath(['C:\\Users\\huber\\git\\ptt\\.venv\\Lib\\site-packages\\nvidia'])
+[2026-06-05 07:58:27] Resolving CUDA DLLs for paths: ['C:\\Users\\huber\\git\\ptt\\.venv\\Lib\\site-packages\\nvidia']
+[2026-06-05 07:58:27] Checking directory: C:\Users\huber\git\ptt\.venv\Lib\site-packages\nvidia\cudnn\bin
+[2026-06-05 07:58:27] Added DLL directory: C:\Users\huber\git\ptt\.venv\Lib\site-packages\nvidia\cudnn\bin
+[2026-06-05 07:58:27] Checking directory: C:\Users\huber\git\ptt\.venv\Lib\site-packages\nvidia\cublas\bin
+[2026-06-05 07:58:27] Added DLL directory: C:\Users\huber\git\ptt\.venv\Lib\site-packages\nvidia\cublas\bin
+[2026-06-05 07:58:27] Checking directory: C:\Users\huber\git\ptt\.venv\Lib\site-packages\nvidia\cuda_nvrtc\bin
+[2026-06-05 07:58:27] Added DLL directory: C:\Users\huber\git\ptt\.venv\Lib\site-packages\nvidia\cuda_nvrtc\bin
+[2026-06-05 07:58:27] Importing system and audio libraries...
+[2026-06-05 07:58:27] Importing ctranslate2/faster-whisper...
+[2026-06-05 07:58:27] Importing GUI and tray libraries...
+[2026-06-05 07:58:27] Imports completed successfully.
+[2026-06-05 07:58:27] IS_DESKTOP: True
+[2026-06-05 07:58:27] MODEL_SIZE: large-v3-turbo
+[2026-06-05 07:58:27] CONFIG_FILE: C:\Users\huber\git\ptt\app\config.json

@@ -25,6 +25,7 @@ import time
 import threading
 import socket
 import re
+import pyperclip
 
 # --- Make pip-installed CUDA/cuDNN DLLs discoverable before importing CT2 -----
 def _add_nvidia_dll_dirs():
@@ -108,12 +109,44 @@ class Recorder:
 
 
 def paste_text(text):
-    """Insert text at the cursor by simulating typing (highly compatible)."""
+    """Insert text at the cursor by copying to clipboard and simulating Shift+Insert."""
     if not text:
         return
-    # Add a tiny sleep to make sure keys are fully released before typing starts
-    time.sleep(0.05)
-    keyboard.write(text)
+        
+    # Save original clipboard contents
+    try:
+        old_clipboard = pyperclip.paste()
+    except Exception:
+        old_clipboard = None
+        
+    # Copy the transcribed text to clipboard
+    try:
+        pyperclip.copy(text)
+    except Exception:
+        # Fallback to direct typing if clipboard copy fails
+        keyboard.write(text)
+        return
+
+    # Release modifier keys programmatically to ensure a clean Shift+Insert
+    for key in ("ctrl", "alt", "shift", "win"):
+        try:
+            keyboard.release(key)
+        except Exception:
+            pass
+
+    # Simulate Shift+Insert to paste
+    time.sleep(0.01)
+    keyboard.press_and_release("shift+insert")
+    
+    # Wait for Windows to process the paste before restoring clipboard
+    time.sleep(0.1)
+    
+    # Restore original clipboard contents
+    if old_clipboard is not None:
+        try:
+            pyperclip.copy(old_clipboard)
+        except Exception:
+            pass
 
 
 def chord_held():
