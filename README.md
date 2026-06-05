@@ -2,44 +2,78 @@
 
 A local, low-latency dictation utility that records audio when you hold a hotkey, transcribes it on your GPU using `faster-whisper`, and types the text directly at your cursor.
 
----
-
-## ⚡ Quick Start (Windows Run)
-
-You can launch this application directly using the Windows Run dialog:
-
-1. Press **`Win + R`** to open the Run dialog.
-2. Type **`ppt`** and press **Enter**.
-3. Click **Yes** on the Windows User Account Control (UAC) prompt.
-4. A PowerShell window running the script will open in the background. **Hold `Ctrl + Space`** to record audio, and release the keys to transcribe and type the text.
+This repository includes both a **command-line developer version** and a **compiled standalone System Tray application** that runs headless without a console window.
 
 ---
 
-## 💻 Manual Execution
+## 📦 Distribution & Installation Directions (For Target PCs)
 
-If you want to run the script manually from a command prompt:
+The application is fully portable and requires **no Python installation** on target PCs.
 
-1. Open PowerShell or Command Prompt **as Administrator** (required for global key hooks).
-2. Navigate to the project directory:
+### 1. Installation
+1. Copy the **`ptt_dictate_dist.zip`** archive to the target computer.
+2. Extract the ZIP file to a folder of your choice (e.g., `C:\Users\<Username>\Documents` or Desktop).
+3. Open the extracted folder and locate **`ptt_dictate.exe`**.
+4. **Create a Shortcut:** Right-click `ptt_dictate.exe` -> select **Show more options** -> **Create shortcut** (or Send to -> Desktop).
+5. **Configure Administrator Privileges:**
+   * Right-click the newly created shortcut and select **Properties**.
+   * On the **Shortcut** tab, click the **Advanced...** button.
+   * Check the box for **"Run as administrator"**.
+   * Click **OK**, then click **Apply**.
+   * *(Note: Administrator privileges are required for global key interception and to simulate typing into other elevated applications).*
+
+---
+
+## ⚡ Run Directions
+
+### 1. Launching
+1. Double-click the shortcut you created (or `ptt_dictate.exe` directly).
+2. Click **Yes** on the Windows User Account Control (UAC) elevation prompt.
+3. A **Teal Microphone** icon will appear in the Windows System Tray (notification area, usually bottom right).
+
+### 2. Usage
+* **Record:** **Hold `Ctrl + Space`** to record audio. The tray icon will turn **Red**.
+* **Transcribe:** **Release the keys**. The tray icon will turn **Yellow** while it transcribes and automatically type the text directly at your cursor.
+* **Settings:** Right-click the system tray icon to:
+  * Check the current state (`Status: Ready (CUDA)`, `Status: Recording...`, etc.).
+  * Toggle between **`Use GPU (CUDA)`** and **`Use CPU`** modes.
+  * **Exit** the application.
+* **Persistence:** The application creates a local `config.json` file in its directory to remember your CPU/GPU preference across restarts.
+
+---
+
+## 💻 Developer Directions
+
+If you want to run the python scripts directly or rebuild the executable:
+
+### 1. Run the Command-Line Script (Untouched)
+To run the original command-line utility from PowerShell:
+1. Open PowerShell **as Administrator**.
+2. Navigate to the project directory and run:
    ```powershell
-   cd "C:\Users\huber\git\ppt"
+   .venv\Scripts\python.exe ptt_dictate.py
    ```
-3. Run the script using the local virtual environment:
+
+### 2. Run the System Tray Script
+To run the tray icon script natively:
+1. Open PowerShell **as Administrator**.
+2. Run:
    ```powershell
-   .venv\Scripts\python.exe ppt_dictate.py
+   .venv\Scripts\python.exe app\ptt_tray.py
    ```
 
----
-
-## ⚙️ Configuration & Customization
-
-All settings are configured at the top of [ppt_dictate.py](file:///c:/Users/huber%20(windows)/git/ppt/ppt_dictate.py):
-
-* **Hotkey:** To change the recording hotkey, update `HOTKEY_MODS` (line 70).
-* **Model Size:** Change `MODEL_SIZE` (line 65) to change transcription accuracy vs. speed (e.g., `"large-v3"` or `"large-v3-turbo"`).
-* **Hardware Mode:** Default is set to GPU (`"cuda"`) and `float16` compute type to support Blackwell/Ampere architectures.
+### 3. Rebuild the Standalone Executable
+To compile changes under `app/` and generate a new ZIP package:
+1. Ensure the running executable is closed (right-click the tray icon and select **Exit**).
+2. Open PowerShell and run:
+   ```powershell
+   .venv\Scripts\python.exe build_dist.py
+   ```
+3. This will rebuild the executable under `dist/` and overwrite `ptt_dictate_dist.zip`.
 
 ---
 
 ## 📄 Development Details
-For detailed environment setup, script locations, and the project roadmap, see [development_history.md](file:///C:/Users/huber/git/ppt/development_history.md).
+For detailed environment setup, packaging summaries, and the project roadmap, see:
+* [agent_project_summary.md](file:///c:/Users/huber/git/ptt/agent_project_summary.md) (Packaging technical notes)
+* [development_history.md](file:///C:/Users/huber/git/ptt/development_history.md) (Environment setup and roadmap)

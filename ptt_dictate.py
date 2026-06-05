@@ -1,5 +1,5 @@
 """
-ppt_dictate.py — Push-to-talk local dictation for Windows 11.
+ptt_dictate.py — Push-to-talk local dictation for Windows 11.
 
 Hold Ctrl+Alt -> records mic. Release -> transcribes on the GPU (faster-whisper,
 fp16) and pastes the text at the current cursor location.
@@ -16,7 +16,7 @@ Install (native Windows Python 3.11/3.12 venv, NOT WSL):
 
 Run (Administrator terminal — the `keyboard` hook needs it for a global hotkey,
 and to inject into elevated windows the process must itself be elevated):
-    python ppt_dictate.py
+    python ptt_dictate.py
 """
 
 import os

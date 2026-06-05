@@ -1,13 +1,13 @@
 # Development History & Project Status
 
-This file tracks the setup, current configuration, and future roadmap of the **Push-to-Talk (PTT) Local Dictation Utility** (`ppt`). This allows future AI agents or developers to quickly understand the current state of the project.
+This file tracks the setup, current configuration, and future roadmap of the **Push-to-Talk (PTT) Local Dictation Utility** (`ptt`). This allows future AI agents or developers to quickly understand the current state of the project.
 
 ---
 
 ## 📋 Project Overview
 The project is a local, low-latency push-to-talk dictation utility for Windows 11. It records audio from the microphone when a hotkey is held, transcribes the speech locally using a `faster-whisper` model on the GPU, and automatically types/injects the text at the current cursor position.
 
-* **Core Script:** [ppt_dictate.py](file:///c:/Users/huber%20(windows)/git/ppt/ppt_dictate.py)
+* **Core Script:** [ptt_dictate.py](file:///c:/Users/huber%20(windows)/git/ptt/ptt_dictate.py)
 * **Target Platforms/Hardware:**
   * Developed for modern Windows 11 systems.
   * Optimized for high-end NVIDIA GPUs (RTX 5090, RTX 3080 Ti) using FP16 compute mode to avoid crashes on Blackwell/Ampere architectures.
@@ -18,11 +18,11 @@ The project is a local, low-latency push-to-talk dictation utility for Windows 1
 
 ### 1. Active Hotkey
 * **Chord:** `Ctrl + Space`
-* **Variable:** `HOTKEY_MODS = ("ctrl", "space")` in [ppt_dictate.py](file:///c:/Users/huber%20(windows)/git/ppt/ppt_dictate.py#L70)
+* **Variable:** `HOTKEY_MODS = ("ctrl", "space")` in [ptt_dictate.py](file:///c:/Users/huber%20(windows)/git/ptt/ptt_dictate.py#L70)
 * **Behavior:** Hold both keys to record, release to transcribe and paste.
 
 ### 2. Python Virtual Environment
-* **Location:** `C:\Users\huber\git\ppt\.venv`
+* **Location:** `C:\Users\huber\git\ptt\.venv`
 * **Python Version:** 3.14.2
 * **Dependencies Installed:**
   * `faster-whisper` (speech-to-text engine)
@@ -33,12 +33,12 @@ The project is a local, low-latency push-to-talk dictation utility for Windows 1
   * `pyperclip` (clipboard operations)
   * `nvidia-cudnn-cu12` & `nvidia-cublas-cu12` (provides cuDNN 9 / cuBLAS DLLs directly inside the venv)
 
-### 3. Windows Run Alias (`ppt`)
+### 3. Windows Run Alias (`ptt`)
 To allow quick launch without manual command prompt navigation, a launch helper is set up:
-* **Batch Script Path:** [ppt.bat](file:///C:/Users/huber/.local/bin/ppt.bat)
-* **Location in PATH:** `C:\Users\huber\.local\bin\ppt.bat`
+* **Batch Script Path:** [ptt.bat](file:///C:/Users/huber/.local/bin/ptt.bat)
+* **Location in PATH:** `C:\Users\huber\.local\bin\ptt.bat`
 * **Behavior:** 
-  1. Triggered by typing `ppt` in the Windows Run dialog (`Win + R`).
+  1. Triggered by typing `ptt` in the Windows Run dialog (`Win + R`).
   2. Automatically requests Administrator elevation (UAC prompt).
   3. Launches a new elevated PowerShell console, navigates to the repository, and executes the script using the local virtual environment.
 
@@ -48,7 +48,7 @@ To allow quick launch without manual command prompt navigation, a launch helper 
 
 * **To run the script directly (as Admin):**
   ```powershell
-  .venv\Scripts\python.exe ppt_dictate.py
+  .venv\Scripts\python.exe ptt_dictate.py
   ```
 * **To install new packages to the environment:**
   ```powershell
@@ -67,5 +67,5 @@ To allow quick launch without manual command prompt navigation, a launch helper 
    * Package the application using PyInstaller so it can run as a standalone `.exe` without requiring a local Python installation:
      ```powershell
      .venv\Scripts\pip install pyinstaller
-     .venv\Scripts\pyinstaller --noconsole --onefile ppt_dictate.py
+     .venv\Scripts\pyinstaller --noconsole --onefile ptt_dictate.py
      ```
