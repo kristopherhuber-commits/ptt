@@ -69,14 +69,18 @@ To run the tray icon script natively:
    .venv\Scripts\python.exe app\ptt_tray.py
    ```
 
-### 3. Repackage the Portable Distribution
-To bundle changes under `app/` or dependency updates into a new distribution ZIP package:
+### 3. Build & Package the Portable Distribution
+If you pull the repository on a new computer (or need to rebuild it from scratch):
 1. Ensure the running executable is closed (right-click the tray icon and select **Exit**).
-2. Open PowerShell and run:
+2. Run the build script using your local Python installation:
    ```powershell
-   .venv\Scripts\python.exe package_portable.py
+   python build_portable.py
    ```
-3. This will rebuild and overwrite `ptt_dictate_dist.zip` with your latest files and virtual environment.
+This script will automatically:
+* Create a virtual environment (`.venv`) if it does not exist.
+* Upgrade pip and install all package requirements from `requirements.txt`.
+* Configure the virtual environment with the signed Python interpreter DLLs (renaming `pythonw.exe` to `ptt_dictate.exe` so it shows up correctly on the GPU).
+* Bundle everything cleanly into `ptt_dictate_dist.zip` (skipping `__pycache__` and other temporary developer files).
 
 ---
 
