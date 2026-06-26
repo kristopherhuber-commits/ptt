@@ -60,8 +60,25 @@ _add_nvidia_dll_dirs()
 
 import numpy as np
 import sounddevice as sd
+sd._terminate()  # Terminate initial auto-initialization to prevent sleep blocking
 import keyboard
 from faster_whisper import WhisperModel
+import ctypes
+
+class LASTINPUTINFO(ctypes.Structure):
+    _fields_ = [
+        ("cbSize", ctypes.c_uint),
+        ("dwTime", ctypes.c_uint)
+    ]
+
+def get_idle_duration():
+    lii = LASTINPUTINFO()
+    lii.cbSize = ctypes.sizeof(LASTINPUTINFO)
+    if ctypes.windll.user32.GetLastInputInfo(ctypes.byref(lii)):
+        tick_count = ctypes.windll.kernel32.GetTickCount()
+        millis = (tick_count - lii.dwTime) & 0xFFFFFFFF
+        return millis / 1000.0
+    return 0.0
 
 # ----------------------------- Configuration ---------------------------------
 # Desktop (darklord) gets the full large-v3; laptops/other hosts get large-v3-turbo
@@ -82,34 +99,71 @@ class Recorder:
     def __init__(self, samplerate):
         self.samplerate = samplerate
         self._frames = []
+        self._preroll = []
         self._stream = None
+        self.recording = False
 
     def _callback(self, indata, frames, time_info, status):
         if status:
             print(f"[audio] {status}", file=sys.stderr)
-        self._frames.append(indata.copy())
+        if self.recording:
+            self._frames.append(indata.copy())
+        else:
+            self._preroll.append(indata.copy())
+            while len(self._preroll) > 4:
+                self._preroll.pop(0)
+
+    def open_stream(self):
+        if self._stream is not None:
+            return
+        try:
+            sd._initialize()
+            self._frames = []
+            self._preroll = []
+            self._stream = sd.InputStream(
+                samplerate=self.samplerate, channels=1,
+                dtype="float32", callback=self._callback,
+            )
+            self._stream.start()
+        except Exception as e:
+            print(f"[audio] Failed to open stream: {e}", file=sys.stderr)
+
+    def close_stream(self):
+        self.recording = False
+        if self._stream is not None:
+            try:
+                self._stream.stop()
+                self._stream.close()
+            except Exception:
+                pass
+            self._stream = None
+            try:
+                sd._terminate()
+            except Exception:
+                pass
+        self._frames = []
+        self._preroll = []
 
     def start(self):
-        self._frames = []
-        self._stream = sd.InputStream(
-            samplerate=self.samplerate, channels=1,
-            dtype="float32", callback=self._callback,
-        )
-        self._stream.start()
+        if self._stream is None:
+            self.open_stream()
+        # Seed main frames with pre-roll data to capture early speech
+        self._frames = list(self._preroll)
+        self._preroll = []
+        self.recording = True
 
     def stop(self):
-        if self._stream is None:
-            return np.empty(0, dtype=np.float32)
-        self._stream.stop()
-        self._stream.close()
-        self._stream = None
+        self.recording = False
+        self._preroll = []
         if not self._frames:
             return np.empty(0, dtype=np.float32)
-        return np.concatenate(self._frames, axis=0).flatten()
+        audio_data = np.concatenate(self._frames, axis=0).flatten()
+        self._frames = []
+        return audio_data
 
 
 def paste_text(text):
-    """Insert text at the cursor by copying to clipboard and simulating Shift+Insert."""
+    """Insert text at the cursor by copying to clipboard and simulating Shift+Insert via native Win32 API."""
     if not text:
         return
         
@@ -124,19 +178,45 @@ def paste_text(text):
         pyperclip.copy(text)
     except Exception:
         # Fallback to direct typing if clipboard copy fails
-        keyboard.write(text)
-        return
-
-    # Release modifier keys programmatically to ensure a clean Shift+Insert
-    for key in ("ctrl", "alt", "shift", "win"):
         try:
-            keyboard.release(key)
+            keyboard.write(text)
         except Exception:
             pass
+        return
 
-    # Simulate Shift+Insert to paste
-    time.sleep(0.01)
-    keyboard.press_and_release("shift+insert")
+    # Release modifier keys programmatically using native Win32 keybd_event
+    try:
+        scan_ctrl = ctypes.windll.user32.MapVirtualKeyW(0x11, 0)
+        scan_alt = ctypes.windll.user32.MapVirtualKeyW(0x12, 0)
+        scan_lwin = ctypes.windll.user32.MapVirtualKeyW(0x5B, 0)
+        scan_rwin = ctypes.windll.user32.MapVirtualKeyW(0x5C, 0)
+        
+        ctypes.windll.user32.keybd_event(0x11, scan_ctrl, 2, 0) # Release Ctrl
+        ctypes.windll.user32.keybd_event(0x12, scan_alt, 2, 0)  # Release Alt
+        ctypes.windll.user32.keybd_event(0x5B, scan_lwin, 2, 0) # Release Left Win
+        ctypes.windll.user32.keybd_event(0x5C, scan_rwin, 2, 0) # Release Right Win
+    except Exception:
+        for key in ("ctrl", "alt", "win"):
+            try:
+                keyboard.release(key)
+            except Exception:
+                pass
+
+    # Simulate Shift+Insert to paste via native Win32 keybd_event with scan codes and extended key flags
+    try:
+        time.sleep(0.01)
+        scan_shift = ctypes.windll.user32.MapVirtualKeyW(0x10, 0)
+        scan_insert = ctypes.windll.user32.MapVirtualKeyW(0x2D, 0)
+        
+        ctypes.windll.user32.keybd_event(0x10, scan_shift, 0, 0)              # Shift down
+        ctypes.windll.user32.keybd_event(0x2D, scan_insert, 1, 0)             # Insert down (extended)
+        ctypes.windll.user32.keybd_event(0x2D, scan_insert, 1 | 2, 0)         # Insert up (extended | keyup)
+        ctypes.windll.user32.keybd_event(0x10, scan_shift, 2, 0)              # Shift up
+    except Exception:
+        try:
+            keyboard.press_and_release("shift+insert")
+        except Exception:
+            pass
     
     # Wait for Windows to process the paste before restoring clipboard
     time.sleep(0.1)
@@ -149,8 +229,20 @@ def paste_text(text):
             pass
 
 
+VK_MAP = {
+    "ctrl": 0x11,
+    "space": 0x20,
+    "shift": 0x10,
+    "alt": 0x12,
+    "win": 0x5B
+}
+
 def chord_held():
-    return all(keyboard.is_pressed(k) for k in HOTKEY_MODS)
+    """Check if all keys in the hotkey chord are pressed using GetAsyncKeyState."""
+    try:
+        return all((ctypes.windll.user32.GetAsyncKeyState(VK_MAP[k]) & 0x8000) != 0 for k in HOTKEY_MODS)
+    except Exception:
+        return all(keyboard.is_pressed(k) for k in HOTKEY_MODS)
 
 
 def main():
@@ -161,9 +253,21 @@ def main():
 
     rec = Recorder(SAMPLE_RATE)
     recording = False
+    stream_open = False
+    IDLE_THRESHOLD_SEC = 240.0
 
     try:
         while True:
+            idle = get_idle_duration()
+            if idle < IDLE_THRESHOLD_SEC:
+                if not stream_open:
+                    rec.open_stream()
+                    stream_open = True
+            else:
+                if stream_open and not recording:
+                    rec.close_stream()
+                    stream_open = False
+
             held = chord_held()
             if held and not recording:
                 recording = True
@@ -194,8 +298,15 @@ def main():
     except KeyboardInterrupt:
         if recording:
             rec.stop()
+        rec.close_stream()
         print("\nBye.")
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+        import os
+        os._exit(0)
+    except Exception as e:
+        import os
+        os._exit(1)

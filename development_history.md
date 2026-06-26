@@ -97,6 +97,29 @@ When packaging using PyInstaller (`--onedir` mode):
 * **Cause:** `keyboard.write()` types character-by-character. If the user was still physically releasing the `Ctrl` modifier key, simulated keys were sent as shortcuts (e.g., `4` became `Ctrl+4` which switches Notepad tabs; `c` became `Ctrl+C` which triggers copy).
 * **Fix:** Switched from `keyboard.write` character simulation to clipboard-based paste using `Shift + Insert` which is instant, single-event, and doesn't conflict with lingering physical `Ctrl` keys. Temporarily preserves and restores the user's previous clipboard contents.
 
+### 6. Hotkey Recording Wake-up Delay (Headset Latency)
+* **Symptom:** A ~1-second delay when starting to record after pressing `Ctrl+Space` (often with headset chime/clicks).
+* **Cause:** PortAudio audio streams were started and stopped on every key press and release, triggering hardware wake-up latency.
+* **Fix:** Kept the audio stream in the `started` state continuously while active. Implemented callback-level filtering via a `self.recording` flag and added a 200ms pre-roll buffer (`self._preroll`) to prevent clipping early words. Increased idle timeout from 120s to 240s to preserve low-power states when inactive.
+
+### 7. Keyboard Hook Loss / Unresponsiveness after System Transitions
+* **Symptom:** PTT stops responding to the `Ctrl+Space` hotkey entirely (the icon remains green), even though the process is running and responding.
+* **Cause:** The Python `keyboard` library relies on Windows low-level keyboard hooks (`SetWindowsHookEx`), which Windows silently disables after UAC prompts, screen locks, or sleep timeouts.
+* **Fix:** Replaced hook-based polling with the Win32 `GetAsyncKeyState` API in `chord_held()` to query keyboard driver states directly from the OS. This makes hotkey detection completely immune to hook unregistrations.
+
+### 8. Pasting Failure After USB HID (Jabra) Connection & Zombie Process Accumulation
+* **Symptom:** The application records audio and transcribes successfully (visible in the debug logs), but no text is pasted at the cursor when the hotkey is released. Additionally, multiple duplicate zombie `ptt_dictate.exe` instances accumulate in memory on restart.
+* **Cause:** 
+  1. **Hook Thread Failure**: Connecting or disconnecting USB HID devices (like Jabra headsets with physical call control buttons) resets the Windows keyboard hook chain. This silently invalidates the Python `keyboard` library's hook thread, causing simulated inputs (like `keyboard.press_and_release("shift+insert")`) to fail.
+  2. **UWP Scancode Requirement**: Modern Windows 11 Notepad (a UWP application) rejects simulated virtual keys (like `VK_INSERT`) if they do not contain valid hardware scan codes and the `KEYEVENTF_EXTENDEDKEY` (0x01) flag (since the physical `Insert` key is in the extended navigation block).
+  3. **UIPI Security Blocks**: Windows User Interface Privilege Isolation (UIPI) blocks simulated inputs sent from non-elevated scripts to other privilege contexts or UWP containers.
+  4. **Zombie Processes**: Python's interpreter blocks exiting if background threads spawned by CTranslate2 thread pools or the `keyboard` listener hook remain alive, leaving zombie processes in memory.
+* **Fix:** 
+  1. **Native Input Injection**: Replaced the `keyboard` library's pasting with direct, native Win32 `keybd_event` calls via `ctypes`.
+  2. **Hardware Scancodes & Extended Flag**: Resolved scan codes via `MapVirtualKeyW` and explicitly flagged `VK_INSERT` as extended (`0x01`), allowing UWP Notepad and command-line terminals to accept the simulated `Shift+Insert` keystroke.
+  3. **Elevation Wrapper**: Standardized launcher and installers to self-elevate to Administrator, bypassing UIPI.
+  4. **Forced Process Termination**: Added `os._exit(0)` directly inside the `__main__` entry point of both `ptt_dictate.py` and `ptt_tray.py` to immediately terminate the process and all background threads at the OS level upon exiting.
+
 ## 🛠️ Maintenance & Execution Protocols
 
 ### Native Terminal Execution

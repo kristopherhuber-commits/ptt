@@ -27,7 +27,7 @@ def main():
 
     # 4. Copy core Python executable and DLLs to .venv/Scripts/
     print("Configuring standalone signed interpreter in .venv...")
-    python_dir = os.path.dirname(sys.executable)
+    python_dir = sys.base_prefix
     target_scripts = os.path.join(".venv", "Scripts")
 
     # Determine Python DLL name based on current python version (e.g. python314.dll)
@@ -36,6 +36,7 @@ def main():
 
     files_to_copy = [
         ("pythonw.exe", "ptt_dictate.exe"),
+        ("python.exe", "python.exe"),
         ("python3.dll", "python3.dll"),
         (py_dll, py_dll),
         ("vcruntime140.dll", "vcruntime140.dll"),
@@ -47,9 +48,33 @@ def main():
         dest_path = os.path.join(target_scripts, dest_name)
         if os.path.exists(src_path):
             print(f"  Copying {src_name} -> {dest_name}...")
-            shutil.copy2(src_path, dest_path)
+            try:
+                shutil.copy2(src_path, dest_path)
+            except PermissionError:
+                print(f"  Warning: {dest_name} is currently in use/locked. Skipping copy since it already exists.")
         else:
             print(f"  Warning: {src_name} not found in base Python directory.")
+
+    # Copy base python DLLs and Lib directories to make the virtual environment fully portable
+    print("Copying DLLs folder from base Python...")
+    src_dlls = os.path.join(python_dir, "DLLs")
+    dest_dlls = os.path.join(".venv", "DLLs")
+    if os.path.isdir(src_dlls):
+        shutil.copytree(src_dlls, dest_dlls, dirs_exist_ok=True)
+
+    print("Copying standard library (Lib) from base Python...")
+    src_lib = os.path.join(python_dir, "Lib")
+    dest_lib = os.path.join(".venv", "Lib")
+    if os.path.isdir(src_lib):
+        for name in os.listdir(src_lib):
+            if name.lower() == "site-packages":
+                continue
+            src_item = os.path.join(src_lib, name)
+            dest_item = os.path.join(dest_lib, name)
+            if os.path.isdir(src_item):
+                shutil.copytree(src_item, dest_item, dirs_exist_ok=True)
+            else:
+                shutil.copy2(src_item, dest_item)
 
     # 5. Package everything into ptt_dictate_dist.zip
     zip_name = "ptt_dictate_dist.zip"
@@ -80,6 +105,11 @@ def main():
                     if ".pytest_cache" in dirs:
                         dirs.remove(".pytest_cache")
                     for file in files:
+                        if item == ".venv" and root == ".venv" and file == "pyvenv.cfg":
+                            print("  Skipping pyvenv.cfg to ensure environment portability...")
+                            continue
+                        if file.lower().endswith(".old"):
+                            continue
                         filepath = os.path.join(root, file)
                         zipf.write(filepath, filepath)
                         count += 1

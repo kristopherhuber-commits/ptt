@@ -52,11 +52,11 @@ Copy-Item -Path "$SourceDir\run_tray.bat" -Destination "$TargetDir\run_tray.bat"
 
 # Verify DLLs are in the Scripts directory of the target
 $TargetScripts = "$TargetDir\.venv\Scripts"
-$Dlls = @("python314.dll", "python3.dll", "vcruntime140.dll", "vcruntime140_1.dll")
-foreach ($dll in $Dlls) {
-    if (-not (Test-Path "$TargetScripts\$dll")) {
-        if (Test-Path "$SourceDir\.venv\Scripts\$dll") {
-            Copy-Item "$SourceDir\.venv\Scripts\$dll" "$TargetScripts\$dll" -Force
+if (Test-Path "$SourceDir\.venv\Scripts") {
+    Get-ChildItem -Path "$SourceDir\.venv\Scripts\*.dll" | ForEach-Object {
+        $dllName = $_.Name
+        if (-not (Test-Path "$TargetScripts\$dllName")) {
+            Copy-Item $_.FullName "$TargetScripts\$dllName" -Force
         }
     }
 }
@@ -70,6 +70,7 @@ $WshShell = New-Object -ComObject WScript.Shell
 $Shortcut = $WshShell.CreateShortcut($ShortcutPath)
 $Shortcut.TargetPath = "$TargetDir\run_tray.bat"
 $Shortcut.WorkingDirectory = "$TargetDir"
+$Shortcut.IconLocation = "C:\Windows\System32\mmres.dll,-3014"
 $Shortcut.Description = "Push-to-Talk Local GPU Dictation"
 $Shortcut.Save()
 
@@ -86,6 +87,7 @@ Write-Host "Creating Startup shortcut (to run automatically on Windows login)...
 $StartupShortcut = $WshShell.CreateShortcut($StartupShortcutPath)
 $StartupShortcut.TargetPath = "$TargetDir\run_tray.bat"
 $StartupShortcut.WorkingDirectory = "$TargetDir"
+$StartupShortcut.IconLocation = "C:\Windows\System32\mmres.dll,-3014"
 $StartupShortcut.Description = "Push-to-Talk Local GPU Dictation"
 $StartupShortcut.Save()
 
@@ -102,8 +104,8 @@ Write-Host "PTT Dictation has been installed to:" -ForegroundColor Gray
 Write-Host "  $TargetDir" -ForegroundColor Green
 Write-Host ""
 Write-Host "Features Configured:" -ForegroundColor Gray
-Write-Host "  [✓] Desktop shortcut created (with Auto-Admin elevation)" -ForegroundColor Green
-Write-Host "  [✓] Startup folder shortcut created (to run at Windows login)" -ForegroundColor Green
+Write-Host "  [+] Desktop shortcut created (with Auto-Admin elevation)" -ForegroundColor Green
+Write-Host "  [+] Startup folder shortcut created (to run at Windows login)" -ForegroundColor Green
 Write-Host ""
 Write-Host "Launching PTT Dictation now..." -ForegroundColor Cyan
 
