@@ -38,7 +38,7 @@ system:
       purpose: "binary compilation and standalone packaging"
 
 active_hotkey:
-  mods: ["ctrl", "space"]
+  mods: ["shift", "alt"]
   trigger_behavior: "Press and hold to record; release to transcribe and paste."
 
 model_parameters:
@@ -119,6 +119,17 @@ When packaging using PyInstaller (`--onedir` mode):
   2. **Hardware Scancodes & Extended Flag**: Resolved scan codes via `MapVirtualKeyW` and explicitly flagged `VK_INSERT` as extended (`0x01`), allowing UWP Notepad and command-line terminals to accept the simulated `Shift+Insert` keystroke.
   3. **Elevation Wrapper**: Standardized launcher and installers to self-elevate to Administrator, bypassing UIPI.
   4. **Forced Process Termination**: Added `os._exit(0)` directly inside the `__main__` entry point of both `ptt_dictate.py` and `ptt_tray.py` to immediately terminate the process and all background threads at the OS level upon exiting.
+
+### 9. Space-Bar Leakage Moving the Cursor / Scrolling During Recording
+* **Symptom:** Holding the `Ctrl+Space` hotkey would sometimes type a literal space or scroll the focused window (cursor "moving forward") instead of just starting a recording.
+* **Cause:** `chord_held()` detects the hotkey via `GetAsyncKeyState` polling rather than a suppressing keyboard hook (see issue #7), so the physical keypress is never blocked from reaching the focused application. `Space` is a printable/actionable key, so every hold also delivered a real spacebar press to whatever had focus (typing a space, or scrolling in browsers/PDF viewers). `Ctrl` alone doesn't cause this because it has no character or default scroll action.
+* **Fix:** Changed the hotkey chord from `Ctrl+Space` to `Shift+Alt` — two pure modifier keys that produce no character and no scroll action on their own, eliminating the leakage. Updated in both `ptt_dictate.py` and `app/ptt_tray.py` (`HOTKEY_MODS`); `VK_MAP` already contained entries for both keys so no new Win32 plumbing was needed.
+* **Caveat:** `Alt+Shift` is Windows' default "switch input/keyboard language" hotkey when more than one input language is installed (Settings → Time & Language → Language). On machines with a second layout installed, this should be checked/disabled to avoid the hotkey also cycling keyboard layouts.
+
+### 10. `pip.exe` Self-Upgrade Failure During Portable Build
+* **Symptom:** `build_portable.py` failed with `ERROR: To modify pip, please run the following command: ...python.exe -m pip install --upgrade pip` when upgrading pip inside the fresh `.venv`.
+* **Cause:** On Windows, `pip.exe` cannot overwrite its own running executable file during a self-upgrade.
+* **Fix:** Changed the upgrade step in `build_portable.py` to invoke `python.exe -m pip install --upgrade pip` instead of calling `pip.exe` directly.
 
 ## 🛠️ Maintenance & Execution Protocols
 

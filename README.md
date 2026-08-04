@@ -44,7 +44,7 @@ The installation script will automatically:
 * A **Teal Microphone** icon will appear in the Windows System Tray (notification area, bottom right). If it is hidden, click the **`^`** chevron next to the clock and drag the microphone icon to the main taskbar.
 
 ### 2. Usage
-* **Record**: **Hold `Ctrl + Space`** and speak. The tray icon will turn **Red**.
+* **Record**: **Hold `Shift + Alt`** and speak. The tray icon will turn **Red**.
 * **Transcribe**: **Release the keys**. The tray icon will turn **Yellow** while it transcribes and automatically pastes the text directly at your cursor.
 * **Settings**: Right-click the system tray icon to:
   * Check the current state (`Status: Ready (CUDA)`, `Status: Recording...`, etc.).

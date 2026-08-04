@@ -21,8 +21,11 @@ def main():
 
     # 3. Upgrade pip and install requirements
     print("Installing dependencies in .venv (this might take a few minutes)...")
+    python_exe = os.path.join(".venv", "Scripts", "python.exe")
     pip_exe = os.path.join(".venv", "Scripts", "pip.exe")
-    subprocess.run([pip_exe, "install", "--upgrade", "pip"], check=True)
+    # Use `python -m pip` for the upgrade: pip.exe cannot overwrite its own
+    # running executable on Windows ("To modify pip, please run ... -m pip").
+    subprocess.run([python_exe, "-m", "pip", "install", "--upgrade", "pip"], check=True)
     subprocess.run([pip_exe, "install", "-r", "requirements.txt"], check=True)
 
     # 4. Copy core Python executable and DLLs to .venv/Scripts/

@@ -125,7 +125,7 @@ IS_DESKTOP   = socket.gethostname().lower() == "darklord"
 MODEL_SIZE   = "large-v3-turbo"
 SAMPLE_RATE  = 16_000
 LANGUAGE     = "en"
-HOTKEY_MODS  = ("ctrl", "space")
+HOTKEY_MODS  = ("shift", "alt")
 POLL_SEC     = 0.02
 CONFIG_FILE  = os.path.join(app_dir, "config.json")
 

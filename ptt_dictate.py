@@ -1,7 +1,7 @@
 """
 ptt_dictate.py — Push-to-talk local dictation for Windows 11.
 
-Hold Ctrl+Space -> records mic. Release -> transcribes on the GPU (faster-whisper,
+Hold Shift+Alt -> records mic. Release -> transcribes on the GPU (faster-whisper,
 fp16) and pastes the text at the current cursor location.
 
 Built for an RTX 5090 (Blackwell / sm_120):
@@ -89,7 +89,7 @@ DEVICE       = "cuda"
 COMPUTE_TYPE = "float16"       # REQUIRED on Blackwell; do NOT use int8
 SAMPLE_RATE  = 16_000          # Whisper's native rate
 LANGUAGE     = "en"            # set None for autodetect
-HOTKEY_MODS  = ("ctrl", "space") # the push-to-talk chord
+HOTKEY_MODS  = ("shift", "alt") # the push-to-talk chord
 POLL_SEC     = 0.02            # 20 ms hotkey polling
 # ------------------------------------------------------------------------------
 
