@@ -4,6 +4,28 @@ import subprocess
 import shutil
 import zipfile
 
+#: Per-machine files the application writes next to itself at runtime. They live
+#: inside app/, so os.walk picks them up and they ship to every target PC.
+#: debug_log.txt has been doing so since this script was written.
+#:
+#: config.json is the dangerous one. install.ps1 copies app/ over an existing
+#: installation with -Force, so a shipped config.json would overwrite the user's
+#: saved hotkey and device preference on every reinstall.
+RUNTIME_ARTIFACTS = frozenset({"config.json", "debug_log.txt", "debug_log.prev.txt"})
+
+
+def should_skip(item, root, filename):
+    """Whether one walked file is excluded from the distribution archive."""
+    # pyvenv.cfg pins the venv to the build machine's interpreter path
+    if item == ".venv" and root == ".venv" and filename == "pyvenv.cfg":
+        return "environment portability"
+    if item == "app" and root == "app" and filename.lower() in RUNTIME_ARTIFACTS:
+        return "per-machine runtime artifact"
+    if filename.lower().endswith(".old"):
+        return "backup file"
+    return None
+
+
 def main():
     print("=== Push-to-Talk Portable Build & Package Script ===")
     
@@ -108,10 +130,9 @@ def main():
                     if ".pytest_cache" in dirs:
                         dirs.remove(".pytest_cache")
                     for file in files:
-                        if item == ".venv" and root == ".venv" and file == "pyvenv.cfg":
-                            print("  Skipping pyvenv.cfg to ensure environment portability...")
-                            continue
-                        if file.lower().endswith(".old"):
+                        reason = should_skip(item, root, file)
+                        if reason:
+                            print(f"  Skipping {os.path.join(root, file)} ({reason})...")
                             continue
                         filepath = os.path.join(root, file)
                         zipf.write(filepath, filepath)
