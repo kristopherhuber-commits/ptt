@@ -62,6 +62,14 @@ class Engine:
         self.cuda_supported = cuda_supported
         self.current_device = "cpu"
 
+        # Hardware has the last word over the saved preference. Done here rather
+        # than in each frontend so the rule lives once: the tray needs it so the
+        # menu checkmark tells the truth, and load_model_with_fallback needs it
+        # so it does not attempt CUDA on a machine without it.
+        if not cuda_supported:
+            log_debug("CUDA not supported on this hardware. Overriding config to use CPU.")
+            settings.use_gpu = False
+
         self._on_state = on_state
         self._on_text = on_text or (lambda _text: None)
         self._chord_held = chord_held or hotkey_mod.chord_held

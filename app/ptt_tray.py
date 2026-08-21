@@ -51,10 +51,8 @@ def main():
     logging_setup.log_debug(f"Initial check_cuda_availability: {cuda_supported}")
 
     # 2. Load settings
+    # The engine applies the no-CUDA override; see its constructor.
     settings = config.load()
-    if not cuda_supported:
-        logging_setup.log_debug("CUDA not supported on this hardware. Overriding config to use CPU.")
-        settings.use_gpu = False
 
     # 3. Two-phase wiring: the tray needs the engine to drive it, and the engine
     #    needs the tray's callback to report to. The engine never imports the UI.
