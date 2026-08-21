@@ -9,6 +9,7 @@ This application is built for compatibility and stability across different envir
 ## 🚀 Features & Architecture
 
 * **Zero-Latency Audio**: PortAudio streams remain active continuously in low-power states to prevent audio hardware wake-up delays.
+* **Focus-Safe Hotkey**: Defaults to `Right Ctrl` — a lone modifier that types no character, scrolls nothing, and never activates a menu bar. Configurable via `config.json`.
 * **Universal Clipboard Pasting**: Pastes using `Shift+Insert` to ensure full compatibility with WSL terminals and bash command prompts, while preserving and restoring your original clipboard content.
 * **Native Input Injection**: Bypasses the fragile Python `keyboard` library for pasting, using native Win32 `keybd_event` calls. This guarantees that your pasting never breaks when Windows resets the hook chain (e.g., when plugging in USB headsets like Jabra).
 * **Smart App Control Compatible**: Uses a launcher signed by the Python Software Foundation to bypass Windows security blocks natively.
@@ -44,13 +45,22 @@ The installation script will automatically:
 * A **Teal Microphone** icon will appear in the Windows System Tray (notification area, bottom right). If it is hidden, click the **`^`** chevron next to the clock and drag the microphone icon to the main taskbar.
 
 ### 2. Usage
-* **Record**: **Hold `Shift + Alt`** and speak. The tray icon will turn **Red**.
+* **Record**: **Hold `Right Ctrl`** and speak. The tray icon will turn **Red**.
 * **Transcribe**: **Release the keys**. The tray icon will turn **Yellow** while it transcribes and automatically pastes the text directly at your cursor.
 * **Settings**: Right-click the system tray icon to:
-  * Check the current state (`Status: Ready (CUDA)`, `Status: Recording...`, etc.).
+  * Check the current state (`Status: Ready (CUDA)`, `Status: Recording...`, etc.) and the active `Hotkey:`.
   * Toggle between **`Use GPU (CUDA)`** and **`Use CPU`** modes.
   * **Exit** the application.
 * **Persistence**: The application creates a local `config.json` file in its directory to remember your CPU/GPU preference across restarts.
+* **Changing the hotkey**: Add a `hotkey` entry to `config.json` and restart. It takes a list of key names, all of which must be held together:
+
+  ```json
+  { "use_gpu": true, "hotkey": ["rctrl"] }
+  ```
+
+  Valid names: `ctrl`, `lctrl`, `rctrl`, `shift`, `lshift`, `rshift`, `alt`, `lalt`, `ralt`, `win`, `lwin`, `rwin`, `space`. Unsided names (`ctrl`) match either side. An unrecognised name falls back to the default and is noted in `debug_log.txt`.
+
+  Two cautions when choosing your own, both learned the hard way (see [docs/development_history.md](docs/development_history.md)): keys that produce a **character or scroll** (`space`) leak into the focused window while you hold them, and chords containing **`alt`** activate the target window's menu bar on release, which steals keyboard focus and silently discards the paste. The app now disarms the Alt case automatically, but `Alt+Shift` and `Ctrl+Shift` remain Windows' input-language and keyboard-layout switches when a second layout is installed.
 
 ---
 
@@ -93,6 +103,8 @@ This script will automatically:
 
 ---
 
-## 📄 Development Details
-For detailed environment setup, packaging summaries, and the project roadmap, see:
-* [development_history.md](file:///C:/Users/huber/git/ptt/development_history.md) (Environment setup and roadmap)
+## 📄 Documentation
+
+* [docs/requirements.md](docs/requirements.md) — what the utility must do, and the compatibility constraints that earlier bugs produced.
+* [docs/design.md](docs/design.md) — how it is built: configuration matrix, module layout, the keystroke-injection contract, and the hotkey design.
+* [docs/development_history.md](docs/development_history.md) — the retrospective log of solved issues.

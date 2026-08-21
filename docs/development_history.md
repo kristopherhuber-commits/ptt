@@ -1,68 +1,20 @@
-# PTT Local Dictation Utility: Machine-Readable System State
+# PTT Local Dictation Utility: Retrospective Log
 
-This document is optimized for LLM parser consumption. It records system properties, environment details, codebase structure, packaging specifications, resolved issues, and roadmap status.
+This document is optimized for LLM parser consumption. It records solved issues: the
+symptom observed, the underlying cause, and the fix applied. Entries are appended, not
+rewritten.
 
-## ⚙️ System Configuration Matrix
+## 📌 Scope of this document
 
-```yaml
-system:
-  target_os: "Windows 11"
-  python_version: "3.14.2"
-  dependencies:
-    - name: "faster-whisper"
-      version: "1.2.1"
-      purpose: "speech-to-text inference engine"
-    - name: "ctranslate2"
-      version: "4.7.2"
-      purpose: "execution engine supporting CUDA float16 on Blackwell architectures"
-    - name: "sounddevice"
-      version: "0.5.5"
-      purpose: "audio microphone stream capture"
-    - name: "numpy"
-      version: "2.4.6"
-      purpose: "numerical array audio flattening"
-    - name: "keyboard"
-      version: "0.13.5"
-      purpose: "global hotkey capture and keystroke simulation"
-    - name: "pyperclip"
-      version: "1.11.0"
-      purpose: "clipboard copy/paste integration"
-    - name: "pystray"
-      version: "0.19.5"
-      purpose: "headless system tray icon integration"
-    - name: "pillow"
-      version: "12.2.0"
-      purpose: "programmatic status tray icon rendering"
-    - name: "pyinstaller"
-      version: "6.20.0"
-      purpose: "binary compilation and standalone packaging"
+This is the **append-only retrospective log**: symptoms, causes, and fixes, kept so that
+solved problems stay solved. It is deliberately narrow.
 
-active_hotkey:
-  mods: ["shift", "alt"]
-  trigger_behavior: "Press and hold to record; release to transcribe and paste."
+* What the utility must do, and the constraints these issues produced -> [requirements.md](requirements.md)
+* How it is built — configuration matrix, module layout, injection contract -> [design.md](design.md)
 
-model_parameters:
-  default_model: "large-v3-turbo"
-  device: "cuda"
-  compute_type: "float16"
-  language: "en"
-  beam_size: 5
-  vad_filter: true
-  condition_on_previous_text: false
-
-persistence:
-  config_file: "config.json"
-  saved_keys:
-    - use_gpu: boolean
-```
-
-## 📂 Codebase Map
-
-* `ptt_dictate.py`: Command-line developer version of the utility.
-* `app/ptt_tray.py`: Headless system tray version (teal mic = idle, red = recording, yellow = transcribing, blue = loading).
-* `build_dist.py`: Automated PyInstaller compilation script that resolves CUDA binaries and builds `ptt_dictate_dist.zip`.
-* `run_tray.bat`: UAC-elevating native launcher that bypasses Windows Smart App Control (SAC) blocks using `pythonw.exe`.
-* `C:\Users\huber\.local\bin\ptt.bat`: Elevated global shell alias mapped to user PATH to run `ptt_dictate.py` natively.
+Those sections used to live here and drifted out of date (this file once documented a
+`build_dist.py` that no longer existed). They are now maintained next to the code they
+describe.
 
 ## 🐛 DLL & Resource Resolution Rules
 
@@ -131,6 +83,20 @@ When packaging using PyInstaller (`--onedir` mode):
 * **Cause:** On Windows, `pip.exe` cannot overwrite its own running executable file during a self-upgrade.
 * **Fix:** Changed the upgrade step in `build_portable.py` to invoke `python.exe -m pip install --upgrade pip` instead of calling `pip.exe` directly.
 
+### 11. Dictation Silently Failing in Notepad (and every other menu-bar app)
+* **Symptom:** Holding the hotkey in Windows 11 Notepad records and transcribes correctly - `debug_log.txt` shows a clean result - but no text ever appears at the cursor.
+* **Cause:** Confirmed by direct Win32 probing against a live Notepad window. Windows activates a window's menu bar - or, in WinUI apps like Windows 11 Notepad, the access-key layer - when `Alt` goes **up with no other key pressed in between**. Activation moves keyboard focus off the document: `GetGUIThreadInfo` reports `GUI_CARETBLINKING` dropping to 0, i.e. the caret is gone. Every subsequently injected keystroke is discarded. Two separate triggers were present:
+  1. **The user's own release.** `Shift` does not count as an intervening key, so releasing the `Shift+Alt` chord is a bare `Alt` tap.
+  2. **The app's own injection.** `paste_text()` unconditionally injected a synthetic `Alt` keyup as its "release stuck modifiers" step, firing a second activation while `Alt` was still physically held.
+* **Measured evidence:** with a bare `Alt` down/up before pasting, the caret dies and both `Shift+Insert` **and** `Ctrl+V` are swallowed - so this was never a paste-mechanism or UWP-scancode problem (contrast issue #8). Tapping `Esc` first restores the caret and the paste lands. A bare `Alt` **keyup alone**, with no preceding keydown, is harmless - activation requires the full press. End-to-end check against a pinned Notepad window: Right Ctrl pastes, `Shift+Alt` with the guard pastes (caret alive), `Shift+Alt` without it is swallowed (caret dead).
+* **Fix:**
+  1. **Default hotkey changed to `Right Ctrl`** (`HOTKEY_MODS = ("rctrl",)`): a lone modifier with no character, no scroll, and no menu activation. It also sidesteps the `Alt+Shift` language-switch caveat from issue #9. `VK_MAP` gained left/right variants so a single side can be bound.
+  2. **`suppress_alt_menu()`**: taps `VK_NONAME` (0xFC - reserved and unassigned, so it produces no character and no command) while `Alt` is still held, supplying the missing intervening keypress that renders the release inert. Called on record start (covers the user's physical release) and again inside `paste_text()` (covers the app's synthetic one).
+  3. **Conditional, side-aware modifier release**: only modifiers actually reported down are released, and both `VK_LCONTROL` and `VK_RCONTROL` are released explicitly - injecting the unsided `VK_CONTROL` release leaves the right-hand key state set.
+  4. **Hotkey made configurable** via `config.json`, validated against `VK_MAP`, with the active chord shown in the tray menu.
+  5. **Paste is now logged**: `target_accepts_keys()` checks for a caret before pasting and logs a warning when it is missing, along with the target window class. Previously a swallowed paste left no trace - the log recorded a successful transcription either way, which is why this went undiagnosed.
+* **Scope:** not Notepad-specific. Any window with a menu bar or access keys - Explorer, VS Code, Office, Firefox - behaves identically.
+
 ## 🛠️ Maintenance & Execution Protocols
 
 ### Native Terminal Execution
@@ -145,5 +111,5 @@ When packaging using PyInstaller (`--onedir` mode):
 
 ### Clean Recompile & Rebuild
 ```powershell
-.venv\Scripts\python.exe build_dist.py
+python build_portable.py
 ```
