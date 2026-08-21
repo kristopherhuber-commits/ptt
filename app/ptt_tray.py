@@ -14,7 +14,6 @@ import sys
 import time
 import threading
 import socket
-import json
 import traceback
 
 # Determine application directory for saving config and finding local models
@@ -48,7 +47,7 @@ log_debug(f"app_dir: {app_dir}")
 # Register the CUDA/cuDNN DLL directories before CTranslate2 is ever imported.
 # ptt.transcribe imports only paths + logging_setup at module scope, so this is
 # cheap and pulls in nothing heavy; see its docstring for why the order matters.
-from ptt import transcribe
+from ptt import paths, transcribe
 transcribe.ensure_cuda_dll_dirs()
 
 # Standard imports
@@ -59,7 +58,7 @@ try:
     import pystray
     from pystray import MenuItem as item
     from PIL import Image, ImageDraw
-    from ptt import hotkey as hotkey_mod, inject
+    from ptt import config, hotkey as hotkey_mod, inject
     log_debug("Imports completed successfully.")
 except Exception as e:
     log_debug(f"CRITICAL: Failed to import dependencies: {str(e)}")
@@ -70,18 +69,18 @@ except Exception as e:
 IS_DESKTOP   = socket.gethostname().lower() == "darklord"
 MODEL_SIZE   = transcribe.MODEL_SIZE   # "large-v3-turbo"; see ptt/transcribe.py
 SAMPLE_RATE  = audio_mod.SAMPLE_RATE   # 16_000; see ptt/audio.py
-DEFAULT_HOTKEY = hotkey_mod.DEFAULT_HOTKEY   # ("rctrl",); see ptt/hotkey.py
-HOTKEY_MODS  = DEFAULT_HOTKEY # replaced by load_config(); ptt/hotkey.py VK_MAP lists valid names
 POLL_SEC     = 0.02
-CONFIG_FILE  = os.path.join(app_dir, "config.json")
 
 log_debug(f"IS_DESKTOP: {IS_DESKTOP}")
 log_debug(f"MODEL_SIZE: {MODEL_SIZE}")
-log_debug(f"CONFIG_FILE: {CONFIG_FILE}")
+log_debug(f"CONFIG_FILE: {paths.config_path()}")
 
 # Dynamic global state variables
 model = None
-use_gpu = True
+# Assigned once in main(), before the tray icon or the engine thread exist.
+# Declared rather than set to None so a premature read is a NameError instead
+# of a confusing AttributeError on NoneType.
+settings: "config.Settings"
 is_cuda_supported = False
 app_status = "Initializing..."
 running = True
@@ -92,45 +91,8 @@ icon = None
 
 def _persist_cpu_fallback():
     """Remember that CUDA failed, so the next start does not retry it (FR-6)."""
-    global use_gpu
-    use_gpu = False
-    save_config()
-
-def parse_hotkey(value):
-    """Validate a configured chord, falling back to the default and saying why (OBS-3)."""
-    chord, reason = hotkey_mod.parse_chord(value)
-    if chord is None:
-        log_debug(f"config.json hotkey invalid ({reason}); using default {DEFAULT_HOTKEY}.")
-        return DEFAULT_HOTKEY
-    return chord
-
-def load_config():
-    """Load CPU/GPU preference and push-to-talk chord from config.json."""
-    global use_gpu, HOTKEY_MODS
-    if os.path.exists(CONFIG_FILE):
-        try:
-            with open(CONFIG_FILE, "r") as f:
-                cfg = json.load(f)
-                use_gpu = cfg.get("use_gpu", True)
-                HOTKEY_MODS = parse_hotkey(cfg.get("hotkey", DEFAULT_HOTKEY))
-                log_debug(f"Loaded config.json: use_gpu={use_gpu}, hotkey={HOTKEY_MODS}")
-        except Exception as e:
-            log_debug(f"Failed to read config.json: {str(e)}")
-            use_gpu = True
-            HOTKEY_MODS = DEFAULT_HOTKEY
-    else:
-        log_debug("config.json not found, using defaults (use_gpu=True, hotkey=%s)" % (DEFAULT_HOTKEY,))
-        use_gpu = True
-        HOTKEY_MODS = DEFAULT_HOTKEY
-
-def save_config():
-    """Save CPU/GPU preference and push-to-talk chord to config.json."""
-    try:
-        with open(CONFIG_FILE, "w") as f:
-            json.dump({"use_gpu": use_gpu, "hotkey": list(HOTKEY_MODS)}, f)
-            log_debug(f"Saved config.json: use_gpu={use_gpu}, hotkey={HOTKEY_MODS}")
-    except Exception as e:
-        log_debug(f"Failed to save config.json: {str(e)}")
+    settings.use_gpu = False
+    settings.save()
 
 # -------------------------- Icon Generation ----------------------------------
 
@@ -173,17 +135,15 @@ def set_state(state, status_text=None):
         icon.menu = create_menu()
 
 def set_device_gpu(icon_obj, item_obj):
-    global use_gpu
-    if not use_gpu:
-        use_gpu = True
-        save_config()
+    if not settings.use_gpu:
+        settings.use_gpu = True
+        settings.save()
         reload_model_event.set()
 
 def set_device_cpu(icon_obj, item_obj):
-    global use_gpu
-    if use_gpu:
-        use_gpu = False
-        save_config()
+    if settings.use_gpu:
+        settings.use_gpu = False
+        settings.save()
         reload_model_event.set()
 
 def on_exit(icon_obj, item_obj):
@@ -198,18 +158,18 @@ def create_menu():
     
     return pystray.Menu(
         item(status_label, lambda icon_obj, item_obj: None, enabled=False),
-        item(f"Hotkey: {hotkey_mod.chord_label(HOTKEY_MODS)}", lambda icon_obj, item_obj: None, enabled=False),
+        item(f"Hotkey: {hotkey_mod.chord_label(settings.hotkey)}", lambda icon_obj, item_obj: None, enabled=False),
         pystray.Menu.SEPARATOR,
         item(
             "Use GPU (CUDA)",
             set_device_gpu,
-            checked=lambda item_obj: use_gpu,
+            checked=lambda item_obj: settings.use_gpu,
             enabled=lambda item_obj: is_cuda_supported
         ),
         item(
             "Use CPU",
             set_device_cpu,
-            checked=lambda item_obj: not use_gpu
+            checked=lambda item_obj: not settings.use_gpu
         ),
         pystray.Menu.SEPARATOR,
         item("Exit", on_exit)
@@ -219,7 +179,7 @@ def create_menu():
 
 def transcription_loop(icon_obj):
     """Runs in a background thread to manage model lifecycle and key monitoring."""
-    global model, use_gpu, is_cuda_supported, running
+    global model, is_cuda_supported, running
     
     # Run initial config load & model build
     reload_model_event.set()
@@ -239,7 +199,7 @@ def transcription_loop(icon_obj):
             model = None
 
             model, current_device, status_text = transcribe.load_model_with_fallback(
-                use_gpu, is_cuda_supported, on_fallback=_persist_cpu_fallback
+                settings.use_gpu, is_cuda_supported, on_fallback=_persist_cpu_fallback
             )
             set_state("idle", status_text)
 
@@ -257,7 +217,7 @@ def transcription_loop(icon_obj):
         # Monitor the hotkey for recording/transcribing
         if model is not None:
             try:
-                held = hotkey_mod.chord_held(HOTKEY_MODS)
+                held = hotkey_mod.chord_held(settings.hotkey)
                 if held and not recording:
                     recording = True
                     # Break up the Alt press now, while it is still held: once the
@@ -305,17 +265,17 @@ def transcription_loop(icon_obj):
 # -------------------------- Application Entry ---------------------------------
 
 def main():
-    global icon, is_cuda_supported, use_gpu
+    global icon, is_cuda_supported, settings
     
     # 1. Detect if CUDA is available on this system
     is_cuda_supported = transcribe.cuda_available()
     log_debug(f"Initial check_cuda_availability: {is_cuda_supported}")
     
     # 2. Load settings
-    load_config()
+    settings = config.load()
     if not is_cuda_supported:
         log_debug("CUDA not supported on this hardware. Overriding config to use CPU.")
-        use_gpu = False
+        settings.use_gpu = False
         
     # 3. Create the tray icon
     icon = pystray.Icon(
