@@ -53,12 +53,15 @@ transcribe.ensure_cuda_dll_dirs()
 # Standard imports
 try:
     log_debug("Importing system and audio libraries...")
-    from ptt import audio as audio_mod   # imports sounddevice; see ptt/audio.py
+    # Keeps its original slot: importing the engine pulls in ptt.audio, and so
+    # sounddevice and its _terminate() (issue #6), at the same point the tray
+    # used to import sounddevice directly.
+    from ptt import engine as engine_mod
     log_debug("Importing GUI and tray libraries...")
     import pystray
     from pystray import MenuItem as item
     from PIL import Image, ImageDraw
-    from ptt import config, hotkey as hotkey_mod, inject
+    from ptt import config, hotkey as hotkey_mod
     log_debug("Imports completed successfully.")
 except Exception as e:
     log_debug(f"CRITICAL: Failed to import dependencies: {str(e)}")
@@ -68,31 +71,21 @@ except Exception as e:
 # ----------------------------- Configuration ---------------------------------
 IS_DESKTOP   = socket.gethostname().lower() == "darklord"
 MODEL_SIZE   = transcribe.MODEL_SIZE   # "large-v3-turbo"; see ptt/transcribe.py
-SAMPLE_RATE  = audio_mod.SAMPLE_RATE   # 16_000; see ptt/audio.py
-POLL_SEC     = 0.02
 
 log_debug(f"IS_DESKTOP: {IS_DESKTOP}")
 log_debug(f"MODEL_SIZE: {MODEL_SIZE}")
 log_debug(f"CONFIG_FILE: {paths.config_path()}")
 
 # Dynamic global state variables
-model = None
-# Assigned once in main(), before the tray icon or the engine thread exist.
-# Declared rather than set to None so a premature read is a NameError instead
-# of a confusing AttributeError on NoneType.
-settings: "config.Settings"
 is_cuda_supported = False
 app_status = "Initializing..."
-running = True
-reload_model_event = threading.Event()
 icon = None
 
-# -------------------------- Helper Functions ---------------------------------
-
-def _persist_cpu_fallback():
-    """Remember that CUDA failed, so the next start does not retry it (FR-6)."""
-    settings.use_gpu = False
-    settings.save()
+# Both are assigned once in main(), before the tray icon or the engine thread
+# exist. Declared rather than set to None so a premature read raises NameError
+# instead of a confusing AttributeError on NoneType.
+settings: "config.Settings"
+engine: "engine_mod.Engine"
 
 # -------------------------- Icon Generation ----------------------------------
 
@@ -138,18 +131,21 @@ def set_device_gpu(icon_obj, item_obj):
     if not settings.use_gpu:
         settings.use_gpu = True
         settings.save()
-        reload_model_event.set()
+        engine.request_model_reload()
 
 def set_device_cpu(icon_obj, item_obj):
     if settings.use_gpu:
         settings.use_gpu = False
         settings.save()
-        reload_model_event.set()
+        engine.request_model_reload()
 
 def on_exit(icon_obj, item_obj):
-    global running
     log_debug("Exit requested by user.")
-    running = False
+    engine.stop()
+    # Do NOT join the engine thread here. It is a daemon and the process
+    # exits via os._exit immediately after icon.run() returns; joining would
+    # block for an in-flight transcription -- up to 30 s on CPU -- turning
+    # "Exit" into "hang".
     icon_obj.stop()
 
 def create_menu():
@@ -177,95 +173,10 @@ def create_menu():
 
 # -------------------------- Main App Loop ------------------------------------
 
-def transcription_loop(icon_obj):
-    """Runs in a background thread to manage model lifecycle and key monitoring."""
-    global model, is_cuda_supported, running
-    
-    # Run initial config load & model build
-    reload_model_event.set()
-    rec = audio_mod.Recorder(SAMPLE_RATE)
-    recording = False
-    current_device = "cpu"
-    stream_open = False
-    IDLE_THRESHOLD_SEC = 240.0
-    
-    while running:
-        # Check if we need to reload the transcription model
-        if reload_model_event.is_set():
-            reload_model_event.clear()
-            set_state("loading", "Loading Model...")
-            
-            # Deallocate the old model before loading its replacement
-            model = None
-
-            model, current_device, status_text = transcribe.load_model_with_fallback(
-                settings.use_gpu, is_cuda_supported, on_fallback=_persist_cpu_fallback
-            )
-            set_state("idle", status_text)
-
-        # Check user idle duration
-        idle = audio_mod.get_idle_duration()
-        if idle < IDLE_THRESHOLD_SEC:
-            if not stream_open:
-                rec.open_stream()
-                stream_open = True
-        else:
-            if stream_open and not recording:
-                rec.close_stream()
-                stream_open = False
-        
-        # Monitor the hotkey for recording/transcribing
-        if model is not None:
-            try:
-                held = hotkey_mod.chord_held(settings.hotkey)
-                if held and not recording:
-                    recording = True
-                    # Break up the Alt press now, while it is still held: once the
-                    # user releases it the menu has already taken focus.
-                    inject.suppress_alt_menu()
-                    rec.start()
-                    set_state("recording", "Recording...")
-                    log_debug("Recording started...")
-                elif not held and recording:
-                    recording = False
-                    audio = rec.stop()
-                    set_state("transcribing", "Transcribing...")
-                    log_debug(f"Recording stopped. Audio samples: {audio.size}")
-                    
-                    if audio.size < SAMPLE_RATE * 0.3:  # skip accidental clicks
-                        log_debug("Recording too short, skipping transcription.")
-                        set_state("idle", f"Ready ({current_device.upper()})")
-                        continue
-                    
-                    log_debug("Starting transcription...")
-                    t0 = time.time()
-                    text = transcribe.transcribe_audio(model, audio)
-                    t1 = time.time()
-                    log_debug(f"Transcription finished in {t1-t0:.2f}s. Result: '{text}'")
-                    
-                    if text:
-                        if not inject.target_accepts_keys():
-                            log_debug("WARNING: focused window has no caret; paste may be discarded.")
-                        inject.paste_text(text)
-                        log_debug(f"Pasted {len(text)} chars into '{inject.foreground_window_class()}'.")
-                    set_state("idle", f"Ready ({current_device.upper()})")
-            except Exception as e:
-                log_debug(f"ERROR inside main processing loop: {str(e)}")
-                log_debug(traceback.format_exc())
-                set_state("idle", f"Error: {str(e)}")
-                
-        time.sleep(POLL_SEC)
-        
-    # Cleanup on exit
-    if recording:
-        rec.stop()
-    rec.close_stream()
-    log_debug("Transcription background loop finished.")
-
 # -------------------------- Application Entry ---------------------------------
 
 def main():
-    global icon, is_cuda_supported, settings
+    global icon, is_cuda_supported, settings, engine
     
     # 1. Detect if CUDA is available on this system
     is_cuda_supported = transcribe.cuda_available()
@@ -277,7 +188,11 @@ def main():
         log_debug("CUDA not supported on this hardware. Overriding config to use CPU.")
         settings.use_gpu = False
         
-    # 3. Create the tray icon
+    # 3. Build the engine. It reports state through set_state and never
+    #    imports the UI; see ptt/engine.py for the callback contract.
+    engine = engine_mod.Engine(settings, is_cuda_supported, on_state=set_state)
+
+    # 4. Create the tray icon
     icon = pystray.Icon(
         "ptt_dictate",
         create_icon_image("loading"),
@@ -285,11 +200,11 @@ def main():
         menu=create_menu()
     )
     
-    # 4. Start backend loop
+    # 5. Start the engine on a daemon thread; pystray owns the main thread
     def setup_tray(icon_obj):
         icon_obj.visible = True
         log_debug("System Tray icon made visible. Starting background thread...")
-        t = threading.Thread(target=transcription_loop, args=(icon_obj,), daemon=True)
+        t = threading.Thread(target=engine.run, daemon=True)
         t.start()
         
     log_debug("Starting tray icon event loop...")
