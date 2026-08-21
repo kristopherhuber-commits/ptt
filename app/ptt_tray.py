@@ -125,7 +125,8 @@ IS_DESKTOP   = socket.gethostname().lower() == "darklord"
 MODEL_SIZE   = "large-v3-turbo"
 SAMPLE_RATE  = 16_000
 LANGUAGE     = "en"
-HOTKEY_MODS  = ("shift", "alt")
+DEFAULT_HOTKEY = ("rctrl",)   # a lone modifier: no character, no menu activation
+HOTKEY_MODS  = DEFAULT_HOTKEY # replaced by load_config(); see VK_MAP for valid names
 POLL_SEC     = 0.02
 CONFIG_FILE  = os.path.join(app_dir, "config.json")
 
@@ -156,28 +157,42 @@ def check_cuda_availability():
         log_debug(traceback.format_exc())
         return False
 
+def parse_hotkey(value):
+    """Validate a configured chord, falling back to the default if it names unknown keys."""
+    if not isinstance(value, (list, tuple)) or not value:
+        return DEFAULT_HOTKEY
+    chord = tuple(str(k).strip().lower() for k in value)
+    unknown = [k for k in chord if k not in VK_MAP]
+    if unknown:
+        log_debug(f"config.json hotkey contains unknown keys {unknown}; using default.")
+        return DEFAULT_HOTKEY
+    return chord
+
 def load_config():
-    """Load CPU/GPU preference from config.json."""
-    global use_gpu
+    """Load CPU/GPU preference and push-to-talk chord from config.json."""
+    global use_gpu, HOTKEY_MODS
     if os.path.exists(CONFIG_FILE):
         try:
             with open(CONFIG_FILE, "r") as f:
                 cfg = json.load(f)
                 use_gpu = cfg.get("use_gpu", True)
-                log_debug(f"Loaded config.json: use_gpu={use_gpu}")
+                HOTKEY_MODS = parse_hotkey(cfg.get("hotkey", DEFAULT_HOTKEY))
+                log_debug(f"Loaded config.json: use_gpu={use_gpu}, hotkey={HOTKEY_MODS}")
         except Exception as e:
             log_debug(f"Failed to read config.json: {str(e)}")
             use_gpu = True
+            HOTKEY_MODS = DEFAULT_HOTKEY
     else:
-        log_debug("config.json not found, using default (use_gpu=True)")
+        log_debug("config.json not found, using defaults (use_gpu=True, hotkey=%s)" % (DEFAULT_HOTKEY,))
         use_gpu = True
+        HOTKEY_MODS = DEFAULT_HOTKEY
 
 def save_config():
-    """Save CPU/GPU preference to config.json."""
+    """Save CPU/GPU preference and push-to-talk chord to config.json."""
     try:
         with open(CONFIG_FILE, "w") as f:
-            json.dump({"use_gpu": use_gpu}, f)
-            log_debug(f"Saved config.json: use_gpu={use_gpu}")
+            json.dump({"use_gpu": use_gpu, "hotkey": list(HOTKEY_MODS)}, f)
+            log_debug(f"Saved config.json: use_gpu={use_gpu}, hotkey={HOTKEY_MODS}")
     except Exception as e:
         log_debug(f"Failed to save config.json: {str(e)}")
 
@@ -247,6 +262,7 @@ def create_menu():
     
     return pystray.Menu(
         item(status_label, lambda icon_obj, item_obj: None, enabled=False),
+        item(f"Hotkey: {hotkey_label(HOTKEY_MODS)}", lambda icon_obj, item_obj: None, enabled=False),
         pystray.Menu.SEPARATOR,
         item(
             "Use GPU (CUDA)",
@@ -374,17 +390,14 @@ def paste_text(text):
             pass
         return
 
-    # Release modifier keys programmatically using native Win32 keybd_event
+    # Neutralise any modifier still physically held, so the paste chord is not
+    # reinterpreted as a shortcut by the target window. Alt is disarmed first:
+    # releasing it bare would activate the window's menu and steal focus.
     try:
-        scan_ctrl = ctypes.windll.user32.MapVirtualKeyW(0x11, 0)
-        scan_alt = ctypes.windll.user32.MapVirtualKeyW(0x12, 0)
-        scan_lwin = ctypes.windll.user32.MapVirtualKeyW(0x5B, 0)
-        scan_rwin = ctypes.windll.user32.MapVirtualKeyW(0x5C, 0)
-        
-        ctypes.windll.user32.keybd_event(0x11, scan_ctrl, 2, 0) # Release Ctrl
-        ctypes.windll.user32.keybd_event(0x12, scan_alt, 2, 0)  # Release Alt
-        ctypes.windll.user32.keybd_event(0x5B, scan_lwin, 2, 0) # Release Left Win
-        ctypes.windll.user32.keybd_event(0x5C, scan_rwin, 2, 0) # Release Right Win
+        suppress_alt_menu()
+        for vk in NEUTRALISE_VKS:
+            if ctypes.windll.user32.GetAsyncKeyState(vk) & 0x8000:
+                _send_key(vk, keyup=True)
     except Exception:
         for key in ("ctrl", "alt", "win"):
             try:
@@ -395,19 +408,16 @@ def paste_text(text):
     # Simulate Shift+Insert to paste via native Win32 keybd_event with scan codes and extended key flags
     try:
         time.sleep(0.01)
-        scan_shift = ctypes.windll.user32.MapVirtualKeyW(0x10, 0)
-        scan_insert = ctypes.windll.user32.MapVirtualKeyW(0x2D, 0)
-        
-        ctypes.windll.user32.keybd_event(0x10, scan_shift, 0, 0)              # Shift down
-        ctypes.windll.user32.keybd_event(0x2D, scan_insert, 1, 0)             # Insert down (extended)
-        ctypes.windll.user32.keybd_event(0x2D, scan_insert, 1 | 2, 0)         # Insert up (extended | keyup)
-        ctypes.windll.user32.keybd_event(0x10, scan_shift, 2, 0)              # Shift up
+        _send_key(0x10)                              # Shift down
+        _send_key(0x2D, extended=True)               # Insert down (extended)
+        _send_key(0x2D, keyup=True, extended=True)   # Insert up (extended)
+        _send_key(0x10, keyup=True)                  # Shift up
     except Exception:
         try:
             keyboard.press_and_release("shift+insert")
         except Exception:
             pass
-    
+
     # Wait for Windows to process the paste before restoring clipboard
     time.sleep(0.1)
     
@@ -419,20 +429,123 @@ def paste_text(text):
             pass
 
 
+# --------------------------- Hotkey key tables -------------------------------
+# Virtual-key codes for every key that may take part in the push-to-talk chord.
+# Left/right variants are listed separately so a single side can be bound; the
+# unsided names ("ctrl", "alt", ...) match either side.
 VK_MAP = {
-    "ctrl": 0x11,
+    "ctrl":  0x11, "lctrl":  0xA2, "rctrl":  0xA3,
+    "shift": 0x10, "lshift": 0xA0, "rshift": 0xA1,
+    "alt":   0x12, "lalt":   0xA4, "ralt":   0xA5,
+    "win":   0x5B, "lwin":   0x5B, "rwin":   0x5C,
     "space": 0x20,
-    "shift": 0x10,
-    "alt": 0x12,
-    "win": 0x5B
 }
+
+# Human-readable chord labels for the tray menu and console banner.
+KEY_LABELS = {
+    "ctrl": "Ctrl", "lctrl": "Left Ctrl", "rctrl": "Right Ctrl",
+    "shift": "Shift", "lshift": "Left Shift", "rshift": "Right Shift",
+    "alt": "Alt", "lalt": "Left Alt", "ralt": "Right Alt",
+    "win": "Win", "lwin": "Left Win", "rwin": "Right Win",
+    "space": "Space",
+}
+
+ALT_VKS = (0x12, 0xA4, 0xA5)
+
+# Modifiers neutralised before pasting. Both sides are listed explicitly:
+# releasing the unsided VK_CONTROL leaves the right-hand key state set.
+NEUTRALISE_VKS = (0xA2, 0xA3, 0xA4, 0xA5, 0x5B, 0x5C)
+
+# Reserved, unassigned virtual key. Produces no character and no command, so it
+# is safe to inject purely to break up an Alt press (see suppress_alt_menu).
+VK_NONAME = 0xFC
+
+
+def _send_key(vk, keyup=False, extended=False):
+    """Inject one key event carrying a real hardware scan code (UWP apps reject bare VKs)."""
+    scan = ctypes.windll.user32.MapVirtualKeyW(vk, 0)
+    flags = (0x01 if extended else 0) | (0x02 if keyup else 0)
+    ctypes.windll.user32.keybd_event(vk, scan, flags, 0)
+
+
+def _alt_is_down():
+    return any((ctypes.windll.user32.GetAsyncKeyState(vk) & 0x8000) != 0 for vk in ALT_VKS)
+
+
+def suppress_alt_menu():
+    """
+    Stop an Alt release from opening the focused window's menu bar.
+
+    Windows activates the menu -- or, in WinUI apps like Windows 11 Notepad, the
+    access-key layer -- when Alt goes up and no other key was pressed in between.
+    That moves keyboard focus off the document: the caret disappears and every
+    subsequent injected keystroke, Shift+Insert and Ctrl+V alike, is discarded.
+    Tapping a reserved unassigned key while Alt is still held supplies the
+    missing intervening keypress, so the release becomes inert.
+    """
+    if not _alt_is_down():
+        return
+    try:
+        _send_key(VK_NONAME)
+        _send_key(VK_NONAME, keyup=True)
+    except Exception:
+        pass
+
+
+class GUITHREADINFO(ctypes.Structure):
+    _fields_ = [
+        ("cbSize", ctypes.c_uint), ("flags", ctypes.c_uint),
+        ("hwndActive", ctypes.c_void_p), ("hwndFocus", ctypes.c_void_p),
+        ("hwndCapture", ctypes.c_void_p), ("hwndMenuOwner", ctypes.c_void_p),
+        ("hwndMoveSize", ctypes.c_void_p), ("hwndCaret", ctypes.c_void_p),
+        ("rcCaret", ctypes.c_long * 4),
+    ]
+
+GUI_CARETBLINKING = 0x00000001
+
+
+def target_accepts_keys():
+    """
+    Report whether the focused window still owns a text caret.
+
+    A missing caret is how a swallowed paste announces itself: menu or access-key
+    activation moves focus off the document, and injected keystrokes vanish
+    silently. Diagnostic only -- pasting is attempted either way.
+    """
+    try:
+        gti = GUITHREADINFO()
+        gti.cbSize = ctypes.sizeof(GUITHREADINFO)
+        hwnd = ctypes.windll.user32.GetForegroundWindow()
+        tid = ctypes.windll.user32.GetWindowThreadProcessId(hwnd, None)
+        if not ctypes.windll.user32.GetGUIThreadInfo(tid, ctypes.byref(gti)):
+            return True
+        return bool(gti.flags & GUI_CARETBLINKING) or bool(gti.hwndCaret)
+    except Exception:
+        return True
+
+
+def foreground_window_class():
+    """Window class of the paste target, recorded so failures name the culprit app."""
+    try:
+        buf = ctypes.create_unicode_buffer(256)
+        hwnd = ctypes.windll.user32.GetForegroundWindow()
+        ctypes.windll.user32.GetClassNameW(hwnd, buf, 256)
+        return buf.value
+    except Exception:
+        return "?"
+
+
+def hotkey_label(chord):
+    return " + ".join(KEY_LABELS.get(k, k.title()) for k in chord)
+
 
 def chord_held():
     """Check if all keys in the hotkey chord are pressed using GetAsyncKeyState."""
     try:
         return all((ctypes.windll.user32.GetAsyncKeyState(VK_MAP[k]) & 0x8000) != 0 for k in HOTKEY_MODS)
     except Exception:
-        return all(keyboard.is_pressed(k) for k in HOTKEY_MODS)
+        # The keyboard library has no side-aware names: strip the l/r prefix.
+        return all(keyboard.is_pressed(k.lstrip("lr")) for k in HOTKEY_MODS)
 
 # -------------------------- Main App Loop ------------------------------------
 
@@ -514,6 +627,9 @@ def transcription_loop(icon_obj):
                 held = chord_held()
                 if held and not recording:
                     recording = True
+                    # Break up the Alt press now, while it is still held: once the
+                    # user releases it the menu has already taken focus.
+                    suppress_alt_menu()
                     rec.start()
                     set_state("recording", "Recording...")
                     log_debug("Recording started...")
@@ -543,7 +659,10 @@ def transcription_loop(icon_obj):
                     log_debug(f"Transcription finished in {t1-t0:.2f}s. Result: '{text}'")
                     
                     if text:
+                        if not target_accepts_keys():
+                            log_debug("WARNING: focused window has no caret; paste may be discarded.")
                         paste_text(text)
+                        log_debug(f"Pasted {len(text)} chars into '{foreground_window_class()}'.")
                     set_state("idle", f"Ready ({current_device.upper()})")
             except Exception as e:
                 log_debug(f"ERROR inside main processing loop: {str(e)}")
