@@ -16,7 +16,6 @@ import threading
 import socket
 import json
 import traceback
-import re
 
 # Determine application directory for saving config and finding local models
 if getattr(sys, 'frozen', False):
@@ -46,65 +45,16 @@ log_debug(f"sys.frozen: {getattr(sys, 'frozen', False)}")
 log_debug(f"sys.executable: {sys.executable}")
 log_debug(f"app_dir: {app_dir}")
 
-# --- Make pip-installed CUDA/cuDNN DLLs discoverable before importing CT2 -----
-def _add_nvidia_dll_dirs():
-    if not sys.platform.startswith("win"):
-        log_debug("Not on Windows, skipping DLL dir additions.")
-        return
-        
-    base_paths = []
-    
-    # 1. Check if running under PyInstaller and check the bundle root sys._MEIPASS
-    if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
-        pyi_nvidia_path = os.path.join(sys._MEIPASS, "nvidia")
-        log_debug(f"PyInstaller detected. Adding PyInstaller bundle search path: {pyi_nvidia_path}")
-        base_paths.append(pyi_nvidia_path)
-        
-    # 2. Try standard import as fallback
-    try:
-        import nvidia
-        paths = getattr(nvidia, "__path__", None)
-        if paths:
-            log_debug(f"nvidia package found via import. Paths: {paths}")
-            base_paths.extend(paths)
-        else:
-            file_path = getattr(nvidia, "__file__", None)
-            if file_path:
-                log_debug(f"nvidia package __file__ found: {file_path}")
-                base_paths.append(os.path.dirname(file_path))
-    except ImportError as e:
-        log_debug(f"nvidia package import failed/skipped: {str(e)}")
-        
-    # Deduplicate paths
-    unique_base_paths = []
-    for p in base_paths:
-        if p not in unique_base_paths:
-            unique_base_paths.append(p)
-            
-    # 3. Add DLL directories to Search Path
-    log_debug(f"Resolving CUDA DLLs for paths: {unique_base_paths}")
-    for base in unique_base_paths:
-        for sub in ("cudnn", "cublas", "cuda_nvrtc"):
-            d = os.path.join(base, sub, "bin")
-            log_debug(f"Checking directory: {d}")
-            if os.path.isdir(d):
-                try:
-                    os.add_dll_directory(d)
-                    os.environ["PATH"] = d + os.pathsep + os.environ["PATH"]
-                    log_debug(f"Added DLL directory: {d}")
-                except Exception as ex:
-                    log_debug(f"Error adding DLL directory {d}: {str(ex)}")
-            else:
-                log_debug(f"Directory does not exist: {d}")
-
-_add_nvidia_dll_dirs()
+# Register the CUDA/cuDNN DLL directories before CTranslate2 is ever imported.
+# ptt.transcribe imports only paths + logging_setup at module scope, so this is
+# cheap and pulls in nothing heavy; see its docstring for why the order matters.
+from ptt import transcribe
+transcribe.ensure_cuda_dll_dirs()
 
 # Standard imports
 try:
     log_debug("Importing system and audio libraries...")
     from ptt import audio as audio_mod   # imports sounddevice; see ptt/audio.py
-    log_debug("Importing ctranslate2/faster-whisper...")
-    from faster_whisper import WhisperModel
     log_debug("Importing GUI and tray libraries...")
     import pystray
     from pystray import MenuItem as item
@@ -118,9 +68,8 @@ except Exception as e:
 
 # ----------------------------- Configuration ---------------------------------
 IS_DESKTOP   = socket.gethostname().lower() == "darklord"
-MODEL_SIZE   = "large-v3-turbo"
+MODEL_SIZE   = transcribe.MODEL_SIZE   # "large-v3-turbo"; see ptt/transcribe.py
 SAMPLE_RATE  = audio_mod.SAMPLE_RATE   # 16_000; see ptt/audio.py
-LANGUAGE     = "en"
 DEFAULT_HOTKEY = hotkey_mod.DEFAULT_HOTKEY   # ("rctrl",); see ptt/hotkey.py
 HOTKEY_MODS  = DEFAULT_HOTKEY # replaced by load_config(); ptt/hotkey.py VK_MAP lists valid names
 POLL_SEC     = 0.02
@@ -141,17 +90,11 @@ icon = None
 
 # -------------------------- Helper Functions ---------------------------------
 
-def check_cuda_availability():
-    """Verify if CTranslate2 can see an NVIDIA GPU."""
-    try:
-        import ctranslate2
-        count = ctranslate2.get_cuda_device_count()
-        log_debug(f"ctranslate2 detected CUDA devices count: {count}")
-        return count > 0
-    except Exception as e:
-        log_debug(f"ctranslate2 CUDA check raised exception: {str(e)}")
-        log_debug(traceback.format_exc())
-        return False
+def _persist_cpu_fallback():
+    """Remember that CUDA failed, so the next start does not retry it (FR-6)."""
+    global use_gpu
+    use_gpu = False
+    save_config()
 
 def parse_hotkey(value):
     """Validate a configured chord, falling back to the default and saying why (OBS-3)."""
@@ -292,49 +235,14 @@ def transcription_loop(icon_obj):
             reload_model_event.clear()
             set_state("loading", "Loading Model...")
             
-            # Deallocate old model
+            # Deallocate the old model before loading its replacement
             model = None
-            
-            target_device = "cuda" if (use_gpu and is_cuda_supported) else "cpu"
-            target_compute_type = "float16" if target_device == "cuda" else "int8"
-            
-            try:
-                # Check for locally packaged model folder first
-                local_model_path = os.path.join(app_dir, "models", MODEL_SIZE)
-                if os.path.isdir(local_model_path):
-                    model_path = local_model_path
-                    log_debug(f"Using local bundled model directory: {model_path}")
-                else:
-                    model_path = MODEL_SIZE
-                    log_debug(f"Using on-demand model name: {model_path}")
-                
-                log_debug(f"Attempting to load model '{model_path}' on '{target_device.upper()}' ({target_compute_type})...")
-                model = WhisperModel(model_path, device=target_device, compute_type=target_compute_type)
-                current_device = target_device
-                log_debug(f"Model successfully loaded on '{target_device.upper()}'.")
-                set_state("idle", f"Ready ({target_device.upper()})")
-            except Exception as e:
-                log_debug(f"ERROR: Failed to load model on '{target_device.upper()}': {str(e)}")
-                log_debug(traceback.format_exc())
-                
-                # If CUDA failed to load, automatically fall back to CPU
-                if target_device == "cuda":
-                    log_debug("Initiating auto CPU fallback...")
-                    use_gpu = False
-                    save_config()
-                    try:
-                        log_debug(f"Attempting to load fallback model '{MODEL_SIZE}' on CPU (int8)...")
-                        model = WhisperModel(MODEL_SIZE, device="cpu", compute_type="int8")
-                        current_device = "cpu"
-                        log_debug("Fallback model loaded successfully on CPU.")
-                        set_state("idle", "Ready (CPU Fallback)")
-                    except Exception as e2:
-                        log_debug(f"ERROR: Fallback CPU model load failed: {str(e2)}")
-                        log_debug(traceback.format_exc())
-                        set_state("idle", "Error loading model")
-                else:
-                    set_state("idle", "Error loading model")
-        
+
+            model, current_device, status_text = transcribe.load_model_with_fallback(
+                use_gpu, is_cuda_supported, on_fallback=_persist_cpu_fallback
+            )
+            set_state("idle", status_text)
+
         # Check user idle duration
         idle = audio_mod.get_idle_duration()
         if idle < IDLE_THRESHOLD_SEC:
@@ -371,15 +279,7 @@ def transcription_loop(icon_obj):
                     
                     log_debug("Starting transcription...")
                     t0 = time.time()
-                    segments, _ = model.transcribe(
-                        audio,
-                        language=LANGUAGE,
-                        beam_size=5,
-                        vad_filter=True,
-                        condition_on_previous_text=False
-                    )
-                    text = "".join(s.text for s in segments).strip()
-                    text = re.sub(r'\.{2,}', '', text).strip()
+                    text = transcribe.transcribe_audio(model, audio)
                     t1 = time.time()
                     log_debug(f"Transcription finished in {t1-t0:.2f}s. Result: '{text}'")
                     
@@ -408,7 +308,7 @@ def main():
     global icon, is_cuda_supported, use_gpu
     
     # 1. Detect if CUDA is available on this system
-    is_cuda_supported = check_cuda_availability()
+    is_cuda_supported = transcribe.cuda_available()
     log_debug(f"Initial check_cuda_availability: {is_cuda_supported}")
     
     # 2. Load settings
