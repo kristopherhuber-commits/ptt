@@ -3,8 +3,9 @@
 How the utility is built, and how it is going to be built. Cites requirement IDs from
 [requirements.md](requirements.md).
 
-Sections 1–3 describe what exists today. Sections 4–9 are the **target** design and are
-not implemented yet.
+Sections 4–9 describe the implementation as it stands after the `app/ptt/` split
+(step 1 of section 10). Sections 2–3 record the state it replaced, and why, because the
+reasoning is the part worth keeping.
 
 ---
 
@@ -47,16 +48,25 @@ active_hotkey:
 
 | Path | Role |
 |---|---|
-| `ptt_dictate.py` | Command-line developer version. |
-| `app/ptt_tray.py` | Headless system tray version. The one that ships. |
+| `ptt_dictate.py` | Entry point: console frontend. 68 lines. |
+| `app/ptt_tray.py` | Entry point: system tray frontend. The one that ships. 68 lines. |
+| `app/ptt/` | The implementation, shared by both entry points. See section 4. |
+| `pyproject.toml` | Tooling configuration only — pytest and pyrefly. No build system. |
 | `build_portable.py` | Provisions `.venv` from `requirements.txt`, installs the signed PSF interpreter, bundles `ptt_dictate_dist.zip`. |
 | `run_tray.bat` | Self-elevating launcher; runs `.venv\Scripts\ptt_dictate.exe app\ptt_tray.py`. |
 | `install.bat` / `install.ps1` | Self-elevating installer; copies `.venv` + `app` to `%LOCALAPPDATA%\Programs\ptt_dictate`, creates Desktop and Startup shortcuts marked run-as-administrator (`FR-C5`). |
 | `docs/` | This document, `requirements.md`, `development_history.md`. |
 
+`build_portable.py`, `run_tray.bat` and `install.ps1` are unchanged by the split, which
+is the whole reason section 4 chose `app/ptt/` over `src/ptt/`.
+
 ---
 
-## 3. Current state, and why it needs to change
+## 3. The state this replaced, and why it had to change
+
+> **Resolved by the `app/ptt/` split.** The duplication metric below now reports **0**
+> matched lines between the two entry points, down from 213. This section is kept
+> because the reasoning still explains why the package is shaped the way it is.
 
 **The two scripts are the same program twice.** 213 of the 370 lines in `ptt_dictate.py`
 are byte-identical with `app/ptt_tray.py` — `Recorder`, `paste_text`, `chord_held`,
@@ -96,6 +106,8 @@ portable environment, not a wheel, so the packaging benefit of `src/` does not a
 
 | Module | Responsibility |
 |---|---|
+| `app/ptt/paths.py` | **Sole owner of every application-relative path.** No other module computes a directory. |
+| `app/ptt/runtime.py` | `main_guard()`. The only module permitted to call `os._exit` (`FR-9`). |
 | `app/ptt/config.py` | Settings dataclass; load, validate, save, migrate `config.json`. |
 | `app/ptt/hotkey.py` | VK table, chord parse/format, `GetAsyncKeyState` polling, safety classifier. |
 | `app/ptt/inject.py` | The only module permitted to call `keybd_event`. Paste, modifier neutralisation, `suppress_alt_menu`, focus diagnostics. |
@@ -104,18 +116,33 @@ portable environment, not a wheel, so the packaging benefit of `src/` does not a
 | `app/ptt/engine.py` | The state machine. Owns the poll loop; emits state changes to a listener. |
 | `app/ptt/logging_setup.py` | `debug_log.txt` writer (`OBS-4`). |
 | `app/ptt/ui/tray.py` | pystray icon, menu, state-to-icon mapping. |
-| `app/ptt/ui/hotkey_dialog.py` | tkinter capture window. |
+| `app/ptt/ui/hotkey_dialog.py` | tkinter capture window. **Not built yet — step 3.** |
 | `app/ptt_tray.py` | Entry point: builds the tray UI, starts the engine. Unchanged invocation path. |
 | `ptt_dictate.py` | Entry point: prints state to the console, starts the engine. |
 
 The engine must not import the UI. It reports state through a callback the frontend
 supplies, which is what allows one core to serve both a tray icon and a console.
 
+Three structural constraints hold this layout together. Each is checkable, and each
+exists because breaking it fails silently rather than loudly:
+
+1. **`app/ptt/__init__.py` is empty, and `transcribe.py` has no `faster_whisper` or
+   `ctranslate2` import at column 0.** Both are imported inside functions that call
+   `ensure_cuda_dll_dirs()` first. If CTranslate2 loads before those directories are
+   registered the GPU is simply not found — no exception, just CPU inference at roughly
+   ten times the latency (issue #1). Measured on this machine: 0.5 s against 5.5 s.
+2. **`os._exit` appears only in `runtime.py`.** `FR-9` is load-bearing and a rule with no
+   owner gets duplicated, which is how the original two-script problem began.
+3. **`paths.py` is the only module that computes a directory.** The application's paths
+   are anchored one level *above* the package; a module deriving them from its own
+   `__file__` would relocate `config.json` into `app/ptt/` and orphan every existing
+   installation's settings.
+
 ---
 
 ## 5. Keystroke injection contract
 
-`inject.py` is the only place `keybd_event` may be called. Four rules, each bought with a
+`inject.py` is the only place `keybd_event` may be called. Five rules, each bought with a
 bug report:
 
 1. **Every event carries a real scan code** from `MapVirtualKeyW`. UWP targets reject
@@ -126,6 +153,9 @@ bug report:
 4. **Modifier release is conditional and side-aware.** Only modifiers actually reported
    down are released, and `VK_LCONTROL`/`VK_RCONTROL` are released explicitly: injecting
    the unsided `VK_CONTROL` release leaves the right-hand key state set.
+5. **The clipboard is captured before and restored after every paste** (`FR-C4`, issue
+   #5). Insertion goes via the clipboard, so the user's contents must come back. Stated
+   here because a rule that appears only in the code is a rule that gets simplified away.
 
 ### The Alt menu-activation problem
 
@@ -210,6 +240,19 @@ Tray menu item **Set Hotkey…** opens a small tkinter window (`CON-3`).
 - Saving writes `config.json` and **hot-swaps the chord live**. The engine's poll loop
   re-reads the setting each iteration, so no restart is required.
 
+### What makes the live re-read safe
+
+`Settings` is **not frozen**, and every field holds an immutable value. The engine
+re-reads `settings.hotkey` inside its poll loop on every iteration, never caching it in
+a local or on `self`. That is safe only because writes are whole-value rebinds —
+`settings.hotkey = ("rshift",)`, never `settings.hotkey.append(...)`. An attribute
+rebind is a single bytecode, so a reader on another thread sees either the old tuple or
+the new one, never a half-built one. **No lock is needed and none should be added.**
+
+Two ways to break this, both tempting: making `Settings` frozen, which stops the picker
+writing to it at all; and making `hotkey` a list mutated in place, which turns a clean
+hand-off into a race that shows up once a month.
+
 ### Safety classifier
 
 `hotkey.py` classifies a candidate chord and returns warnings. This is `FR-C3` made
@@ -243,7 +286,15 @@ that they choose with the information.
 - Unknown keys are preserved on write, so a newer build's settings survive a rollback.
 - An invalid or unrecognised `hotkey` falls back to the default and logs why (`OBS-3`).
 - Files without `version` are treated as v1 — that is what today's `{use_gpu}` files are.
-- `config.py` owns the schema. No other module reads or writes the file.
+- `config.py` owns the schema. No other module reads or writes the file. The CUDA
+  fallback reaches it through a callback rather than importing it, so this holds
+  literally rather than approximately.
+- **Known keys win a collision** with a preserved unknown key: they are serialised last.
+- **`version` is written back on the next save**, not on read. Migration is lazy; loading
+  a config never rewrites it.
+- **Every field is validated by type, not by truthiness, and every fallback logs why.**
+  `{"use_gpu": "false"}` is a truthy string; read naively it silently forces GPU on a
+  machine that may not have one.
 
 ---
 
@@ -259,6 +310,12 @@ that they choose with the information.
 
 Wired through `pyproject.toml` with `pythonpath = ["app"]` so `import ptt` resolves
 without installing anything.
+
+**Where pytest itself lives is an open decision.** It is not in `.venv`, and
+`build_portable.py` zips `.venv` wholesale — so `pip install pytest` there would ship the
+test framework to every target PC. Either run it as `uvx pytest`, or create a separate
+`.venv-dev` from a `requirements-dev.txt`, which never ships because `items_to_zip` is an
+explicit allowlist. `CON-3` forbids adding it to `requirements.txt`.
 
 **Manual Win32 probes** (`tests/tools/probe_paste.py`). Menu activation, caret loss, and
 paste delivery cannot be unit-tested — they are behaviours of another process's window.
@@ -290,6 +347,11 @@ put `NFR-6`/`NFR-7` back in play for no gain.
 
 ## 10. Sequencing
 
-1. Split into `app/ptt/` with entry-point shims; add `pyproject.toml`. Behaviour-neutral.
+1. ~~Split into `app/ptt/` with entry-point shims; add `pyproject.toml`.~~ **Done.**
+   Behaviour-neutral *for the tray*, verified against a captured baseline at every step.
+   The console frontend was deliberately upgraded onto the same engine, gaining
+   `config.json`, logging, CPU fallback and the caret diagnostics it had drifted behind
+   on. `debug_log.txt` now rotates rather than truncating, because both frontends write
+   it.
 2. Add the unit tests and the pinned-window probe harness.
 3. Build the picker dialog and the safety classifier on top of the settled config layer.

@@ -120,7 +120,7 @@ trace at all. It went undiagnosed for months as a result.
 | `OBS-1` | Every step that can fail silently must log its outcome, not merely its attempt. Insertion is the specific case: log that text was inserted, and into which window. |
 | `OBS-2` | Conditions known to cause silent failure must be detected and logged as warnings — in particular, a focused window with no caret at the moment of pasting. |
 | `OBS-3` | Configuration actually in force at startup must be logged, including the resolved chord and the reason for any fallback to a default. |
-| `OBS-4` | The log must be a plain text file next to the application, readable without tooling. |
+| `OBS-4` | The log must be a plain text file next to the application, readable without tooling. It is rotated to `debug_log.prev.txt` at startup rather than truncated: both frontends write the same file, so starting one would otherwise destroy the other's log — and a crash log must survive the restart that follows it. |
 
 ---
 

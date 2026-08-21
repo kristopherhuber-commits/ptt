@@ -51,11 +51,11 @@ The installation script will automatically:
   * Check the current state (`Status: Ready (CUDA)`, `Status: Recording...`, etc.) and the active `Hotkey:`.
   * Toggle between **`Use GPU (CUDA)`** and **`Use CPU`** modes.
   * **Exit** the application.
-* **Persistence**: The application creates a local `config.json` file in its directory to remember your CPU/GPU preference across restarts.
+* **Persistence**: The application creates a local `config.json` file in its directory to remember your CPU/GPU preference and hotkey across restarts. Settings it does not recognise are preserved, so a newer build's config survives a rollback.
 * **Changing the hotkey**: Add a `hotkey` entry to `config.json` and restart. It takes a list of key names, all of which must be held together:
 
   ```json
-  { "use_gpu": true, "hotkey": ["rctrl"] }
+  { "version": 1, "use_gpu": true, "hotkey": ["rctrl"] }
   ```
 
   Valid names: `ctrl`, `lctrl`, `rctrl`, `shift`, `lshift`, `rshift`, `alt`, `lalt`, `ralt`, `win`, `lwin`, `rwin`, `space`. Unsided names (`ctrl`) match either side. An unrecognised name falls back to the default and is noted in `debug_log.txt`.
@@ -68,8 +68,10 @@ The installation script will automatically:
 
 If you want to run the python scripts directly or rebuild the executable:
 
-### 1. Run the Command-Line Script
-To run the original command-line utility from PowerShell:
+### 1. Run the Console Frontend
+A developer-facing frontend that prints state to the terminal instead of drawing a tray
+icon. It runs the same engine and reads the same `config.json` as the tray, so a hotkey or
+device chosen in either applies to both. From PowerShell:
 1. Open PowerShell **as Administrator**.
 2. Navigate to the project directory and run:
    ```powershell
@@ -108,3 +110,6 @@ This script will automatically:
 * [docs/requirements.md](docs/requirements.md) — what the utility must do, and the compatibility constraints that earlier bugs produced.
 * [docs/design.md](docs/design.md) — how it is built: configuration matrix, module layout, the keystroke-injection contract, and the hotkey design.
 * [docs/development_history.md](docs/development_history.md) — the retrospective log of solved issues.
+
+The implementation lives in `app/ptt/`; `ptt_dictate.py` and `app/ptt_tray.py` are thin
+entry points over it. See [docs/design.md](docs/design.md) section 4 for the module layout.
