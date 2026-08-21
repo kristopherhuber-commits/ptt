@@ -17,3 +17,11 @@ dist/
 
 # Claude Code local settings (per-machine, not shared)
 .claude/settings.local.json
+
+# Runtime artifacts written next to the app (per-machine, never distributed)
+app/config.json
+app/debug_log.prev.txt
+
+# Test artifacts
+.pytest_cache/
+*.egg-info/
