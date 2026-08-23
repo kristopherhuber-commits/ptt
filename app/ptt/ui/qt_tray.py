@@ -25,7 +25,7 @@ import threading
 from typing import TYPE_CHECKING
 
 from PIL import Image, ImageDraw
-from PySide6.QtCore import QObject, Slot
+from PySide6.QtCore import QObject, QRect, Signal, Slot
 from PySide6.QtGui import QIcon, QImage, QPixmap
 from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 
@@ -124,6 +124,14 @@ class QtTray(QObject):
     which is the exact failure this whole arrangement exists to prevent.
     """
 
+    #: Left click on the icon. The reliable way to raise the popover: it arrives
+    #: through QSystemTrayIcon.activated, which works even when geometry() is
+    #: empty because the icon is in the Windows 11 overflow flyout.
+    popover_requested = Signal()
+
+    #: Double click, or the Settings... menu item.
+    settings_requested = Signal()
+
     def __init__(self, settings, cuda_supported, parent=None):
         super().__init__(parent)
         self._settings = settings
@@ -137,6 +145,7 @@ class QtTray(QObject):
 
         self._tray = QSystemTrayIcon(self._icons["loading"])
         self._tray.setToolTip("PTT Dictation (Initializing...)")
+        self._tray.activated.connect(self._on_activated)
         self._build_menu()
 
     def attach(self, engine):
@@ -147,6 +156,26 @@ class QtTray(QObject):
 
     def hide(self):
         self._tray.hide()
+
+    def icon_geometry(self):
+        """
+        The icon's rectangle in screen coordinates, for placing the popover.
+
+        Qt returns an empty QRect whenever the icon is not visible, which
+        includes the icon sitting in the overflow flyout behind the `^` chevron.
+        Callers must treat an empty rect as "unknown", not as (0, 0).
+        """
+        try:
+            return self._tray.geometry()
+        except Exception:
+            return QRect()
+
+    @Slot(QSystemTrayIcon.ActivationReason)
+    def _on_activated(self, reason):
+        if reason == QSystemTrayIcon.ActivationReason.Trigger:
+            self.popover_requested.emit()
+        elif reason == QSystemTrayIcon.ActivationReason.DoubleClick:
+            self.settings_requested.emit()
 
     # -- the bridged Engine callback ----------------------------------------
 
@@ -195,6 +224,11 @@ class QtTray(QObject):
         self._act_cpu = self._menu.addAction("Use CPU")
         self._act_cpu.setCheckable(True)
         self._act_cpu.triggered.connect(self._set_device_cpu)
+
+        self._menu.addSeparator()
+
+        self._act_settings = self._menu.addAction("Settings…")
+        self._act_settings.triggered.connect(self.settings_requested.emit)
 
         self._menu.addSeparator()
 

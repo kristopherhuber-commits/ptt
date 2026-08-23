@@ -41,8 +41,14 @@ import threading
 from PySide6.QtCore import QObject, Qt, QTimer, Signal
 from PySide6.QtWidgets import QApplication, QSystemTrayIcon
 
+from ptt import hotkey as hotkey_mod
+from ptt import transcribe
 from ptt.logging_setup import log_debug
+from ptt.ui import qt_theme
+from ptt.ui.qt_popover import Popover
+from ptt.ui.qt_statusview import UiState
 from ptt.ui.qt_tray import QtTray, _log_thread
+from ptt.ui.qt_window import SettingsWindow
 
 #: Windows initialises the notification area asynchronously at login, and the
 #: installer's Startup shortcut launches this app into that race. pystray blocked
@@ -104,20 +110,65 @@ class QtApp:
         self._app = QApplication.instance() or QApplication(sys.argv)
         self._app.setApplicationName("PTT Dictation")
 
-        # There are no windows in this build, but there will be from session 2,
-        # and the default would make closing the settings window quit the whole
-        # application and take the tray icon with it.
+        # Closing the settings window must not end the application -- it lives
+        # in the tray, and Qt would otherwise quit with the last window.
         self._app.setQuitOnLastWindowClosed(False)
+
+        # Fonts need a live QGuiApplication, so this cannot move earlier. It
+        # must still happen before any widget is built, or the first widgets
+        # measure themselves against the wrong face.
+        qt_theme.apply_theme(self._app)
+
+        self.ui = UiState(
+            hotkey=hotkey_mod.chord_label(settings.hotkey),
+            model=transcribe.MODEL_SIZE,
+        )
 
         self.bridge = EngineBridge()
         self._tray = QtTray(settings, cuda_supported)
+        self._popover = Popover()
+        self._window = SettingsWindow()
+
         self.bridge.state_changed.connect(
             self._tray.on_state_changed, Qt.ConnectionType.QueuedConnection
         )
+        # Second receiver on the same signal: the tray updates the icon, this
+        # refreshes the two state displays. Both run on the GUI thread.
+        self.bridge.state_changed.connect(
+            self._on_state_changed, Qt.ConnectionType.QueuedConnection
+        )
+
+        self._tray.popover_requested.connect(self._popover.show_at_tray)
+        self._tray.settings_requested.connect(self._open_settings)
+        self._popover.clicked.connect(self._open_settings)
+
+        self._push_ui()
 
     def attach(self, engine):
         self._engine = engine
         self._tray.attach(engine)
+
+    # -- state --------------------------------------------------------------
+
+    def _on_state_changed(self, state, status_text):
+        self.ui.state = state
+        self.ui.status_text = status_text or state.capitalize()
+        self.ui.hotkey = hotkey_mod.chord_label(self._settings.hotkey)
+        self.ui.model = transcribe.MODEL_SIZE
+        if self._engine is not None:
+            # A plain attribute the engine rebinds; reading it here is the same
+            # safe hand-off config.py's Settings docstring describes.
+            self.ui.device = self._engine.current_device
+        self._push_ui()
+
+    def _push_ui(self):
+        """One UiState, pushed to both displays, so they cannot drift apart."""
+        self._popover.apply(self.ui)
+        self._window.apply(self.ui)
+
+    def _open_settings(self):
+        self._popover.hide()
+        self._window.show_and_raise()
 
     # -- run ----------------------------------------------------------------
 
@@ -149,6 +200,8 @@ class QtApp:
                 f"System tray icon made visible after {self._tray_attempts} "
                 f"retries. Starting background thread..."
             )
+            # Hover polling only makes sense once there is an icon to hover.
+            self._popover.start_hover_watch(self._tray.icon_geometry)
             return
 
         self._tray_attempts += 1
