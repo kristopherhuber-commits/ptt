@@ -19,13 +19,23 @@ This application is built for compatibility and stability across different envir
 
 ## 📦 Distribution & Installation (For Target PCs)
 
+### ⬇️ [**Download the latest release**](https://github.com/kristopherhuber-commits/ptt/releases/latest) — no Python or developer tools needed
+
 The application is distributed as a portable Python environment. No pre-existing Python installation or library configuration is required on the target computers.
 
 ### 1. Installation Steps
-1. Copy the **`ptt_dictate_dist.zip`** archive to the target computer.
+1. Download **`ptt_dictate_dist.zip`** (~1.35 GB) from the [Releases page](https://github.com/kristopherhuber-commits/ptt/releases/latest), or copy the archive to the target computer by hand.
 2. Extract the ZIP file completely.
 3. Double-click **`install.bat`** inside the extracted folder.
 4. Click **Yes** on the User Account Control (UAC) prompt. The batch script will automatically self-elevate to Administrator to complete the setup.
+
+Requires Windows 11 and an NVIDIA GPU. The first launch downloads the speech model
+(~3 GB) and takes a few minutes; every launch after that is a few seconds.
+
+> **Developers** do not need the archive. Clone this repository and run
+> `python build_portable.py`, which rebuilds `ptt_dictate_dist.zip` from source — see
+> [Developer Directions](#-developer-directions) below. The published archive is built
+> from the tagged commit it is attached to, so the two are equivalent.
 
 ### 2. What the Installer Does
 The installation script will automatically:
