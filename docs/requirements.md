@@ -130,7 +130,7 @@ trace at all. It went undiagnosed for months as a result.
 |---|---|
 | `CON-1` | Windows 11 only. The implementation is built directly on Win32 APIs. |
 | `CON-2` | Distributed as a portable environment built around a Python Software Foundation-signed interpreter (`NFR-6`, `NFR-7`). |
-| `CON-3` | GUI additions may only use `tkinter`. It is the sole toolkit present in the portable environment (`.venv/DLLs/_tkinter.pyd`, `tcl90.dll`), so using it adds no dependency and no distribution size. |
+| `CON-3` | The GUI is built on **PySide6-Essentials** (LGPL). *Revised.* This was originally constrained to `tkinter` on the grounds that it is already in the portable environment and so adds no dependency and no distribution size. That trade was re-taken when the GUI grew from a single hotkey-capture dialog into three layers and six panels. Measured cost: +76.9 MB compressed on a 1.35 GB distribution. `NFR-6` and `NFR-7` are unaffected — the wheel bundles its own MSVC runtime (`msvcp140*.dll`, `vcruntime140*.dll`) and its own Windows platform plugin (`qwindows.dll`), so a target PC needs no redistributable, and the launcher is still the PSF-signed interpreter. The wheel is `cp310-abi3`, i.e. stable-ABI, so it loads on 3.14 without a version-specific build. |
 | `CON-4` | Inference runs through `faster-whisper`/CTranslate2 with `float16` on CUDA. `int8` is not usable on Blackwell GPUs. |
 | `CON-5` | The application must keep working when it is the only thing that has changed — i.e. no requirement here may be met by asking the user to reconfigure Windows. |
 

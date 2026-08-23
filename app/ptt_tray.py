@@ -35,7 +35,7 @@ def main():
         logging_setup.log_debug("Importing system and audio libraries...")
         from ptt import engine as engine_mod
         logging_setup.log_debug("Importing GUI and tray libraries...")
-        from ptt.ui.tray import TrayApp
+        from ptt.ui.qt_app import QtApp
         from ptt import config
         logging_setup.log_debug("Imports completed successfully.")
     except Exception as e:
@@ -55,13 +55,19 @@ def main():
     settings = config.load()
 
     # 3. Two-phase wiring: the tray needs the engine to drive it, and the engine
-    #    needs the tray's callback to report to. The engine never imports the UI.
-    tray = TrayApp(settings, cuda_supported)
-    engine = engine_mod.Engine(settings, cuda_supported, on_state=tray.on_state)
-    tray.attach(engine)
+    #    needs a callback to report to. The engine never imports the UI.
+    #
+    #    on_state is the bridge's, not the tray's: the engine calls it from the
+    #    engine thread, and it does nothing but emit a signal that Qt delivers on
+    #    the GUI thread. See ptt/ui/qt_app.py for why that indirection is not
+    #    optional.
+    app = QtApp(settings, cuda_supported)
+    engine = engine_mod.Engine(settings, cuda_supported, on_state=app.bridge.on_state)
+    app.attach(engine)
 
-    # 4. pystray owns the main thread; it starts the engine on a daemon thread.
-    tray.run()
+    # 4. Qt owns the main thread; it starts the engine on a daemon thread once
+    #    the event loop is running.
+    app.run()
 
 
 if __name__ == "__main__":

@@ -19,8 +19,9 @@ The state-callback contract
 2. **Single producer.** The callback is invoked only from the thread that called
    `run()`, never concurrently, and in order. The engine makes **no promise that
    this is the UI thread** -- marshalling, if a frontend needs it, is that
-   frontend's problem. In the tray it is the pystray daemon worker; in the
-   console it is the main thread.
+   frontend's problem. In the tray it is the daemon thread the Qt frontend
+   starts, and the marshalling is `ptt.ui.qt_app.EngineBridge`; in the console
+   it is the main thread and there is none.
 
 3. It must not block and must not raise. Every invocation is wrapped, so a
    frontend bug cannot kill the poll loop or strand `recording=True` with the

@@ -15,7 +15,7 @@ reasoning is the part worth keeping.
 system:
   target_os: "Windows 11"
   python_version: "3.14.2"
-  gui_toolkit: "tkinter (bundled; see CON-3)"
+  gui_toolkit: "PySide6-Essentials (LGPL; see CON-3)"
 
 dependencies:
   faster-whisper: "1.2.1"     # speech-to-text inference
@@ -24,8 +24,8 @@ dependencies:
   numpy:          "2.4.6"     # audio buffer concatenation
   keyboard:       "0.13.5"    # fallback only; see section 3
   pyperclip:      "1.11.0"    # clipboard read/restore
-  pystray:        "0.19.5"    # system tray icon
-  pillow:         "12.2.0"    # tray icon rendering
+  PySide6-Essentials: "6.11.2"  # Qt6 GUI and QSystemTrayIcon
+  pillow:         "12.2.0"    # tray icon rendering (still: see section 4)
   nvidia-*-cu12:  "see requirements.txt"
 
 model_parameters:
@@ -115,8 +115,9 @@ portable environment, not a wheel, so the packaging benefit of `src/` does not a
 | `app/ptt/transcribe.py` | Model load, CUDA detection, CPU fallback, text cleanup. |
 | `app/ptt/engine.py` | The state machine. Owns the poll loop; emits state changes to a listener. |
 | `app/ptt/logging_setup.py` | `debug_log.txt` writer (`OBS-4`). |
-| `app/ptt/ui/tray.py` | pystray icon, menu, state-to-icon mapping. |
-| `app/ptt/ui/hotkey_dialog.py` | tkinter capture window. **Not built yet — step 3.** |
+| `app/ptt/ui/qt_app.py` | `QApplication` owner and `EngineBridge`, the engine-thread-to-GUI-thread boundary. |
+| `app/ptt/ui/qt_tray.py` | `QSystemTrayIcon`, menu, state-to-icon mapping. |
+| `app/ptt/ui/panels/hotkey.py` | Qt keyboard-diagram picker. **Not built yet — step 3.** |
 | `app/ptt_tray.py` | Entry point: builds the tray UI, starts the engine. Unchanged invocation path. |
 | `ptt_dictate.py` | Entry point: prints state to the console, starts the engine. |
 
@@ -225,12 +226,12 @@ side. `chord_held()` is true when every key in the tuple is reported down by
 
 ### The picker
 
-Tray menu item **Set Hotkey…** opens a small tkinter window (`CON-3`).
+The settings window's **Hotkey** panel draws a full keyboard diagram (`CON-3`).
 
-- It runs **on its own thread with its own `mainloop`**. pystray menu callbacks run on
-  the tray thread, and tkinter requires the thread that created a root window to run its
-  loop. Only one dialog may exist at a time; the menu item is disabled while it is open.
-- Capture **polls `GetAsyncKeyState`** rather than reading tkinter key events. Same
+- It runs **on the GUI thread**, like every other widget. The engine reports state from
+  its own thread and that is marshalled across by `ui/qt_app.py`'s `EngineBridge`;
+  nothing in the UI may be touched from the engine thread.
+- Capture **polls `GetAsyncKeyState`** rather than reading Qt key events. Same
   reason as `chord_held()`: side-aware virtual keys, and immunity to the hook loss
   described in `FR-C2`. It also means the dialog captures the chord identically to the
   way the engine will later detect it — the picker and the detector share one code path.
