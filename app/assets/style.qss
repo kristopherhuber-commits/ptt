@@ -37,6 +37,27 @@ QWidget {
 }
 
 
+/* -- the status dot ---------------------------------------------------
+   Painted by StatusDot.paintEvent, but coloured from here: the widget
+   exposes a `dotColour` Qt property and these rules write it, selected on
+   the engine state. So no colour lives in Python, not even one a
+   paintEvent draws.
+
+   Red and amber deliberately match the tray icon the user is already
+   looking at rather than the blue ramp -- section 7 keeps the tray
+   colours out of the design system on purpose, because they are
+   functional signalling. Consistency between the two surfaces matters
+   more here than palette purity.
+   -------------------------------------------------------------------- */
+
+QWidget#statusDot                       { qproperty-dotColour: #94bce3; }  /* steel */
+QWidget#statusDot[state="idle"]         { qproperty-dotColour: #94bce3; }
+QWidget#statusDot[state="loading"]      { qproperty-dotColour: #f59e0b; }  /* amber */
+QWidget#statusDot[state="recording"]    { qproperty-dotColour: #ef4444; }  /* red   */
+QWidget#statusDot[state="transcribing"] { qproperty-dotColour: #f59e0b; }
+QWidget#statusDot[state="error"]        { qproperty-dotColour: #8c3a2e; }  /* dark red */
+
+
 /* -- the read-only ground: popover body and window banner ------------ */
 
 QFrame#statusView {

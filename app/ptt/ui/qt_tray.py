@@ -188,6 +188,19 @@ class QtTray(QObject):
         The status fallback matches the pre-Qt tray exactly: an empty status text
         falls back to the capitalised state name.
         """
+        # Development-time assertion. Safe to raise *here*, unlike on the
+        # callback side: this is a slot reached through the event loop, so an
+        # AssertionError surfaces normally instead of being swallowed by
+        # Engine._emit's except clause. It is close to tautological -- a queued
+        # connection guarantees it -- but it does catch the one regression that
+        # would otherwise be silent: someone changing the connection type to
+        # DirectConnection. The paired log lines below are the real evidence.
+        from PySide6.QtCore import QThread
+        assert QThread.currentThread() == QApplication.instance().thread(), (
+            "on_state_changed ran off the GUI thread; the queued connection in "
+            "qt_app.py is not doing its job"
+        )
+
         if not self._thread_checked:
             self._thread_checked = True
             _log_thread("slot QtTray.on_state_changed", expect_gui=True)

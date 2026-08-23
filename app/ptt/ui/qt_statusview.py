@@ -19,26 +19,11 @@ colour scheme is: dark surfaces are read-only, light surfaces are interactive.
 
 from dataclasses import dataclass
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Property, Qt
 from PySide6.QtGui import QColor, QPainter
 from PySide6.QtWidgets import (
     QFrame, QGridLayout, QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget,
 )
-
-#: Status-dot colours, keyed by the engine's own state.
-#:
-#: Deliberately in Python rather than style.qss: these are painted, and they are
-#: functional signalling rather than design-system tokens -- the same argument
-#: section 7 makes for the tray icon colours, which it keeps out of the design
-#: system on purpose. Red and amber here agree with the tray icon a user is
-#: already looking at, which matters more than matching a blue ramp.
-DOT_COLOURS = {
-    "loading":      "#f59e0b",   # amber, as the blue arc icon
-    "idle":         "#94bce3",   # steel
-    "recording":    "#ef4444",   # red, as the red circle icon
-    "transcribing": "#f59e0b",   # amber, as the amber square icon
-    "error":        "#8c3a2e",   # dark red
-}
 
 #: Placeholder for a value this build cannot obtain yet. The Microphone and Last
 #: rows need engine changes that are scheduled for a later session; showing an
@@ -103,23 +88,53 @@ class UiState:
 
 
 class StatusDot(QWidget):
-    """A small filled circle. Painted, because a round dot is the one thing the
-    otherwise-square design keeps round."""
+    """
+    A small filled circle. Painted, because a round dot is the one thing the
+    otherwise-square design keeps round.
+
+    The colour is **not** hard-coded here. It comes from style.qss through the
+    `dotColour` Qt property, selected on a dynamic `state` property:
+
+        QWidget#statusDot[state="recording"] { qproperty-dotColour: #ef4444; }
+
+    That indirection exists so the session 2 rule holds literally -- every
+    colour lives in the stylesheet, not in Python -- even for something a
+    paintEvent draws. `qproperty-` is resolved when the widget is polished, so
+    changing the state means re-polishing.
+    """
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._colour = DOT_COLOURS["loading"]
+        self.setObjectName("statusDot")
+        # Only reached if the stylesheet failed to load, which qt_theme logs.
+        # Taken from the palette rather than written as a literal, so this file
+        # defines no colour of its own.
+        self._colour = self.palette().windowText().color()
         self.setFixedSize(10, 10)
+        self.set_state("loading")
+
+    def _get_dot_colour(self):
+        return self._colour
+
+    def _set_dot_colour(self, colour):
+        self._colour = colour
+        self.update()
+
+    #: Written by style.qss via `qproperty-dotColour`.
+    dotColour = Property(QColor, _get_dot_colour, _set_dot_colour)
 
     def set_state(self, state_key):
-        self._colour = DOT_COLOURS.get(state_key, DOT_COLOURS["idle"])
+        self.setProperty("state", state_key)
+        style = self.style()
+        style.unpolish(self)
+        style.polish(self)
         self.update()
 
     def paintEvent(self, _event):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         p.setPen(Qt.PenStyle.NoPen)
-        p.setBrush(QColor(self._colour))
+        p.setBrush(self._colour)
         p.drawEllipse(self.rect())
 
 
