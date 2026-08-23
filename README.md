@@ -110,6 +110,7 @@ This script will automatically:
 * [docs/requirements.md](docs/requirements.md) — what the utility must do, and the compatibility constraints that earlier bugs produced.
 * [docs/design.md](docs/design.md) — how it is built: configuration matrix, module layout, the keystroke-injection contract, and the hotkey design.
 * [docs/development_history.md](docs/development_history.md) — the retrospective log of solved issues.
+* [docs/gui_handoff/gui_handoff.md](docs/gui_handoff/gui_handoff.md) — the PySide6 GUI specification: the three UI layers (tray icon, hover popover, settings window), panel-by-panel behaviour, and the acceptance criteria. `docs/gui_handoff/ptt_dictation_ui_mockups.html` is the visual reference and `claude_code_prompt.md` is the staged build plan.
 
 The implementation lives in `app/ptt/`; `ptt_dictate.py` and `app/ptt_tray.py` are thin
 entry points over it. See [docs/design.md](docs/design.md) section 4 for the module layout.
