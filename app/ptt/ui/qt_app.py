@@ -142,6 +142,10 @@ class QtApp:
         self._tray.settings_requested.connect(self._open_settings)
         self._popover.clicked.connect(self._open_settings)
 
+        # The settings window's banner already shows what the popover shows, so
+        # the popover stands down whenever that window is up.
+        self._popover.set_suppressor(self._window.isVisible)
+
         self._push_ui()
 
     def attach(self, engine):

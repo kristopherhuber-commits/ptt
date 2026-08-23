@@ -241,7 +241,11 @@ class QtTray(QObject):
         self._menu.addSeparator()
 
         self._act_settings = self._menu.addAction("Settings…")
-        self._act_settings.triggered.connect(self.settings_requested.emit)
+        # Swallow QAction.triggered's `checked` bool rather than forwarding it
+        # into a zero-argument signal, which raises TypeError if emitted directly.
+        self._act_settings.triggered.connect(
+            lambda _checked=False: self.settings_requested.emit()
+        )
 
         self._menu.addSeparator()
 

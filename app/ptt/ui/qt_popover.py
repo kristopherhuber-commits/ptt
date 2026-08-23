@@ -73,6 +73,14 @@ class Popover(QWidget):
         self.setFixedWidth(340)
 
         self._icon_rect = QRect()
+        #: Returns True while the popover must stay down. Set by QtApp to the
+        #: settings window's visibility: once that window is open its banner
+        #: already shows this exact content, so raising the panel on top of it
+        #: is redundant and reads as a bug. It also covers the case that looked
+        #: like one -- choosing "Settings..." from the tray menu leaves the
+        #: pointer near the icon, so the hover poll would otherwise raise the
+        #: panel over the window that had just opened.
+        self._suppressed = lambda: False
         self._leave_timer = QTimer(self)
         self._leave_timer.setSingleShot(True)
         self._leave_timer.setInterval(LEAVE_GRACE_MS)
@@ -96,8 +104,14 @@ class Popover(QWidget):
         self._icon_rect_getter = icon_rect_getter
         self._hover_timer.start()
 
+    def set_suppressor(self, predicate):
+        """Install a callable that returns True while the panel must stay down."""
+        self._suppressed = predicate
+
     def show_at_tray(self):
         """Raise the panel next to the tray icon without taking focus."""
+        if self._suppressed():
+            return
         self._leave_timer.stop()
         self._place()
         self.show()
@@ -106,6 +120,11 @@ class Popover(QWidget):
     # -- hover --------------------------------------------------------------
 
     def _poll_cursor(self):
+        if self._suppressed():
+            if self.isVisible():
+                self.hide()
+            return
+
         rect = self._icon_rect_getter()
         self._icon_rect = rect
         pos = QCursor.pos()
