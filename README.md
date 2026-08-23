@@ -121,16 +121,20 @@ privileges" instead of using the Startup folder, which is a change to
   * Check the current state (`Status: Ready (CUDA)`, `Status: Recording...`, etc.) and the active `Hotkey:`.
   * Toggle between **`Use GPU (CUDA)`** and **`Use CPU`** modes. On a machine without a supported GPU the CUDA option is unavailable and CPU is used automatically.
   * **Exit** the application.
-* **Persistence**: The application creates a local `config.json` file in its directory to remember your CPU/GPU preference and hotkey across restarts. Settings it does not recognise are preserved, so a newer build's config survives a rollback.
-* **Changing the hotkey**: Add a `hotkey` entry to `config.json` and restart. It takes a list of key names, all of which must be held together:
+* **Persistence**: The application creates a local `config.json` file in its directory to remember your CPU/GPU preference, hotkey and model across restarts. Settings it does not recognise are preserved, so a newer build's config survives a rollback.
+* **Changing the hotkey**: Open **Settings…** from the tray menu and click a key on the **Hotkey** tab's keyboard. It applies immediately — there is no OK button and no restart. Every key you press shades on the diagram as you press it, so you can see the app is reading your keyboard.
+
+  It can still be set by hand. Add a `hotkey` entry to `config.json` and restart; it takes a list of key names, all of which must be held together:
 
   ```json
-  { "version": 1, "use_gpu": true, "hotkey": ["rctrl"] }
+  { "version": 1, "use_gpu": true, "hotkey": ["rctrl"], "model": "large-v3-turbo" }
   ```
 
   Valid names: `ctrl`, `lctrl`, `rctrl`, `shift`, `lshift`, `rshift`, `alt`, `lalt`, `ralt`, `win`, `lwin`, `rwin`, `space`. Unsided names (`ctrl`) match either side. An unrecognised name falls back to the default and is noted in `debug_log.txt`.
 
-  Two cautions when choosing your own, both learned the hard way (see [docs/development_history.md](docs/development_history.md)): keys that produce a **character or scroll** (`space`) leak into the focused window while you hold them, and chords containing **`alt`** activate the target window's menu bar on release, which steals keyboard focus and silently discards the paste. The app now disarms the Alt case automatically, but `Alt+Shift` and `Ctrl+Shift` remain Windows' input-language and keyboard-layout switches when a second layout is installed.
+  Two cautions when choosing your own, both learned the hard way (see [docs/development_history.md](docs/development_history.md)): keys that produce a **character or scroll** (`space`) leak into the focused window while you hold them, and chords containing **`alt`** activate the target window's menu bar on release, which steals keyboard focus and silently discards the paste. The app now disarms the Alt case automatically, but `Alt+Shift` and `Ctrl+Shift` remain Windows' input-language and keyboard-layout switches when a second layout is installed. The Hotkey tab shows these warnings for whatever chord you pick, so you no longer have to remember them.
+
+* **Changing the model**: The **Model** tab lists the Whisper size tiers and switches between them immediately, reloading the engine. `Measure on this machine` times one transcription of a bundled 30-second clip so the latency column is a figure from your hardware rather than a published number for someone else's. Downloading and deleting models are not implemented yet; selecting a model that is not on disk fetches it as part of loading it.
 
 ---
 

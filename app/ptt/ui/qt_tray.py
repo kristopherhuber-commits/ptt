@@ -208,13 +208,13 @@ class QtTray(QObject):
         self._status = status_text if status_text else state.capitalize()
         self._tray.setIcon(self._icons.get(state, self._icons["idle"]))
         self._tray.setToolTip(f"PTT Dictation ({self._status})")
-        self._refresh_menu()
+        self.refresh_menu()
 
     # -- menu ---------------------------------------------------------------
 
     def _build_menu(self):
         """
-        Build the menu once. `_refresh_menu` mutates it in place afterwards.
+        Build the menu once. `refresh_menu` mutates it in place afterwards.
 
         Held on self deliberately: a QMenu with no parent and no reference is
         collected out from under the tray icon.
@@ -253,10 +253,16 @@ class QtTray(QObject):
         self._act_exit.triggered.connect(self._on_exit)
 
         self._tray.setContextMenu(self._menu)
-        self._refresh_menu()
+        self.refresh_menu()
 
-    def _refresh_menu(self):
-        """Bring the menu's labels and check marks up to date. Never rebuilds."""
+    def refresh_menu(self):
+        """
+        Bring the menu's labels and check marks up to date. Never rebuilds.
+
+        Public because the settings window changes the same two settings this
+        menu shows -- the chord and the device -- and the menu would otherwise
+        keep displaying what was set when the app started.
+        """
         self._act_status.setText(f"Status: {self._status}")
         self._act_hotkey.setText(
             f"Hotkey: {hotkey_mod.chord_label(self._settings.hotkey)}"
@@ -270,7 +276,7 @@ class QtTray(QObject):
             self._settings.use_gpu = True
             self._settings.save()
             self._engine.request_model_reload()
-        self._refresh_menu()
+        self.refresh_menu()
 
     @Slot()
     def _set_device_cpu(self):
@@ -278,7 +284,7 @@ class QtTray(QObject):
             self._settings.use_gpu = False
             self._settings.save()
             self._engine.request_model_reload()
-        self._refresh_menu()
+        self.refresh_menu()
 
     @Slot()
     def _on_exit(self):

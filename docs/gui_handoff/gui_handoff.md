@@ -9,6 +9,14 @@ Design reference: `PTT Dictation UI v1 (standalone).html` (open in a browser) or
 rendering; turn 3 is the same design with every tab built out; turn 2 is the
 three-layer interaction wired together.
 
+**Status.** Layers 1 and 2, the window shell, and the Hotkey and Model panels are
+built. The Audio, Vocabulary, Advanced and Diagnostics panels are not. Sections
+marked **As built** record where the shipped code differs from what this document
+originally specified and why; §12's rule applies — the code is right, and these
+notes are this document being brought into line with it. Nothing specified here
+has been dropped, and where a divergence would have cost something, the code was
+changed rather than the requirement.
+
 ---
 
 ## 1. What is being built
@@ -52,20 +60,34 @@ Keep it that way.
 
 ```
 app/ptt/ui/
-    tray.py        # EXISTS (pystray). Replaced by qt_tray.py, or kept for fallback.
-    qt_app.py      # NEW. QApplication owner, wiring, the engine thread bridge.
-    qt_tray.py     # NEW. QSystemTrayIcon + state→icon map + context menu.
-    qt_popover.py  # NEW. Frameless read-only state panel (layer 2).
-    qt_window.py   # NEW. QMainWindow with the tab widget (layer 3).
+    qt_app.py          # QApplication owner, wiring, the engine-thread bridge.
+    qt_tray.py         # QSystemTrayIcon + state→icon map + context menu.
+    qt_popover.py      # Frameless read-only state panel (layer 2).
+    qt_statusview.py   # The state display itself, embedded in both the popover
+                       #   and the window's banner — §5 requires one class.
+    qt_window.py       # QMainWindow with the tab widget (layer 3).
+    qt_theme.py        # Font registration and style.qss, applied to the app.
     panels/
-        hotkey.py      # NEW. Keyboard diagram.
-        model.py       # NEW. Model table.
-        audio.py       # NEW. Device picker + level meter.
-        vocabulary.py  # NEW. Replacement rules table.
-        advanced.py    # NEW. Engine constants.
-        diagnostics.py # NEW. Log tail + probe readouts.
-    style.qss      # NEW. The whole visual layer (see §9).
+        __init__.py    # InstantApplyPanel — the write → save → notify sequence
+                       #   every control routes through. See §6.
+        hotkey.py      # Keyboard diagram.                  BUILT
+        model.py       # Model table.                       BUILT
+        audio.py       # Device picker + level meter.       to build
+        vocabulary.py  # Replacement rules table.           to build
+        advanced.py    # Engine constants.                  to build
+        diagnostics.py # Log tail + probe readouts.         to build
+
+app/assets/
+    style.qss          # The whole visual layer (see §9).
+    fonts/             # Barlow + Barlow Condensed, with both OFL.txt licences.
+    benchmark_sample.wav
 ```
+
+**As built:** `style.qss` and the fonts live under `app/assets/`, not inside
+`app/ptt/ui/`. `design.md` §4 makes `paths.py` the only module allowed to compute
+a directory, so they are reached through `paths.asset_path()`; `build_portable.py`
+walks `app/` wholesale, so they ship with no change to the build script.
+`tray.py` and `pystray` were deleted in session 1, per §11.
 
 `app/ptt_tray.py` becomes a thin entry point over `qt_app.py`, matching how it
 currently sits over `TrayApp`.
@@ -172,6 +194,15 @@ transition from popover to window to feel like the same object growing.
 `QMainWindow`, not frameless — Windows draws the title bar. Width ~880 px,
 resizable, minimum size around 820×620. Structure top to bottom:
 
+**As built:** it opens at 880×800 and each tab sits in a `QScrollArea`. The
+minimum stays 820×620 and is honoured; the scroll area is what makes it safe. The
+banner alone is 254 px because §5 requires it to be the popover's layout verbatim,
+the keyboard is 188 px, and the model table shows six tiers at once — a window
+that opened already scrolled would hide the compatibility warnings on one tab and
+the Measure button on the other. Squeezing a `QHBoxLayout` below its widgets'
+minimum overlaps them rather than clipping them, so without the scroll area a
+keyboard drawn at the minimum size renders on top of itself.
+
 1. **Banner** — the §5 widget on a dark ground. Read-only, updates live.
 2. **`QTabWidget`** — Hotkey · Model · Audio · Vocabulary · Advanced · Diagnostics.
 3. **Panel** — the active tab's content, light ground.
@@ -197,17 +228,44 @@ not add exception handling that surfaces a modal on every keystroke.
 
 This is the part a screenshot cannot convey, so it is spelled out.
 
-**What it shows.** A full 104-key keyboard as a `QGridLayout` of checkable
-`QPushButton`s. Layout: function row, number row, QWERTY rows, modifier row, plus
-the navigation cluster. Keycaps are 28 px tall; modifiers are wider (see the
-mockup for relative widths).
+**What it shows.** A full 104-key keyboard of checkable `QPushButton`s:
+function row, number row, QWERTY rows, modifier row, the navigation cluster and
+the numeric keypad. Keycaps are 28 px tall and 28 px per unit with a 4 px gap, so
+an *n*-unit cap is `32n - 4` px wide (see the mockup for relative widths).
 
-**Which keys are bindable.** Exactly the keys in `hotkey.VK_MAP` that are
-side-specific physical keys, i.e. the nine: `lctrl`, `rctrl`, `lshift`, `rshift`,
-`lalt`, `ralt`, `lwin`, `rwin`, `space`. Every other key on the board is drawn
-but **disabled and dimmed to ~30% opacity**. Do not hard-code this list in the
-panel — derive it from `hotkey.VK_MAP` so adding a key to the engine adds it to
-the UI.
+**As built:** the main block is `QHBoxLayout` rows inside a `QVBoxLayout` rather
+than one `QGridLayout`. A grid aligns columns across rows and a keyboard's main
+block deliberately does not — 1.5u and 1.75u caps stagger every row against the
+one above — so a grid could only express it by giving every cap a span in some
+fine unit, which is a worse way to write the same pixels. The **keypad** *is* a
+`QGridLayout`, because its cells do align and its `+` and `Enter` are two rows
+tall. The mockup draws no keypad; this document says 104 keys and §12 makes this
+document right, so the keypad is drawn.
+
+The keypad's digits report `VK_NUMPAD0`–`9` only while Num Lock is on; with it
+off the same physical keys report `VK_HOME`, `VK_END` and the rest, so keypad 7
+shades `Home` on the main block instead. Both `Enter` keys share `VK_RETURN` —
+Windows separates them with an extended-key flag that `GetAsyncKeyState` does not
+carry — so they shade together. Both are the hardware being reported accurately
+and neither is worth hiding.
+
+**Which keys are bindable.** Exactly the side-specific physical keys plus
+`space` — the nine: `lctrl`, `rctrl`, `lshift`, `rshift`, `lalt`, `ralt`, `lwin`,
+`rwin`, `space`. Every other key on the board is drawn but **disabled and dimmed
+to ~30% opacity**. Do not hard-code this list in the panel; adding a key to the
+engine must add it to the UI.
+
+**As built:** that set is not derivable from `VK_MAP` alone, which was this
+document's instruction and is impossible as written — `VK_MAP` has thirteen
+entries, four of them unsided aliases, and carries no attribute separating a
+physical key from an alias (stage 0 review §3.4). `hotkey.py` therefore gained
+`KEYS`, one declarative table that `VK_MAP`, `KEY_LABELS`, `BINDABLE_KEYS` and
+`BINDABLE_BY_VK` are all derived from.
+
+The panel uses `BINDABLE_BY_VK`: a cap may be bound iff the engine's table has a
+bindable name for that cap's **virtual key**, which the cap already carries for
+the live shading. The panel names no keys at all, so adding one to `KEYS` lights
+up the matching cap with no edit to the UI, and removing one dims it.
 
 **Three visual states per key**, all three visible at once:
 
@@ -227,8 +285,24 @@ by polling `GetAsyncKeyState` on a ~30 ms `QTimer` for the keys on the board
 Windows silently unregisters low-level hooks after UAC prompts, screen locks,
 sleep and USB hotplug — see `docs/development_history.md`, issues #7 and #8). Do
 **not** use `keyPressEvent`; it only fires for the focused window and misses the
-release when focus moves. Clear all held states on `focusOutEvent` and on window
-hide so nothing gets stuck shaded.
+release when focus moves. Nothing may stay shaded once the window is not in front.
+
+**As built:** the polling goes through `hotkey.poll_vks`, so the picker and the
+detector share one Win32 call site and one failure mode. Only bit `0x8000` is
+tested; bit `0x0001` is "pressed since the last call" and is cleared per caller,
+so reading it here would race the engine's own polling.
+
+Clearing is done by the poll itself — `isVisible() and isActiveWindow()`, checked
+on every tick — not by `focusOutEvent`. `focusOutEvent` never fires for this
+widget: focus lives on the caps and the checkbox, never on the panel. Asking the
+two questions on a timer that is already running cannot miss a case; alt-tab,
+minimise, switching tabs and closing the window all land in the same branch.
+`hideEvent` also stops the timer and clears, so a key held at the moment the tab
+changed is not still shaded when it comes back.
+
+Only the caps whose state actually changed are re-polished. Qt resolves a
+`[held="true"]` selector when a widget is polished and not again, and restyling
+104 widgets 33 times a second is not free.
 
 **How binding is committed.** Clicking a bindable key toggles it in the chord.
 Clicking the only bound key leaves it bound (never allow an empty chord —
@@ -240,22 +314,84 @@ every poll iteration, and an attribute rebind is atomic where a list mutation is
 not. This is what lets the new chord take effect with no restart, so **do not add
 a lock and do not make `Settings` frozen.**
 
-**Compatibility warning box.** A live panel beside the chord readout, driven by
-the chosen chord. The rules, all learned the hard way:
+**As built**, four cases this document left open (stage 0 review §5.7–§5.9):
 
-- chord contains `alt` → "Alt chords activate the focused window's menu bar on
-  release, which steals focus and can discard the paste." (The engine already
-  disarms this via `inject.suppress_alt_menu`, so this is a caution, not a block.)
-- chord contains `space` → "Space types a character into whatever has focus while
-  you hold it."
-- chord is a multi-key combination including a shift → "Ctrl+Shift and Alt+Shift
-  are Windows' keyboard-layout switches when a second layout is installed."
-- otherwise → "Safe: types no character, scrolls nothing, activates no menu bar."
+- **Order.** A chord the panel builds is put in `hotkey.KEYS` order by
+  `hotkey.canonical()`. Without it the same three keys chosen in a different order
+  would rewrite `config.json` and relabel the tray menu for no change in
+  behaviour.
+- **A chord already in `config.json` is never rewritten on the user's behalf** —
+  not reordered, not re-spelled, not truncated. Only a chord the user builds is
+  canonicalised, so a four-key chord or a hand-written unsided name survives being
+  looked at. The three-key cap applies to what a *click* may build.
+- **An unsided name lights both of its caps**, because both really are bound —
+  `chord_held` fires on either one.
+- **Clicking one cap of an unsided binding narrows it to the other side** rather
+  than unbinding the pair. `ctrl` + a click on Left Ctrl becomes `rctrl`. Nothing
+  is lost, the chord keeps its length, and it cannot produce an empty chord.
+
+**Compatibility warning box.** A live panel beside the chord readout, driven by
+the chosen chord.
+
+**As built:** the rules live in `hotkey.classify()`, which returns a *list* of
+warnings, with `hotkey.SAFE_NOTE` shown when that list is empty. It is pure — no
+Win32, no Qt — so every rule is testable without a keyboard, and the panel renders
+what it returns instead of restating the rules beside the widgets. `design.md` §6
+holds the table and is the authority; this document's inline version differed from
+it in three ways and lost on all three. The `alt` and `space` rules this document
+listed are unchanged and still fire, word for word; the rule set only grew:
+
+- **The layout-switch rule is `Alt+Shift` or `Ctrl+Shift` specifically**, not "any
+  multi-key combination including a shift". Warning on `Win+Shift` or
+  `Ctrl+Alt+Shift` cries wolf and trains the user to ignore the box. No chord
+  loses its only warning to this narrowing — those two examples warn for Win and
+  for Alt respectively.
+- **A lone unsided `ctrl` or `shift` warns** that it fires during ordinary typing.
+  This document dropped that row, and it is the one rule guarding the exact
+  configuration the "match either side" checkbox exists to create.
+- **A chord containing `win` warns** that it opens the Start menu on release.
+  Neither table had this. `inject.suppress_alt_menu` neutralises the Alt case and
+  has no Win equivalent, so without it the box prints "Safe: … activates no menu
+  bar" over Left Win, which is false.
+
+Warnings never block a save. The user may know better than the classifier; the
+point is that they choose knowing — which is also why an unsafe chord is not
+shown in the same grey as a safe one. Each warning is prefixed `Warning:` and the
+box outlines itself and switches to amber, so the state is legible from across
+the panel rather than only once the paragraph is being read. The box is 420 px
+wide, which fits the two-warning chords (any Alt combination, the common way to
+pick a bad hotkey) without the panel scrolling.
+
+The chord chip and the `"hotkey": [...]` readout are on **separate lines**, not
+side by side as the mockup draws them: a three-key chord makes that one line
+about 540 px wide, which competes with the box for the panel's width and forces a
+horizontal scrollbar. A settings window that scrolls sideways is worse than one
+that stacks two short lines.
 
 **"Match either side" checkbox.** When checked, a side-specific binding is
-written unsided (`rctrl` → `ctrl`), which `hotkey.VK_MAP` resolves to either
-side. Show the resulting JSON (`"hotkey": ["rctrl"]`) next to the chord so the
-user can see exactly what lands in `config.json`.
+written unsided (`rctrl` → `ctrl`), which resolves to either side. Show the
+resulting JSON (`"hotkey": ["rctrl"]`) next to the chord so the user can see
+exactly what lands in `config.json`.
+
+**As built**, with the two corrections the stage 0 review (§3.5, §4.4) required
+before this control could ship:
+
+- **`win` was broken and is fixed.** `VK_MAP["win"]` was `0x5B`, which is
+  `VK_LWIN` — Windows has no unsided Win virtual key — so `["win"]` claimed to
+  match either side and detected only the left one. Each `hotkey.KEYS` entry now
+  carries *every* virtual key that satisfies its name and `chord_held` tests
+  `any`, so the claim is true. Ticking this box with Right Win bound no longer
+  silently stops the hotkey responding.
+- **The classifier runs on the chord as written, not as clicked.** This is the
+  one control that can turn a safe binding into a hazardous one, and the box has
+  to say so at the moment it happens rather than describing the chord the user no
+  longer has. Ticking it with `rctrl` bound immediately replaces "Safe" with the
+  lone-unsided-modifier warning.
+- The box is checked when every sided key in the chord is already unsided, and is
+  disabled for a chord with no sided key (`space` alone). Clearing it has to pick
+  a side, and picks the **right-hand** one: ordinary typing reaches for the
+  left-hand Ctrl, Shift and Alt for every `Ctrl+C` and every capital letter, which
+  is the same reason the shipped default is Right Ctrl.
 
 ### 6.2 Model panel
 
@@ -268,9 +404,20 @@ A `QTableView` over a small model, one row per Whisper size tier: `tiny.en`,
 | Disk size | static table; actual bytes when present locally |
 | Character | one short static phrase, e.g. "fastest, least accurate" |
 | Measured | latency in seconds on this machine, or `—` if never measured |
-| State | `Downloaded` / `Not on disk`, from `paths.local_model_dir(name)` |
+| State | `Downloaded` / `Not on disk` — see the note below |
 
 The bars are a `QStyledItemDelegate`, not widgets in cells.
+
+**As built:** the State column checks **both** `paths.local_model_dir(name)` and
+the Hugging Face cache. `local_model_dir` only ever finds a model *bundled* beside
+the app, and `resolve_model_path` falls back to letting faster-whisper fetch by
+name — so reading only the first printed "Not on disk" beside the 1.6 GB model the
+app was running at that moment. The cache is **scanned** rather than addressed by
+a constructed repository name: the repo a tier resolves to is not derivable from
+the tier (`large-v3-turbo` comes from `mobiuslabsgmbh/`, the smaller tiers from
+`Systran/`), so the repo id is matched by suffix, which needs no guess about who
+publishes what. The Disk column shows the real byte count for anything found and
+a `~`-prefixed estimate otherwise, so the two are never confused.
 
 **Decided: measure on demand, and show nothing until measured.** The speed and
 accuracy bars in the mockup are invented placeholders and must not ship as fact.
@@ -281,6 +428,35 @@ Instead:
   `docs/gui_handoff/record_sample.py`) with the selected model and records the
   wall time. Store results under a new `benchmarks` key in `config.json`, keyed by
   model name and device, with a timestamp.
+
+  **As built:** the button calls `Engine.request_benchmark()`, which is serviced
+  at the top of the poll loop and times the model **already resident**. Selecting
+  a row loads that model, so the selected model and the loaded model are the same
+  one and no second `WhisperModel` is ever allocated. That was the stage 0 review's
+  §4.6 objection and it is not theoretical: `large-v3` measured while
+  `large-v3-turbo` is resident is 3.1 GB plus 1.6 GB of float16 weights on one
+  card before activations, and an allocation failure during a *measurement* must
+  not be able to take down the model dictation depends on. It also makes the
+  number mean something — a latency measured while another model holds VRAM is not
+  comparable to one measured beside it.
+
+  The trade-off, stated plainly: measuring a tier means selecting it first, which
+  loads it. Dictation pauses for the measurement, which the banner says throughout
+  (`transcribing` / `Measuring <model>...` — a new status string, but no new state,
+  so §7's table needs no new row). The result travels back through the same
+  `EngineBridge` hop as every other engine callback; nothing writes `config.json`
+  off the GUI thread.
+
+  `transcribe.load_benchmark_clip()` converts the 16-bit WAV to the float32 buffer
+  inference wants, so the measured path is byte-for-byte the dictation path from
+  `transcribe_audio` inwards. It raises rather than guessing if the clip is not
+  mono 16-bit 16 kHz.
+
+  Each stored entry is `{"seconds": float, "at": ISO-8601, "clip": digest}`, keyed
+  `"<model>|<device>"`. The clip digest is not decoration: `record_sample.py` says
+  the clip must never be re-recorded because that invalidates every cached figure,
+  and nothing enforced it. Measurements taken against a different clip no longer
+  match and are simply not shown.
 - The `Measured` column shows that latency, or `—` for models never measured.
   Draw the relative bar only across rows that have real numbers.
 - Do **not** show an accuracy column. Word error rate cannot be measured without
@@ -289,6 +465,14 @@ Instead:
   qualitative tradeoff instead, which is honest and is what the choice actually
   turns on.
 - Measuring downloads the model if absent. Say so on the button's tooltip.
+
+  **As built:** the warning moved to where the download now happens. Because the
+  measured model is the resident one, it is **selecting** a tier that fetches it,
+  not measuring it — by the time Measure is pressed the model is already loaded.
+  The panel's blurb therefore carries the note ("Selecting one loads it
+  immediately … and downloads it first if it is not already on disk") and the
+  Measure tooltip carries the one that belongs to it ("Dictation pauses while it
+  runs"). Nothing is unsaid; it is said next to the control that does it.
 
 GPU/CPU choice is a pair of `QRadioButton`s beside the table, replacing the tray
 menu's checkboxes as the primary control (keep the menu items too). On change: `settings.use_gpu = …`,
@@ -303,6 +487,31 @@ constant. Make the model name a `Settings` field (`model: str =
 reason like every other field) and pass it into `load_model_with_fallback`.
 Follow `config.py`'s existing validation pattern exactly — validate the value,
 log the reason for any fallback (OBS-3), and preserve unknown keys.
+
+**As built:** it was four changes, not one (stage 0 review §3.6). The constant was
+read in three places — `resolve_model_path()` closed over it and now takes a
+parameter; `load_model_with_fallback()`'s **CPU fallback path** re-read it
+directly, which was a latent bug where a bundled local model was used for the CUDA
+attempt and then re-downloaded by name for the fallback, and now reuses the
+resolved path; and `ptt_tray.py`'s startup log line, which OBS-3 covers, moved
+below `config.load()`. The fourth is `Engine.request_benchmark` above.
+
+`transcribe.MODELS` now holds the tier table — name, parameter count, disk
+estimate, character phrase — and `config.py` validates `model` against
+`MODEL_NAMES` derived from it, so the panel's rows and the accepted values cannot
+drift apart. An unrecognised name falls back to `DEFAULT_MODEL` with a logged
+reason rather than being handed to faster-whisper, which would try to fetch it
+from Hugging Face by that name.
+
+One further change this document did not call for, in `config.py`:
+`Settings.save()` now writes a temp file and `os.replace()`s it into place under a
+lock. Instant-apply turns a handful of writes per process into one per click, and
+gives the file two writers — the GUI thread on every control and the engine thread
+on a CUDA fallback. `"w"` truncates first, so the old code's failure mode was a
+zero-byte `config.json`, which `load()` handles correctly by falling back, meaning
+the user's symptom is their settings silently resetting (stage 0 review §4.3). The
+lock guards the **file**; it is not the field lock `Settings`' docstring forbids,
+and the engine's live re-read stays lock-free.
 
 Download management (fetching a model not on disk, showing progress, deleting
 one) is **out of scope for the first pass** unless the user asks. The buttons are
@@ -441,6 +650,15 @@ Do not invent colours.
 | Bound key fill | `#5980a6`, light text |
 | Held key tint | `#d6ebff` with a 2 px `#5980a6` inset border |
 | Checked box / radio | `#5980a6` fill, `#f2f2f3` check or centre |
+| Compatibility warning text | `#b45309`, 13 px, weight 600 |
+| Compatibility warning box border | `#d97706` |
+
+The two warning colours are the tray's amber ramp, not the accent ramp, and
+deliberately so: §7 keeps the tray colours outside the design system because they
+are functional signalling rather than decoration, and a hotkey that will eat the
+user's keystrokes is the same kind of signal. `#d97706` is the tray's own
+`transcribing` outline; the text is one step darker because `#d97706` on the light
+ground is about 3.4:1, which is not enough for body text.
 
 Everything is square — `border-radius: 0` on buttons, inputs, tabs, cells and
 frames. One exception: the primary button is the only solid accent fill in the UI.
@@ -449,6 +667,15 @@ Two things QSS cannot do, needing a `paintEvent` override:
 
 - the `+` registration marks at panel corners (`.blueprint` in the reference);
 - the level meter and the table bars.
+
+**As built:** the model table's bars and state chips are painted by
+`QStyledItemDelegate`s, and a delegate is not a widget, so no style-sheet selector
+can reach one. They read their colours off the **view**, which carries them as Qt
+properties written from `style.qss` with `qproperty-` — the same indirection
+`StatusDot` uses, and for the same reason: no colour lives in Python, not even one
+a paint method draws.
+
+**Still outstanding:** the `+` registration marks are not drawn on any panel.
 
 **Controls are native Qt widgets — no custom-drawn switches.** Every on/off
 setting is a `QCheckBox`; an either/or choice with a fixed, known set of options
@@ -465,10 +692,17 @@ there. Do not write a custom switch widget.
    format, same right-click items, same non-hanging Exit.
 2. Hovering the tray icon raises the popover without stealing keyboard focus from
    the focused application. Typing in another window while it is up is unaffected.
+   It is also **in front**, including over an always-on-top window from another
+   process: the panel is never activated, and `raise_()` cannot cross out of the
+   ordinary Z-order band, so it carries `WindowStaysOnTopHint`. Topmost is a
+   Z-order property and not an activation one, so this does not cost the focus
+   guarantee above — verify both together.
 3. Clicking the popover opens the settings window; the banner shows identical
    content to the popover it replaced.
 4. Pressing any key while the Hotkey panel is visible shades that key within
-   ~50 ms and unshades it on release. Alt-tabbing away clears all shading.
+   ~50 ms and unshades it on release, on the keypad as well as the main block.
+   Alt-tabbing away clears all shading, as does switching tabs and closing the
+   window.
 5. Clicking `Right Shift`, then holding Right Shift, starts recording — with no
    restart, because the engine re-read `settings.hotkey` on its next poll.
 6. Switching GPU→CPU reloads the model and the banner passes through

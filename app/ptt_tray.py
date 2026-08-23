@@ -43,7 +43,6 @@ def main():
         logging_setup.log_debug(traceback.format_exc())
         sys.exit(1)
 
-    logging_setup.log_debug(f"MODEL_SIZE: {transcribe.MODEL_SIZE}")
     logging_setup.log_debug(f"CONFIG_FILE: {paths.config_path()}")
 
     # 1. Detect if CUDA is available on this system
@@ -54,6 +53,11 @@ def main():
     # The engine applies the no-CUDA override; see its constructor.
     settings = config.load()
 
+    # The model name moved from a transcribe.py constant to a validated setting,
+    # so this line has to come after the load. It is one of the startup lines
+    # OBS-3 covers, so it keeps its shape.
+    logging_setup.log_debug(f"MODEL_SIZE: {settings.model}")
+
     # 3. Two-phase wiring: the tray needs the engine to drive it, and the engine
     #    needs a callback to report to. The engine never imports the UI.
     #
@@ -62,7 +66,11 @@ def main():
     #    the GUI thread. See ptt/ui/qt_app.py for why that indirection is not
     #    optional.
     app = QtApp(settings, cuda_supported)
-    engine = engine_mod.Engine(settings, cuda_supported, on_state=app.bridge.on_state)
+    engine = engine_mod.Engine(
+        settings, cuda_supported,
+        on_state=app.bridge.on_state,
+        on_benchmark=app.bridge.on_benchmark,
+    )
     app.attach(engine)
 
     # 4. Qt owns the main thread; it starts the engine on a daemon thread once

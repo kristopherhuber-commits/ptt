@@ -241,3 +241,271 @@ QLabel#savedFlash {
     color: #5980a6;
     font-weight: 700;
 }
+
+
+/* -- panel furniture --------------------------------------------------
+   Captions, notes and the compatibility box. Shared by every panel so a
+   new tab inherits the typography rather than restating it.
+   -------------------------------------------------------------------- */
+
+/* small-caps label above a group of controls */
+QLabel#caption {
+    color: rgba(29, 31, 32, 0.55);
+    font-family: "Barlow Condensed", "Segoe UI", sans-serif;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 1.4px;
+}
+
+QLabel#panelNote {
+    color: rgba(29, 31, 32, 0.55);
+    font-size: 12px;
+}
+
+
+/* -- the keyboard diagram ---------------------------------------------
+   Four states are visible at once and the rules below MUST stay in this
+   order. Qt style sheets follow CSS2.1 specificity: `#keycap:checked`
+   and `#keycap[held="true"]` both score one id plus one simple
+   selector, so they are equally specific and the LATER rule wins. The
+   combined states are therefore last, and moving them up silently
+   collapses bound-and-held back to plain bound.
+
+   `held` is a dynamic property written by the 30 ms poll in
+   panels/hotkey.py. Qt resolves a property selector when the widget is
+   polished, which is why that code re-polishes on every change.
+
+   Every rule is scoped under `QWidget#keyboard` and must stay that way.
+   The generic `QWidget#panel QPushButton` rule further down scores two
+   element names to a bare `QPushButton#keycap`'s one, so it WINS on
+   specificity and hands every keycap the 14 px side padding meant for
+   the Measure button -- which on a 28 px cap leaves no room for the
+   label at all, and the board renders as rows of blank boxes. Same trap
+   as the two status chips above, same fix.
+   -------------------------------------------------------------------- */
+
+QWidget#keyboard {
+    background: transparent;
+}
+
+/* bindable: pale accent tint, hairline accent border */
+QWidget#keyboard QPushButton#keycap {
+    background: #eef6ff;
+    color: #2c455d;
+    border: 1px solid #94bce3;
+    font-size: 10px;
+    font-weight: 500;
+    padding: 0px;
+}
+
+QWidget#keyboard QPushButton#keycap:hover {
+    background: #d6ebff;
+}
+
+/* drawn for orientation only: dimmed and inert */
+QWidget#keyboard QPushButton#keycap:disabled {
+    background: #e9e9ea;
+    color: rgba(29, 31, 32, 0.30);
+    border: 1px solid rgba(29, 31, 32, 0.16);
+}
+
+/* the OS reports this key down */
+QWidget#keyboard QPushButton#keycap[held="true"] {
+    background: #d6ebff;
+    color: #1d2d3d;
+    border: 2px solid #5980a6;
+}
+
+/* part of the current chord */
+QWidget#keyboard QPushButton#keycap:checked {
+    background: #5980a6;
+    color: #f2f2f3;
+    border: 1px solid #416180;
+    font-weight: 700;
+}
+
+/* a non-bindable key held: still legible, still clearly not bindable */
+QWidget#keyboard QPushButton#keycap:disabled[held="true"] {
+    background: #d4d4d7;
+    color: rgba(29, 31, 32, 0.75);
+    border: 2px solid rgba(29, 31, 32, 0.45);
+}
+
+/* bound and held at once: the accent fill keeps its meaning, the inset
+   border is what says the finger is on the key */
+QWidget#keyboard QPushButton#keycap:checked[held="true"] {
+    background: #416180;
+    color: #eef6ff;
+    border: 2px solid #d6ebff;
+}
+
+
+/* -- the hotkey readout ------------------------------------------------ */
+
+QLabel#chordChip {
+    background: #5980a6;
+    color: #f2f2f3;
+    font-family: "Barlow Condensed", "Segoe UI", sans-serif;
+    font-size: 14px;
+    font-weight: 600;
+    letter-spacing: 0.6px;
+    padding: 6px 14px;
+}
+
+QLabel#chordJson {
+    color: rgba(29, 31, 32, 0.55);
+    font-family: Consolas, "Courier New", monospace;
+    font-size: 12px;
+}
+
+QFrame#warningBox {
+    background: transparent;
+    border: 1px solid rgba(29, 31, 32, 0.16);
+}
+
+QLabel#warningText {
+    color: rgba(29, 31, 32, 0.55);
+    font-size: 12px;
+}
+
+/* The classifier had something to say.
+   Amber, not the accent ramp, and deliberately: section 7 keeps the tray's
+   colours outside the design system because they are functional signalling
+   rather than decoration, and a hotkey that will eat the user's keystrokes is
+   the same kind of signal. #d97706 is the tray's own transcribing outline;
+   the text is one step darker so 13 px stays legible on the light ground,
+   which #d97706 alone does not at ~3.4:1.
+
+   The whole box outlines itself as well as the text changing colour, so an
+   unsafe chord is visible from across the panel and not only once the
+   paragraph is being read. */
+QLabel#warningText[risky="true"] {
+    color: #b45309;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+QFrame#warningBox[risky="true"] {
+    border: 1px solid #d97706;
+}
+
+
+/* -- checkboxes and radio buttons -------------------------------------
+   Native Qt indicators, coloured from the token sheet. gui_handoff
+   section 9 is explicit that there is no custom switch widget here.
+   -------------------------------------------------------------------- */
+
+QCheckBox, QRadioButton {
+    color: #1d1f20;
+    font-size: 13px;
+    spacing: 8px;
+}
+
+QCheckBox:disabled, QRadioButton:disabled {
+    color: rgba(29, 31, 32, 0.30);
+}
+
+QCheckBox::indicator, QRadioButton::indicator {
+    width: 14px;
+    height: 14px;
+    background: #f2f2f3;
+    border: 1px solid rgba(29, 31, 32, 0.45);
+}
+
+QRadioButton::indicator {
+    border-radius: 7px;
+}
+
+QCheckBox::indicator:checked, QRadioButton::indicator:checked {
+    background: #5980a6;
+    border: 1px solid #416180;
+}
+
+QCheckBox::indicator:disabled, QRadioButton::indicator:disabled {
+    background: #e9e9ea;
+    border: 1px solid rgba(29, 31, 32, 0.16);
+}
+
+
+/* -- buttons ----------------------------------------------------------
+   Square, hairline-bordered, transparent: the secondary button is the
+   only button shape in this window. The one solid accent fill in the UI
+   is reserved for a primary action, and there is not one here -- every
+   control applies instantly, so nothing needs confirming.
+   -------------------------------------------------------------------- */
+
+QWidget#panel QPushButton {
+    background: transparent;
+    color: #1d1f20;
+    border: 1px solid rgba(29, 31, 32, 0.16);
+    font-size: 12px;
+    padding: 7px 14px;
+}
+
+QWidget#panel QPushButton:hover {
+    background: #e9e9ea;
+}
+
+QWidget#panel QPushButton:pressed {
+    background: #d4d4d7;
+}
+
+QWidget#panel QPushButton:disabled {
+    color: rgba(29, 31, 32, 0.30);
+}
+
+
+/* -- the model table --------------------------------------------------
+   The bars and the state chips are painted by delegates in
+   panels/model.py, and a delegate is not a widget, so no selector can
+   reach one. The view carries their colours as Qt properties and the
+   delegates read them back -- the same indirection the status dot uses,
+   and for the same reason: no colour lives in Python.
+   -------------------------------------------------------------------- */
+
+QTableView#modelTable {
+    background: #f2f2f3;
+    alternate-background-color: #f2f2f3;
+    border: 1px solid rgba(29, 31, 32, 0.16);
+    gridline-color: transparent;
+    outline: none;
+    font-family: Consolas, "Courier New", monospace;
+    font-size: 12px;
+
+    qproperty-barColour: #5980a6;
+    qproperty-trackColour: #d4d4d7;
+    qproperty-mutedColour: rgba(29, 31, 32, 0.55);
+    qproperty-tagFillColour: #d6ebff;
+    qproperty-tagInkColour: #2c455d;
+}
+
+QTableView#modelTable::item {
+    border-bottom: 1px solid rgba(29, 31, 32, 0.16);
+    padding: 0px 4px;
+}
+
+QTableView#modelTable::item:selected {
+    background: #eef6ff;
+    color: #1d1f20;
+}
+
+QHeaderView::section {
+    background: #e9e9ea;
+    color: rgba(29, 31, 32, 0.55);
+    border: none;
+    border-bottom: 1px solid rgba(29, 31, 32, 0.16);
+    font-family: "Barlow Condensed", "Segoe UI", sans-serif;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 1.2px;
+    padding: 7px 8px;
+    text-transform: uppercase;
+}
+
+/* Each tab lives in a scroll area so the window can be shrunk to its
+   stated minimum without the keyboard diagram collapsing. It must not
+   introduce a second ground colour or a frame of its own. */
+QScrollArea#panelScroll, QScrollArea#panelScroll > QWidget > QWidget {
+    background: #f2f2f3;
+    border: none;
+}

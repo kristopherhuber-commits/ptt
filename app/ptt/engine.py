@@ -52,12 +52,17 @@ MIN_RECORD_SEC = 0.3
 
 class Engine:
     def __init__(self, settings, cuda_supported, on_state,
-                 on_text=None, chord_held=None):
+                 on_text=None, on_benchmark=None, chord_held=None):
         """
         `settings` is held by reference and re-read as the loop runs; see `run`.
 
         `chord_held` is a seam so the loop can be driven without a keyboard in
         step 2's tests. It defaults to the real detector.
+
+        `on_benchmark(model, device, seconds)` reports a latency measurement.
+        Like `on_state` it is called from the engine thread, and like
+        `on_fallback` it is a callback rather than a write so this module never
+        reaches config.json itself.
         """
         self._settings = settings
         self.cuda_supported = cuda_supported
@@ -73,11 +78,13 @@ class Engine:
 
         self._on_state = on_state
         self._on_text = on_text or (lambda _text: None)
+        self._on_benchmark = on_benchmark or (lambda _m, _d, _s: None)
         self._chord_held = chord_held or hotkey_mod.chord_held
 
         self._model = None
         self._running = True
         self._reload_model = threading.Event()
+        self._benchmark_model = threading.Event()
 
     # -- public API ---------------------------------------------------------
 
@@ -96,6 +103,23 @@ class Engine:
         """
         self._reload_model.set()
 
+    def request_benchmark(self):
+        """
+        Ask the loop to time one transcription of the bundled sample clip.
+
+        Thread-safe, and serviced the same way a reload is. It measures the
+        model **already resident**, which is why there is no model argument:
+        the Model panel's selection is the loaded model, so measuring never
+        needs a second `WhisperModel` alongside the working one. Two models on
+        one card -- 3.1 GB plus 1.6 GB of float16 weights before activations --
+        is a plausible CUDA OOM, and an allocation failure while *measuring*
+        must not be able to take down the model that dictation depends on.
+
+        It also makes the number mean something: a latency measured while
+        another model holds VRAM is not comparable to one measured beside it.
+        """
+        self._benchmark_model.set()
+
     # -- internals ----------------------------------------------------------
 
     def _emit(self, state, status_text):
@@ -113,6 +137,13 @@ class Engine:
         except Exception as e:
             log_debug(f"ERROR in on_text callback: {str(e)}")
 
+    def _emit_benchmark(self, model_name, device, seconds):
+        """Report a latency measurement. Wrapped for the same reason `_emit` is."""
+        try:
+            self._on_benchmark(model_name, device, seconds)
+        except Exception as e:
+            log_debug(f"ERROR in on_benchmark callback: {str(e)}")
+
     def _persist_cpu_fallback(self):
         """Remember that CUDA failed, so the next start does not retry it (FR-6)."""
         self._settings.use_gpu = False
@@ -124,11 +155,51 @@ class Engine:
         # Deallocate the old model before loading its replacement
         self._model = None
 
+        # LOAD-BEARING for the same reason the chord is: the model name is read
+        # from the settings object here, not cached, so the Model panel's
+        # selection takes effect on the next reload with no restart.
         self._model, self.current_device, status_text = transcribe.load_model_with_fallback(
-            self._settings.use_gpu, self.cuda_supported,
+            self._settings.model, self._settings.use_gpu, self.cuda_supported,
             on_fallback=self._persist_cpu_fallback,
         )
         self._emit("idle", status_text)
+
+    def _benchmark(self):
+        """
+        Time one transcription of the bundled clip with the resident model.
+
+        Runs on the poll thread and blocks it, so dictation pauses for the
+        duration. That is deliberate rather than an oversight: the alternative
+        is inference on one `WhisperModel` from two threads at once, and
+        faster-whisper does not promise that is safe. The user asked for this by
+        pressing a button and the banner says what is happening throughout.
+
+        The state stays `transcribing` -- it *is* transcribing -- so the
+        state->UI contract in gui_handoff section 7 needs no new row. Only the
+        status text is new, and it comes from here, which is the rule: the
+        headline is whatever the engine reported.
+        """
+        model_name = self._settings.model
+        if self._model is None:
+            log_debug("Benchmark requested with no model loaded; ignoring.")
+            self._emit("idle", self._ready_text())
+            return
+
+        self._emit("transcribing", f"Measuring {model_name}...")
+        try:
+            audio = transcribe.load_benchmark_clip()
+            t0 = time.time()
+            text = transcribe.transcribe_audio(self._model, audio)
+            seconds = time.time() - t0
+            log_debug(
+                f"Benchmark: {model_name} on {self.current_device.upper()} took "
+                f"{seconds:.2f}s for the sample clip. Result: '{text}'"
+            )
+            self._emit_benchmark(model_name, self.current_device, seconds)
+        except Exception as e:
+            log_debug(f"ERROR while measuring {model_name}: {str(e)}")
+            log_debug(traceback.format_exc())
+        self._emit("idle", self._ready_text())
 
     def _ready_text(self):
         return f"Ready ({self.current_device.upper()})"
@@ -155,6 +226,12 @@ class Engine:
                 if self._reload_model.is_set():
                     self._reload_model.clear()
                     self._reload()
+
+                # After the reload check, so selecting a model and measuring it
+                # in one go measures the model that was just loaded.
+                if self._benchmark_model.is_set():
+                    self._benchmark_model.clear()
+                    self._benchmark()
 
                 # Release the audio device while the user is away (NFR-4)
                 idle = audio_mod.get_idle_duration()

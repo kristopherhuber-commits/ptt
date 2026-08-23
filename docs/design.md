@@ -55,7 +55,8 @@ active_hotkey:
 | `build_portable.py` | Provisions `.venv` from `requirements.txt`, installs the signed PSF interpreter, bundles `ptt_dictate_dist.zip`. |
 | `run_tray.bat` | Self-elevating launcher; runs `.venv\Scripts\ptt_dictate.exe app\ptt_tray.py`. |
 | `install.bat` / `install.ps1` | Self-elevating installer; copies `.venv` + `app` to `%LOCALAPPDATA%\Programs\ptt_dictate`, creates Desktop and Startup shortcuts marked run-as-administrator (`FR-C5`). |
-| `docs/` | This document, `requirements.md`, `development_history.md`. |
+| `app/assets/` | `style.qss`, the bundled Barlow faces, and `benchmark_sample.wav`. Shipped by `build_portable.py`'s `os.walk` over `app/`. |
+| `docs/` | This document, `requirements.md`, `development_history.md`, `gui_handoff/`. |
 
 `build_portable.py`, `run_tray.bat` and `install.ps1` are unchanged by the split, which
 is the whole reason section 4 chose `app/ptt/` over `src/ptt/`.
@@ -117,7 +118,13 @@ portable environment, not a wheel, so the packaging benefit of `src/` does not a
 | `app/ptt/logging_setup.py` | `debug_log.txt` writer (`OBS-4`). |
 | `app/ptt/ui/qt_app.py` | `QApplication` owner and `EngineBridge`, the engine-thread-to-GUI-thread boundary. |
 | `app/ptt/ui/qt_tray.py` | `QSystemTrayIcon`, menu, state-to-icon mapping. |
-| `app/ptt/ui/panels/hotkey.py` | Qt keyboard-diagram picker. **Not built yet — step 3.** |
+| `app/ptt/ui/qt_popover.py` | Frameless, non-activating hover panel (layer 2). |
+| `app/ptt/ui/qt_window.py` | `QMainWindow`, tab bar, status bar (layer 3). |
+| `app/ptt/ui/qt_statusview.py` | The read-only state display, embedded in both the popover and the window's banner. |
+| `app/ptt/ui/qt_theme.py` | Font registration and `style.qss`, applied to the `QApplication`. |
+| `app/ptt/ui/panels/__init__.py` | `InstantApplyPanel`: the one write-field-then-save-then-tell-the-engine sequence every control uses. |
+| `app/ptt/ui/panels/hotkey.py` | Qt keyboard-diagram picker; live `GetAsyncKeyState` shading. |
+| `app/ptt/ui/panels/model.py` | Whisper size tiers, GPU/CPU choice, measured latency. |
 | `app/ptt_tray.py` | Entry point: builds the tray UI, starts the engine. Unchanged invocation path. |
 | `ptt_dictate.py` | Entry point: prints state to the console, starts the engine. |
 
@@ -219,10 +226,18 @@ Windows). Those users change the chord — which is why `FR-4` exists.
 
 ### Chord representation
 
-A chord is an ordered tuple of key names resolved through `VK_MAP`. Left/right variants
+A chord is an ordered tuple of key names resolved through `hotkey.KEYS`, the one
+declarative table every other name in the module is derived from — `VK_MAP`,
+`KEY_LABELS`, `BINDABLE_KEYS` and the picker's `BINDABLE_BY_VK`. Left/right variants
 are distinct names (`lctrl`, `rctrl`, `lshift`, …); unsided names (`ctrl`) match either
 side. `chord_held()` is true when every key in the tuple is reported down by
 `GetAsyncKeyState` (`FR-C2`).
+
+Each entry carries **every** virtual key that satisfies its name, not one, and that
+plural is load-bearing for exactly one key. `ctrl`, `shift` and `alt` have real unsided
+virtual keys the OS reports for either side; **Windows has no unsided Win key** — `0x5B`
+is `VK_LWIN`. `"win"` therefore used to claim it matched either side while detecting only
+the left one. It now carries `(0x5B, 0x5C)` and the claim is true.
 
 ### The picker
 
@@ -235,11 +250,18 @@ The settings window's **Hotkey** panel draws a full keyboard diagram (`CON-3`).
   reason as `chord_held()`: side-aware virtual keys, and immunity to the hook loss
   described in `FR-C2`. It also means the dialog captures the chord identically to the
   way the engine will later detect it — the picker and the detector share one code path.
-- The user holds the desired combination; the dialog records the **maximal set held
-  simultaneously**, and settles when everything is released.
-- The resulting chord is displayed with any safety warnings, then **Save** or **Cancel**.
-- Saving writes `config.json` and **hot-swaps the chord live**. The engine's poll loop
-  re-reads the setting each iteration, so no restart is required.
+- Binding is **click-to-bind, not hold-to-record**: clicking a bindable cap toggles it in
+  the chord, up to three keys, and a fourth click replaces the chord outright. Recording a
+  held combination was the original plan and was dropped — it cannot express "either side"
+  and it fights the live shading, which is already showing what is held.
+- The chord is displayed with the classifier's warnings for the chord **as it will be
+  written**, which matters because "match either side" is the one control that can turn a
+  safe binding into a hazardous one.
+- **There is no Save or Cancel.** Each click writes `config.json` and hot-swaps the chord
+  live: the engine's poll loop re-reads the setting each iteration, so no restart is
+  required. A chord may never be empty — clicking the last bound key leaves it bound.
+- A chord already in `config.json` is displayed exactly as stored and is never reordered
+  or re-spelled on the user's behalf. Only a chord the user builds is canonicalised.
 
 ### What makes the live re-read safe
 
@@ -256,13 +278,17 @@ hand-off into a race that shows up once a month.
 
 ### Safety classifier
 
-`hotkey.py` classifies a candidate chord and returns warnings. This is `FR-C3` made
-visible at the moment of choosing, rather than discovered months later:
+`hotkey.classify()` returns a list of warnings for a candidate chord, and `SAFE_NOTE` is
+what the panel shows when that list is empty. Pure — no Win32, no Qt — so every row below
+is testable without a keyboard, and so the panel renders what it returns rather than
+restating the rules beside the widgets. This is `FR-C3` made visible at the moment of
+choosing, rather than discovered months later:
 
 | Condition | Warning |
 |---|---|
 | Contains a printable or scrolling key (`space`, letters, digits) | Types a character or scrolls the focused window while held (issue #9). |
 | Contains any `Alt` | Activates the target window's menu on release. Neutralised automatically, but a non-Alt chord is safer (issue #11). |
+| Contains any `Win` | Opens the Start menu when released on its own, taking focus off the target. `inject.suppress_alt_menu` neutralises the Alt case and has no Win equivalent, so this one is not disarmed. |
 | Is exactly `alt`+`shift`, or `ctrl`+`shift` | Windows' input-language / keyboard-layout switch when a second layout is installed. |
 | Is a single common modifier (`shift`, `ctrl` unsided) | Will fire constantly during ordinary typing. |
 | Empty | Rejected, not warned. |
@@ -280,9 +306,22 @@ that they choose with the information.
 {
   "version": 1,
   "use_gpu": true,
-  "hotkey": ["rctrl"]
+  "hotkey": ["rctrl"],
+  "model": "large-v3-turbo",
+  "benchmarks": {
+    "large-v3-turbo|cuda": { "seconds": 1.18, "at": "2026-08-23T14:22:07", "clip": "1b00eade0c24" }
+  }
 }
 ```
+
+- `model` is validated against `transcribe.MODEL_NAMES`. An unrecognised name falls back
+  to `transcribe.DEFAULT_MODEL` with a logged reason, rather than being handed to
+  faster-whisper, which would try to fetch it from Hugging Face by that name.
+- `benchmarks` caches measured latency, keyed by model **and** device — a CPU figure and a
+  CUDA figure are different numbers about different hardware. Each entry stores a digest of
+  the sample clip it was measured against, so re-recording `benchmark_sample.wav`
+  invalidates the old numbers instead of leaving them on screen looking comparable.
+  Entries that fail validation are dropped individually, with a reason, not silently.
 
 - Unknown keys are preserved on write, so a newer build's settings survive a rollback.
 - An invalid or unrecognised `hotkey` falls back to the default and logs why (`OBS-3`).
@@ -296,6 +335,12 @@ that they choose with the information.
 - **Every field is validated by type, not by truthiness, and every fallback logs why.**
   `{"use_gpu": "false"}` is a truthy string; read naively it silently forces GPU on a
   machine that may not have one.
+- **`save()` writes a temp file and `os.replace()`s it into place, under a lock.** `"w"`
+  truncates first, so a process that died mid-dump left a zero-byte file — which `load()`
+  handles correctly by falling back, meaning the user's symptom is their settings silently
+  resetting. It also has two writers now: the GUI thread on every control, and the engine
+  thread on a CUDA fallback. That lock guards the **file**; it is not the field lock the
+  `Settings` docstring forbids, and the engine's live re-read stays lock-free.
 
 ---
 

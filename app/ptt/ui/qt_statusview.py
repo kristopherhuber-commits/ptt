@@ -78,6 +78,12 @@ class UiState:
             return f"loading {self.model}"
         if self.state == "recording":
             return "hotkey held"
+        if (self.status_text or "").startswith("Measuring"):
+            # Derived from the headline, the same way the two cases above and
+            # below this one are: the Model panel's benchmark reuses the
+            # transcribing state, and "then pastes at the cursor" would be a
+            # plain lie about a measurement that pastes nothing.
+            return "timing the bundled 30-second clip"
         if self.state == "transcribing":
             return "then pastes at the cursor"
         if "Fallback" in (self.status_text or ""):

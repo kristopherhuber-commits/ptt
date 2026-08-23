@@ -42,7 +42,6 @@ from PySide6.QtCore import QObject, Qt, QTimer, Signal
 from PySide6.QtWidgets import QApplication, QSystemTrayIcon
 
 from ptt import hotkey as hotkey_mod
-from ptt import transcribe
 from ptt.logging_setup import log_debug
 from ptt.ui import qt_theme
 from ptt.ui.qt_popover import Popover
@@ -71,6 +70,7 @@ class EngineBridge(QObject):
 
     state_changed = Signal(str, str)     # state, status_text
     text_ready = Signal(str)             # wired to the engine in session 2
+    benchmark_done = Signal(str, float)  # device, seconds -- see Engine.request_benchmark
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -84,6 +84,16 @@ class EngineBridge(QObject):
 
     def on_text(self, text):
         self.text_ready.emit(text)
+
+    def on_benchmark(self, model_name, device, seconds):
+        """
+        A latency measurement, from the engine thread. Emits and nothing else,
+        for exactly the reason `on_state` does -- the slot on the far side
+        writes config.json and repaints a table, and both belong on the GUI
+        thread. The model name is dropped rather than carried: by the time this
+        fires it is `settings.model`, which the receiving panel already reads.
+        """
+        self.benchmark_done.emit(device, seconds)
 
 
 class QtApp:
@@ -121,13 +131,13 @@ class QtApp:
 
         self.ui = UiState(
             hotkey=hotkey_mod.chord_label(settings.hotkey),
-            model=transcribe.MODEL_SIZE,
+            model=settings.model,
         )
 
         self.bridge = EngineBridge()
         self._tray = QtTray(settings, cuda_supported)
         self._popover = Popover()
-        self._window = SettingsWindow()
+        self._window = SettingsWindow(settings, cuda_supported)
 
         self.bridge.state_changed.connect(
             self._tray.on_state_changed, Qt.ConnectionType.QueuedConnection
@@ -146,11 +156,19 @@ class QtApp:
         # the popover stands down whenever that window is up.
         self._popover.set_suppressor(self._window.isVisible)
 
+        # A panel wrote a setting: refresh the two places that display one but
+        # do not own it, without waiting for the engine's next state change.
+        self._window.settings_changed.connect(self._on_settings_changed)
+        self.bridge.benchmark_done.connect(
+            self._on_benchmark_done, Qt.ConnectionType.QueuedConnection
+        )
+
         self._push_ui()
 
     def attach(self, engine):
         self._engine = engine
         self._tray.attach(engine)
+        self._window.attach(engine)
 
     # -- state --------------------------------------------------------------
 
@@ -158,12 +176,27 @@ class QtApp:
         self.ui.state = state
         self.ui.status_text = status_text or state.capitalize()
         self.ui.hotkey = hotkey_mod.chord_label(self._settings.hotkey)
-        self.ui.model = transcribe.MODEL_SIZE
+        self.ui.model = self._settings.model
         if self._engine is not None:
             # A plain attribute the engine rebinds; reading it here is the same
             # safe hand-off config.py's Settings docstring describes.
             self.ui.device = self._engine.current_device
         self._push_ui()
+        # The engine may have overridden a setting the panels display -- a CUDA
+        # load failure persists use_gpu=False from the engine thread -- so the
+        # panels re-read rather than continuing to show what the user chose.
+        self._window.refresh_panels()
+
+    def _on_settings_changed(self):
+        """A panel saved. Repaint what displays a setting without owning it."""
+        self.ui.hotkey = hotkey_mod.chord_label(self._settings.hotkey)
+        self.ui.model = self._settings.model
+        self._push_ui()
+        self._tray.refresh_menu()
+
+    def _on_benchmark_done(self, device, seconds):
+        """Hand a measurement to the Model panel, on the GUI thread."""
+        self._window.record_benchmark(self._settings.model, device, seconds)
 
     def _push_ui(self):
         """One UiState, pushed to both displays, so they cannot drift apart."""

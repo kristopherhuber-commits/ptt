@@ -16,12 +16,30 @@ Three Windows-specific problems this has to survive:
    hover is detected by polling the cursor against the icon's rectangle. There
    is nothing to install an event filter on.
 
+   It is also never *activated*, which is what makes point 4 necessary.
+
 3. **`geometry()` returns an empty QRect when the icon is not visible**, which
    includes the case the README documents: the icon sitting in the Windows 11
    overflow flyout behind the `^` chevron. Hover detection is therefore
    best-effort. Clicking the tray icon always works, because that arrives
    through `activated` regardless of geometry, and placement falls back to the
    cursor so the panel never lands in a corner of the screen by accident.
+
+4. **`raise_()` alone leaves it occluded.** Windows keeps two Z-order bands, and
+   nothing in the ordinary band can be placed above the topmost one. Measured
+   against an always-on-top window owned by another process: without
+   `WindowStaysOnTopHint` the panel is below it, with the hint it is above it,
+   and the foreground window is unchanged either way.
+
+   `raise_()` also only wins at the instant it is called, and nothing re-raises
+   while the panel sits there through a hover. The hint removes the whole class
+   rather than the one moment: a topmost window is above every ordinary window
+   at all times, not merely when it was last raised.
+
+   It costs nothing in focus. Topmost is a Z-order property, not an activation
+   one -- the notification-area flyouts Windows draws itself sit in the same
+   band, over the window the user is typing into, without taking their
+   keystrokes.
 """
 
 from PySide6.QtCore import QPoint, QRect, Qt, QTimer, Signal
@@ -53,7 +71,16 @@ class Popover(QWidget):
     clicked = Signal()
 
     def __init__(self, parent=None):
-        super().__init__(parent, Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint)
+        super().__init__(
+            parent,
+            Qt.WindowType.Tool
+            | Qt.WindowType.FramelessWindowHint
+            # WS_EX_TOPMOST. `raise_()` in show_at_tray is not a substitute
+            # and never was: it cannot cross into the topmost band, so an
+            # always-on-top window from any other process covers this panel.
+            # See point 4 of the module docstring for what was measured.
+            | Qt.WindowType.WindowStaysOnTopHint
+        )
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
         self.setWindowTitle("PTT Dictation")
 
@@ -115,6 +142,9 @@ class Popover(QWidget):
         self._leave_timer.stop()
         self._place()
         self.show()
+        # Orders the panel among the *other* topmost windows, which is all
+        # raise_() can do here. Clearing the ordinary ones is the window flag's
+        # job; see the constructor.
         self.raise_()
 
     # -- hover --------------------------------------------------------------
