@@ -47,7 +47,7 @@ The application is distributed as a portable Python environment, so no pre-exist
 * Terminate any running PTT Dictation processes to prevent file locks.
 * Copy the application files to `C:\Users\<Username>\AppData\Local\Programs\ptt_dictate\`.
 * Create a **PTT Dictation** shortcut on the Desktop, pre-configured to **Run as Administrator** (required to type into elevated Windows apps) and styled with the built-in Windows **microphone icon**.
-* Create a **PTT Dictation** shortcut in the Windows Startup folder to launch automatically when you log in.
+* Create a **PTT Dictation** shortcut in the Windows Startup folder. **This does not currently start the application at log-in** — see [Known limitation](#known-limitation-it-does-not-start-itself-after-a-reboot) below.
 * Relaunch the application immediately.
 
 ### Option 2 — Build it yourself from source
@@ -96,9 +96,22 @@ Administrator is required in both cases: Windows UIPI blocks input injected from
 
 ### 3.1 Launching
 
-* **Normal Usage**: Double-click the **PTT Dictation** shortcut on your Desktop, or let it start automatically on login.
+* **Normal Usage**: Double-click the **PTT Dictation** shortcut on your Desktop. You need to do this once after each reboot.
 * **UAC Prompt**: Click **Yes** on the Windows User Account Control (UAC) elevation prompt.
 * A **Teal Microphone** icon will appear in the Windows System Tray (notification area, bottom right). If it is hidden, click the **`^`** chevron next to the clock and drag the microphone icon to the main taskbar.
+
+#### Known limitation: it does not start itself after a reboot
+
+The installer puts a shortcut in the Windows Startup folder, but the application
+does **not** come up on its own when you log in. You have to launch it once per
+boot from the Desktop shortcut.
+
+The cause is the elevation the app needs in order to type into other windows
+(`FR-C5`): the Startup shortcut is marked **Run as administrator**, and Windows
+does not silently auto-launch Startup-folder shortcuts that request elevation.
+Fixing it properly means registering a Task Scheduler task with "Run with highest
+privileges" instead of using the Startup folder, which is a change to
+`install.ps1`. That has not been done yet.
 
 ### 3.2 Usage
 
