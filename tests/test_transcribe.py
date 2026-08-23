@@ -1,0 +1,189 @@
+"""
+Text cleanup, the model catalogue, and the benchmark clip.
+
+Nothing here loads a model. `transcribe.py` keeps `faster_whisper` and
+`ctranslate2` out of module scope so the CUDA DLL directories are always
+registered first (issue #1), and the side effect is that the module imports --
+and so these tests run -- without either package present.
+"""
+
+import wave
+
+import numpy as np
+import pytest
+
+from ptt import paths, transcribe
+
+
+# -- clean_text: retrospective issue #4 -------------------------------------
+
+def test_clean_text_strips_runs_of_full_stops():
+    """
+    large-v3 hallucinates runs of full stops on trailing silence; saying
+    "testing one two three" could type "Testing .......".
+    """
+    assert transcribe.clean_text("Testing .......") == "Testing"
+
+
+def test_clean_text_keeps_a_single_full_stop():
+    assert transcribe.clean_text("That is all.") == "That is all."
+
+
+def test_clean_text_strips_a_run_from_the_middle():
+    assert transcribe.clean_text("one ... two") == "one  two"
+
+
+def test_clean_text_trims_surrounding_whitespace():
+    assert transcribe.clean_text("   hello   ") == "hello"
+
+
+@pytest.mark.parametrize("value", ["", "   ", "...", ".."])
+def test_clean_text_handles_input_with_nothing_in_it(value):
+    assert transcribe.clean_text(value) == ""
+
+
+# -- the model catalogue -----------------------------------------------------
+
+def test_the_default_model_is_in_the_catalogue():
+    assert transcribe.DEFAULT_MODEL in transcribe.MODEL_NAMES
+
+
+def test_model_names_derive_from_the_catalogue():
+    assert transcribe.MODEL_NAMES == tuple(m.name for m in transcribe.MODELS)
+
+
+def test_model_names_are_unique():
+    assert len(set(transcribe.MODEL_NAMES)) == len(transcribe.MODEL_NAMES)
+
+
+def test_every_catalogue_row_is_fully_populated():
+    """A blank cell would render as an empty column in the Model panel."""
+    for info in transcribe.MODELS:
+        assert info.name and info.params and info.disk and info.character
+
+
+def test_disk_figures_are_marked_as_estimates():
+    """
+    The panel replaces these with the real byte count for anything on disk, so
+    the two must never be confusable.
+    """
+    for info in transcribe.MODELS:
+        assert info.disk.startswith("~"), info.name
+
+
+# -- resolve_model_path ------------------------------------------------------
+
+def test_resolve_model_path_returns_the_bare_name_when_nothing_is_bundled(
+        monkeypatch, tmp_path):
+    monkeypatch.setattr(paths, "local_model_dir",
+                        lambda name: str(tmp_path / "absent" / name))
+    assert transcribe.resolve_model_path("small.en") == "small.en"
+
+
+def test_resolve_model_path_prefers_a_bundled_directory(monkeypatch, tmp_path):
+    bundled = tmp_path / "models" / "small.en"
+    bundled.mkdir(parents=True)
+    monkeypatch.setattr(paths, "local_model_dir", lambda name: str(tmp_path / "models" / name))
+    assert transcribe.resolve_model_path("small.en") == str(bundled)
+
+
+# -- the benchmark clip ------------------------------------------------------
+
+def write_wav(path, channels=1, width=2, rate=16_000, frames=1600):
+    with wave.open(str(path), "wb") as f:
+        f.setnchannels(channels)
+        f.setsampwidth(width)
+        f.setframerate(rate)
+        f.writeframes(b"\x00" * (frames * channels * width))
+    return path
+
+
+def test_the_bundled_clip_is_the_format_the_benchmark_expects():
+    """It ships in the repo, so this asserts against the real file."""
+    with wave.open(paths.asset_path("benchmark_sample.wav"), "rb") as f:
+        assert (f.getnchannels(), f.getsampwidth(), f.getframerate()) == (1, 2, 16_000)
+
+
+def test_load_benchmark_clip_returns_float32_in_range():
+    """
+    `Recorder.stop()` hands the engine float32 in [-1, 1) and a WAV is 16-bit,
+    so something has to divide by 32768 -- this is it, and it is what makes the
+    measured path identical to the dictation path from `transcribe_audio` in.
+    """
+    audio = transcribe.load_benchmark_clip()
+    assert audio.dtype == np.float32
+    assert audio.size > 0
+    assert -1.0 <= float(audio.min()) and float(audio.max()) < 1.0
+
+
+@pytest.mark.parametrize("kwargs", [
+    {"rate": 8_000},        # wrong sample rate
+    {"channels": 2},        # stereo
+    {"width": 1},           # 8-bit
+])
+def test_load_benchmark_clip_refuses_the_wrong_format(monkeypatch, tmp_path, kwargs):
+    """A benchmark that silently measured the wrong audio is worse than none."""
+    wrong = write_wav(tmp_path / "wrong.wav", **kwargs)
+    monkeypatch.setattr(paths, "asset_path", lambda *parts: str(wrong))
+    with pytest.raises(ValueError):
+        transcribe.load_benchmark_clip()
+
+
+def test_benchmark_clip_id_is_stable():
+    transcribe._clip_id = None
+    first = transcribe.benchmark_clip_id()
+    assert first
+    assert transcribe.benchmark_clip_id() == first
+
+
+def test_benchmark_clip_id_changes_with_the_clip(monkeypatch, tmp_path):
+    """
+    `record_sample.py` says re-recording the clip invalidates every cached
+    measurement. This is what makes that enforceable instead of a comment.
+    """
+    transcribe._clip_id = None
+    one = write_wav(tmp_path / "one.wav", frames=1600)
+    monkeypatch.setattr(paths, "asset_path", lambda *parts: str(one))
+    first = transcribe.benchmark_clip_id()
+
+    transcribe._clip_id = None
+    two = write_wav(tmp_path / "two.wav", frames=3200)
+    monkeypatch.setattr(paths, "asset_path", lambda *parts: str(two))
+    assert transcribe.benchmark_clip_id() != first
+
+
+def test_benchmark_clip_id_is_empty_when_the_clip_is_missing(monkeypatch, tmp_path):
+    transcribe._clip_id = None
+    monkeypatch.setattr(paths, "asset_path", lambda *parts: str(tmp_path / "gone.wav"))
+    assert transcribe.benchmark_clip_id() == ""
+
+
+@pytest.fixture(autouse=True)
+def reset_clip_id():
+    """The digest is cached in a module global; leave it as we found it."""
+    yield
+    transcribe._clip_id = None
+
+
+# -- installed_sizes ---------------------------------------------------------
+
+def test_installed_sizes_reports_a_bundled_model_directory(monkeypatch, tmp_path):
+    name = transcribe.MODEL_NAMES[0]
+    bundled = tmp_path / name
+    bundled.mkdir()
+    (bundled / "model.bin").write_bytes(b"x" * 2048)
+    monkeypatch.setattr(paths, "local_model_dir", lambda n: str(tmp_path / n))
+
+    assert transcribe.installed_sizes()[name] == 2048
+
+
+def test_installed_sizes_reports_nothing_when_no_model_is_present(monkeypatch, tmp_path):
+    """
+    The Hugging Face cache is consulted too, so this only asserts the bundled
+    half: whatever the machine running the tests happens to have downloaded is
+    not something a test may depend on.
+    """
+    monkeypatch.setattr(paths, "local_model_dir", lambda n: str(tmp_path / "empty" / n))
+    sizes = transcribe.installed_sizes()
+    assert all(v > 0 for v in sizes.values())
+    assert set(sizes).issubset(set(transcribe.MODEL_NAMES))

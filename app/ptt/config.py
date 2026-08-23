@@ -103,9 +103,18 @@ class Settings:
         tmp = self.path + ".tmp"
         try:
             with _save_lock:
-                with open(tmp, "w", encoding="utf-8") as f:
-                    json.dump(self.to_dict(), f, indent=2)
-                os.replace(tmp, self.path)
+                try:
+                    with open(tmp, "w", encoding="utf-8") as f:
+                        json.dump(self.to_dict(), f, indent=2)
+                    os.replace(tmp, self.path)
+                except Exception:
+                    # A half-written temp file is no use to anyone and would sit
+                    # next to config.json looking like a real one.
+                    try:
+                        os.remove(tmp)
+                    except OSError:
+                        pass
+                    raise
             log_debug(
                 f"Saved config.json: use_gpu={self.use_gpu}, hotkey={self.hotkey}, "
                 f"model={self.model}"

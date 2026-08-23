@@ -1,0 +1,24 @@
+# Development-only dependencies. NEVER add these to requirements.txt.
+#
+# build_portable.py zips .venv wholesale, so anything installed there ships to
+# every target PC (CON-2, CON-3). This file is not installed into .venv and is
+# not in build_portable.py's items_to_zip allowlist, so neither it nor tests/
+# reaches a distribution.
+#
+# Run the suite without installing anything:
+#
+#     uvx --with-requirements requirements-dev.txt pytest
+#
+# The four runtime packages are pinned to the same versions requirements.txt
+# pins, so the test environment matches the shipped one. They are the complete
+# set the modules under test import: faster-whisper, ctranslate2, pillow and the
+# nvidia-* wheels are absent on purpose, because transcribe.py defers those
+# imports into functions (see its module docstring) and no test loads a model.
+
+pytest
+
+keyboard==0.13.5
+numpy==2.4.6
+pyperclip==1.11.0
+PySide6-Essentials==6.11.2
+sounddevice==0.5.5

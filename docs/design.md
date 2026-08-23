@@ -346,22 +346,47 @@ that they choose with the information.
 
 ## 8. Test strategy
 
-**Unit tests** (`tests/`), pure and fast, no Windows API and no audio device:
+**Unit tests** (`tests/`), pure and fast, no Windows API, no audio device, no model
+and no `QApplication`. 176 tests, about two seconds:
 
-- `test_hotkey.py` — chord parsing and validation, rejection of unknown key names,
-  left/right resolution, human-readable labels, and every row of the safety-classifier
-  table above.
-- `test_config.py` — round-trip, defaults when the file is absent, fallback when the
-  chord is invalid, preservation of unknown keys, v0→v1 migration.
+- `test_hotkey.py` — chord parsing and validation, the `KEYS` table's invariants,
+  left/right resolution including the unsided-`win` regression (issue #12), canonical
+  ordering, labels, and every row of the safety-classifier table above.
+- `test_config.py` — round-trip, defaults when the file is absent, every field's
+  type-fallback *and the OBS-3 log line that explains it*, preservation of unknown keys,
+  and the atomic save.
+- `test_engine.py` — the live chord re-read with no restart, model reloads, benchmarks,
+  the minimum-hold rule, and that a raising frontend callback cannot kill the poll loop.
+- `test_transcribe.py` — `clean_text` (issue #4), the model catalogue, and the benchmark
+  clip's format guard.
+- `test_statusview.py` — the error discrimination the engine's lack of an error state
+  forces, and every branch of the derived detail line.
+- `test_panels.py` — the keyboard board's data: 104 caps, no accidental duplicate virtual
+  key, every bindable key drawn exactly once.
 
-Wired through `pyproject.toml` with `pythonpath = ["app"]` so `import ptt` resolves
-without installing anything.
+Where a module needs hardware it is reached through a seam that already existed for this
+purpose: `hotkey._key_state`, `Engine(chord_held=…)`, `paths.asset_path`. None was added
+for the tests.
 
-**Where pytest itself lives is an open decision.** It is not in `.venv`, and
-`build_portable.py` zips `.venv` wholesale — so `pip install pytest` there would ship the
-test framework to every target PC. Either run it as `uvx pytest`, or create a separate
-`.venv-dev` from a `requirements-dev.txt`, which never ships because `items_to_zip` is an
-explicit allowlist. `CON-3` forbids adding it to `requirements.txt`.
+An **autouse fixture redirects `paths.debug_log_path`** into the test's own directory.
+That is not only hygiene — `log_debug` appends unconditionally and swallows every error,
+so an unguarded run would quietly append to the log `logging_setup.init`'s docstring says
+is diffed against a captured baseline. Returning those lines to the test is what makes
+`OBS-3` checkable at all: `load()` returning a default and `load()` returning a default
+*for a logged reason* are indistinguishable from the return value.
+
+**Where pytest lives: settled.** It stays out of `.venv`, which `build_portable.py` zips
+wholesale, and out of `requirements.txt`, which `CON-3` forbids. `requirements-dev.txt`
+lists pytest plus the five runtime packages the pure modules actually import — pinned to
+the same versions `requirements.txt` pins, so the test environment matches the shipped
+one. Run it without installing anything:
+
+```powershell
+uvx --with-requirements requirements-dev.txt pytest
+```
+
+Neither the file nor `tests/` reaches a distribution: `items_to_zip` is an explicit
+allowlist.
 
 **Manual Win32 probes** (`tests/tools/probe_paste.py`). Menu activation, caret loss, and
 paste delivery cannot be unit-tested — they are behaviours of another process's window.
@@ -376,9 +401,19 @@ the front meant a sequence of pastes and select-alls went into an unrelated appl
 An input-injecting test harness that trusts ambient focus is a hazard, not a test.
 
 **Regression coverage of the retrospective log.** Each solved issue should map to either
-a unit test or a documented probe step. Issues #4, #9, #11 and the `FR-C*` family are the
-candidates; #1–#3 and #10 are packaging defects that the build either produces or does
+a unit test or a documented probe step. Issue #4 is covered by
+`test_transcribe.py::test_clean_text_strips_runs_of_full_stops` and issue #12 by
+`test_hotkey.py::test_win_matches_either_side`. Issues #9 and #11 are covered indirectly —
+the classifier warns about exactly the chords that caused them — and directly only by the
+probe harness. #1–#3 and #10 are packaging defects that the build either produces or does
 not.
+
+**The suite is checked against mutation, not just against itself.** Reverting the `win`
+fix, broadening the layout-switch rule back to gui_handoff's version, and restoring the
+truncating `open()` in `Settings.save` each make the matching tests fail. The third one
+initially did **not**: the first version of that test failed on a missing directory, which
+raises at `open` before any truncation and passes against either implementation. A test
+that cannot fail is worse than no test, because it reads like coverage.
 
 ---
 
@@ -399,5 +434,14 @@ put `NFR-6`/`NFR-7` back in play for no gain.
    `config.json`, logging, CPU fallback and the caret diagnostics it had drifted behind
    on. `debug_log.txt` now rotates rather than truncating, because both frontends write
    it.
-2. Add the unit tests and the pinned-window probe harness.
-3. Build the picker dialog and the safety classifier on top of the settled config layer.
+2. ~~Add the unit tests~~ **Done**, out of order — after step 3 rather than before it,
+   which is why session 3 built a classifier and two validated `Settings` fields on top of
+   an untested config layer. 176 tests in `tests/`, run with
+   `uvx --with-requirements requirements-dev.txt pytest`; see section 8.
+   **The pinned-window probe harness is still outstanding** (`tests/tools/probe_paste.py`).
+   It injects real keystrokes into another process's window, so it cannot run unattended
+   and belongs with the acceptance pass rather than with the unit suite.
+3. ~~Build the picker dialog and the safety classifier on top of the settled config layer.~~
+   **Done.** The picker is the settings window's Hotkey panel — a keyboard diagram with
+   click-to-bind and instant apply, not the modal Save/Cancel dialog section 6 originally
+   described. The classifier is `hotkey.classify()`.

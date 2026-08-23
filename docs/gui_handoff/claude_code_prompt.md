@@ -18,6 +18,14 @@ whole conversation at full price.
 
 Everything outside the fenced blocks below is for you, not for Claude Code.
 
+**The unit suite arrived in session 3**, alongside the two panels — `docs/design.md`
+section 10 step 2 had been outstanding since the package split. Run it before and after
+any session that touches `app/ptt/`:
+
+```powershell
+uvx --with-requirements requirements-dev.txt pytest
+```
+
 ## Why Opus 5 and not Fable 5
 
 Anthropic recommends Opus 5 as the starting choice for complex agentic coding,
@@ -163,6 +171,20 @@ Model downloading is out of scope — stub those buttons so they say so.
 When you are done, tell me how to verify that rebinding to Right Shift takes effect without restarting the app.
 ```
 
+**Outcome.** Both panels shipped. Beyond the prompt: `hotkey.py` gained the `KEYS` table
+and `classify()` (`design.md` section 6's classifier, never written until now); the
+unsided-`win` defect was found and fixed (retrospective issue #12); `Settings.save()`
+became atomic and locked, because instant-apply gave the file two writers;
+`Engine.request_benchmark()` was added so measuring never needs a second model in VRAM;
+and the hover popover gained `WindowStaysOnTopHint` after a hand-test found it could sit
+behind an always-on-top window.
+
+The **unit test suite** (`tests/`, 176 tests) landed here too, with
+`requirements-dev.txt`. It was not in the original plan for this session and should have
+been step 2 of `design.md` section 10 all along — session 3 added a classifier and two
+validated `Settings` fields on top of an untested config layer, which is the wrong order.
+The pinned-window probe harness from that step is still outstanding.
+
 ---
 
 # Session 4 — remaining panels
@@ -181,6 +203,8 @@ Implement the Audio, Vocabulary, Advanced and Diagnostics panels.
 - Diagnostics reads the log through paths, never by constructing the path itself.
 
 A config.json written by this build must still load in the pre-GUI build, and unknown keys must survive a round trip. future_setting in the existing file is the test case.
+
+There is a unit suite in tests/. Run it with `uvx --with-requirements requirements-dev.txt pytest` before you start and again before you finish. Every new validated Settings field needs its cases added to tests/test_config.py — the fallback value and the OBS-3 log line that explains it, which is what the log_lines fixture is for. The vocabulary substitution function is pure, so it gets its own test module.
 ```
 
 ---
@@ -195,6 +219,8 @@ Read docs/gui_handoff/gui_handoff.md section 10, and build_portable.py.
 Work through the ten acceptance criteria one at a time. For each, tell me what you did to verify it and the actual result — not whether it should pass. Where a criterion needs hardware or a human, say so and tell me what to do.
 
 Then confirm that app/assets/fonts/ and app/assets/benchmark_sample.wav are included by build_portable.py, run it, and confirm the resulting zip extracts and runs. Both OFL.txt licence files must travel with the fonts into the distribution — that is the font licence condition.
+
+Run the unit suite as part of the acceptance pass: `uvx --with-requirements requirements-dev.txt pytest`. Report the actual count. Confirm that neither tests/ nor requirements-dev.txt appears in the zip, and that the pinned-window probe harness is still recorded as outstanding in design.md section 10.
 
 Finally, update README.md and docs/design.md to describe the new UI module layout, and note that the pystray tray has been removed. The docs are this project's source of truth and are now out of date.
 ```
