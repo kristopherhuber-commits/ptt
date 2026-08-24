@@ -25,3 +25,9 @@ app/debug_log.prev.txt
 # Test artifacts
 .pytest_cache/
 *.egg-info/
+
+# Build-cost records. Deliberately untracked: this repository is public, and the
+# path is named here without any figures. To share this material, copy it out --
+# a commit that adds it stays in a public repo's history even if a later commit
+# deletes it.
+docs/expenses/
