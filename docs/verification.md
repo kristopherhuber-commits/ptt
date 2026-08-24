@@ -184,8 +184,9 @@ element is often pinned by several tests, and the ID is what other documents cit
 
 ## 4. Automated tests
 
-**325 tests, 249 test functions, ~4 s.** Last run **2026-08-24** on the session-4
-working tree: **325 passed, 0 failed.**
+**325 tests, 249 test functions, ~4 s.** Last run **2026-08-24** at the start of the
+session-5 acceptance pass, on the working tree at commit `840a626`:
+**325 passed, 0 failed, in 4.15 s.**
 
 | Module | Tests | Covers |
 |---|---:|---|
@@ -330,23 +331,76 @@ way the design assumed (`V-M-38`, `V-M-43`).
 
 ---
 
+### 5.3 Session 5 — the acceptance pass · 2026-08-24
+
+Everything in this section was run **instrumented**, in the sense section 5.2 defines: a
+script builds the real widgets under a real `QApplication`, drives them through the same
+handlers a click reaches, and reads back `config.json` — but here the Win32 side is real
+too. Keys are injected with `keybd_event`, the same call `inject.py` makes, and read back
+through `GetAsyncKeyState`, the same call the panel polls; focus and Z-order are read from
+`GetForegroundWindow` and `GWL_EXSTYLE`. **Nothing in this section was run by hand.** What
+still needs a person or different hardware is listed in section 7 and named in the
+criterion rows in section 6.
+
+Build: working tree at commit `840a626`. Hardware: laptop, CUDA present, one physical
+microphone, no numeric keypad.
+
+| ID | Test | Result |
+|---|---|---|
+| `V-M-50` | Render all four state icons and compare them byte-for-byte with `tray.py::create_icon_image` from the last commit that had it (`0f70a76^`) | ✅ pass — all four identical, and distinct from each other. The five `QIcon` frames match the frame sizes PIL's ICO writer actually emits for a 64 px source (16, 24, 32, 48, 64), which is what `ICON_SIZES` claims |
+| `V-M-51` | Drive `on_state_changed` through six state/status pairs and read the tooltip back | ✅ pass — `PTT Dictation (<status>)` in every case, and an empty status falls back to the capitalised state exactly as the pystray tray did |
+| `V-M-52` | Enumerate the built `QMenu` and compare it item by item with the pystray menu | 🟡 **partial** — every pystray item is present, in order, with the same enabled and checkable flags. The Qt menu adds `Settings…`, which `gui_handoff` §4 requires. It does **not** have `Pause`, which §4 also lists; see section 7 |
+| `V-M-53` | Inspect and run `QtTray._on_exit` | ✅ pass — `engine.stop()` is called, the icon is hidden, `QApplication.quit()` follows, and there is no `join` on the engine thread anywhere in the method |
+| `V-M-54` | Put a text box in the foreground, raise the popover over it, then inject `X`, `Y`, `Z` — with a control run first, injecting with no popover up | ✅ pass — control typed `xyz`; with the popover visible the foreground window was unchanged, `isActiveWindow()` on the popover was False, the text box kept Qt focus, and it received `xyz` again |
+| `V-M-55` | Launch a second **process** whose window is `WindowStaysOnTopHint`, overlap the popover with it, and read the Z-order | ✅ pass — `GWL_EXSTYLE` on the popover carries `WS_EX_TOPMOST`, and `EnumWindows` (which walks front to back) returns the popover ahead of the rival window |
+| `V-M-56` | Compare all nine displayed fields of the popover's `StatusView` with the window's banner, then send a `MouseButtonPress` to the popover | ✅ pass — every field identical, footer on the popover only; the click hides the popover and shows the window, and `show_at_tray()` afterwards leaves it hidden |
+| `V-M-57` | Emit `EngineBridge.on_state` from a worker thread and record which thread each end runs on | ✅ pass — the emit side is not the GUI thread, the slot side is, and the two `QThread` pointers differ. The `assert` in `QtTray.on_state_changed` did not fire, the tooltip updated, and both `THREAD-CHECK` lines were written |
+| `V-M-58` | Inject ten real keys — including `Keypad 7`, `Keypad +`, `Home` and both `Enter`s — into the visible, active Hotkey panel and time the shade and the unshade | ✅ pass — every key shaded in 2–33 ms and unshaded in 29–34 ms, against a criterion of ~50 ms and a 30 ms poll. Both `Enter` caps shade together. **Synthetic keys, so this does not settle `V-M-04`/`V-M-05`**: what a physical keypad reports with Num Lock off is a property of the keyboard, not of this code |
+| `V-M-59` | With a key held, switch tab, alt-tab to another window, and hide the window | ✅ pass — `_held` is empty after each, and the chord was unchanged by all the injecting |
+| `V-M-60` | Click `Right Shift`, then click `Right Ctrl` to reduce the chord to Right Shift alone, then hold the real key and call `hotkey.chord_held` | ✅ pass — clicking **adds** a key rather than replacing (`('rctrl',)` → `('rctrl','rshift')` → `('rshift',)`), which is `V-M-10`'s documented behaviour; `config.json` and the readout agree; **no model reload was requested at any point**; clicking the last remaining key is a no-op; and `chord_held` is False/True/False as the real key goes down and up |
+| `V-M-61` | Click **CPU** on the Model panel with a stub engine that reads `config.json` at the instant `request_model_reload` is called | ✅ pass — the file already said `use_gpu: false` when the reload was requested, so the order `InstantApplyPanel.apply_now` promises holds; the status bar showed `Saved · HH:MM:SS`; switching back requested exactly one more reload |
+| `V-M-62` | Build the Model panel with `cuda_supported=False`, and construct a real `Engine` the same way | 🟡 **simulated** — the GPU radio is disabled, CPU is selected, and the reason reads "No CUDA device was found, so this build runs on the CPU. See the Diagnostics tab."; `Engine(cuda_supported=False)` forced `use_gpu` to False and the saved `config.json` says so. This is the software half only; see section 7 |
+| `V-M-63` | Copy the live `app/config.json`, `load()` it, `save()` it, and diff | ✅ pass — 11 keys in, 11 keys out, no value changed, `future_setting` preserved, a second `load()` identical to the first, and **zero fallback warnings logged** |
+| `V-M-64` | Run `python build_portable.py` and enumerate the archive | ✅ pass — 8531 entries, 1461.78 MB. `app/assets/` ships whole: the four registered faces, all 36 TTFs, **both `OFL.txt` files**, `style.qss` and `benchmark_sample.wav` (960 044 bytes). No `tests/`, no `requirements-dev.txt`, no `requirements.txt`, no `pyproject.toml`, no `docs/`, no `app/config.json`, no `debug_log*`, no `pyvenv.cfg`, no `__pycache__`. `app/ptt/ui/tray.py` is gone. **But `.venv` still carries `pystray` and `six`** — see section 7 |
+| `V-M-65` | Extract the archive to a fresh directory and launch `.venv\Scripts\ptt_dictate.exe app\ptt_tray.py` from it | ✅ pass — 8531 files out, no extraction errors. The shipped copy registered all four bundled Barlow faces, loaded `style.qss` (19 287 chars) from its own `app/assets/`, resolved the CUDA DLL directories from its own `.venv`, loaded `large-v3-turbo` on CUDA in 5 s, opened the input stream, showed the tray icon on the first attempt, and wrote both correct `THREAD-CHECK` lines. It created `config.json` from defaults, confirming the runtime-artifact exclusion |
+
+**13 passed, 3 partial, 0 failed.**
+
+Two things the build surfaced that are worth keeping.
+
+**The interpreter copies were skipped.** `build_portable.py` copies six files out of the
+base Python into `.venv\Scripts`, and all six were locked by the running application.
+The script's `PermissionError` branch warned and carried on. That was harmless *this
+time* — `ptt_dictate.exe`, `python.exe` and `python314.dll` in `.venv` hash identical to
+the base install's — but it is only harmless while the existing copies are already
+current. **Close the application before building a release**, or a Python upgrade will
+ship the old interpreter beside the new standard library.
+
+**Long paths.** The longest entry in the archive is 175 characters
+(`.venv/Lib/site-packages/PySide6/qml/…/qrc_qmake_Qt_labs_assetdownloader_init.cpp.obj`),
+so extracting under a directory longer than about 80 characters exceeds `MAX_PATH`. A
+normal `Downloads` folder is well inside that; a deep temporary directory is not.
+
+---
+
 ## 6. Acceptance criteria
 
 The ten criteria are stated in [gui_handoff.md](gui_handoff/gui_handoff.md) §10. Their
-status is tracked here.
+status is tracked here. Session 5 worked through all ten; the evidence is section 5.3
+unless another item is named.
 
 | # | Criterion | Status |
 |---|---|---|
-| 1 | Tray icon behaves exactly as today | 🟡 partial — session 1; not re-verified since |
-| 2 | Popover raises on hover without stealing focus, **and is in front** | ✅ `V-M-20`, `V-M-21` |
-| 3 | Clicking the popover opens the window; banner matches | ✅ session 2 |
-| 4 | Any key shades within ~50 ms and unshades on release; alt-tab clears | ✅ `V-M-03`, `V-M-06`, `V-M-07` — except the keypad (`V-M-04`, `V-M-05`) |
-| 5 | Clicking `Right Shift` then holding it records, with no restart | ✅ `V-M-08`, `V-M-24`, and `V-EN-01` |
-| 6 | GPU→CPU reloads; `config.json` written before the reload; status bar confirms | ✅ `V-M-17` |
-| 7 | On a machine without CUDA the GPU toggle is disabled with a visible reason | ⬜ **not verifiable here** — this machine has CUDA. `V-EN-06` covers the engine half |
-| 8 | `config.json` round-trips with the current build; unknown keys survive | ✅ `V-CF-02`, `V-CF-14`, and verified against the pre-GUI `config.py` in both directions |
-| 9 | No UI object is touched from the engine thread | 🟡 asserted at runtime in `qt_tray.on_state_changed`; no automated test |
-| 10 | `build_portable.py` produces a zip that runs on a clean Windows 11 machine | ⬜ **not run** — session 5 |
+| 1 | Tray icon behaves exactly as today | 🟡 **partial.** Glyphs, colours, sizes, tooltip and the non-joining Exit are verified identical to the pystray build (`V-M-50`, `V-M-51`, `V-M-53`), and `qt_tray.py` has not changed since `V-M-01`/`V-M-02` ran against it by hand. The **menu is a superset**: it adds `Settings…`, which `gui_handoff` §4 requires, and omits `Pause`, which §4 also lists and which has never existed (`V-M-52`) |
+| 2 | Popover raises on hover without stealing focus, **and is in front** | ✅ Both halves measured together, as §10 asks. Focus: the foreground window is unchanged, the popover is never activated, and injected keystrokes all land in the other window (`V-M-54`). Z-order: `WS_EX_TOPMOST` is set and the popover enumerates ahead of a **different process's** always-on-top window (`V-M-55`). Confirmed by hand in session 3 as `V-M-20`, `V-M-21` |
+| 3 | Clicking the popover opens the window; banner matches | ✅ `V-M-56` — all nine displayed fields identical, because both hosts embed one `StatusView` fed from one `UiState`. Also session 2 by hand |
+| 4 | Any key shades within ~50 ms and unshades on release; alt-tab clears | ✅ `V-M-58`, `V-M-59` — real injected keys, 2–33 ms to shade, against a 30 ms poll; tab switch, alt-tab and close each clear everything. Also `V-M-03`, `V-M-06`, `V-M-07` by hand. **The physical keypad with Num Lock off is still not covered** — injection cannot answer it (`V-M-04`, `V-M-05`) |
+| 5 | Clicking `Right Shift` then holding it records, with no restart | ✅ `V-M-60` — the click writes the chord and requests no reload; the real detector fires on the real key. The running loop picking the new chord up without a restart is `V-EN-01`, which drives `Engine.run()` on a thread. Also `V-M-08`, `V-M-24` by hand. **What is not automated is the audio**: speaking and seeing text pasted |
+| 6 | GPU→CPU reloads; `config.json` written before the reload; status bar confirms | ✅ `V-M-61` proves the ordering directly — the stub engine read the file at the moment it was asked to reload and found the new value already there. The banner passing `Loading Model...` → `Ready (CPU)` was seen by hand as `V-M-17` |
+| 7 | On a machine without CUDA the GPU toggle is disabled with a visible reason | ⬜ **not verifiable here** — this machine has CUDA. The software half passes simulated (`V-M-62`); `V-EN-06` covers the engine half |
+| 8 | `config.json` round-trips with the current build; unknown keys survive | ✅ `V-M-63` against the live file, with no warnings logged; `V-CF-02`, `V-CF-14`; and verified against the pre-GUI `config.py` in both directions as `V-M-35` |
+| 9 | No UI object is touched from the engine thread | ✅ **upgraded from asserted to measured.** `V-M-57` records the two thread identities on either side of the queued hop and they differ; every one of the three bridge signals is connected with an explicit `QueuedConnection`. The runtime `assert` in `qt_tray.on_state_changed` and the paired `THREAD-CHECK` log lines both stand, and the shipped build wrote them too (`V-M-65`) |
+| 10 | `build_portable.py` produces a zip that runs on a clean Windows 11 machine, and `install.bat` still creates both shortcuts | 🟡 **partial.** The archive builds, extracts and runs — model on CUDA, bundled fonts and stylesheet, tray icon (`V-M-64`, `V-M-65`) — but **on this machine, which is not a clean one**, and `install.bat` was not run. Both remain; see section 7 |
 
 ---
 
@@ -356,20 +410,44 @@ Stated rather than omitted. Anything here is a known hole, not an oversight.
 
 | Gap | Why | Owner |
 |---|---|---|
-| **Pinned-window probe harness** (`tests/tools/probe_paste.py`) | `design.md` §10 step 2. Injects real keystrokes into another process's window to reproduce the issue #11 evidence; cannot run unattended. Its non-negotiable rule: pin a target window handle and refuse to inject unless that window has focus | session 5 |
-| Keypad shading (`V-M-04`, `V-M-05`) | No numeric keypad on the test machine | next desktop session |
-| Acceptance criterion 7 | Requires a machine without CUDA | — |
-| Acceptance criterion 10 | Requires a clean Windows 11 machine | session 5 |
-| `FR-C1`, `FR-C4`, `FR-C5`, `FR-2` — insertion behaviour | Behaviours of *another process's* window: menu activation, caret loss, clipboard restoration, UIPI. Not unit-testable; the probe harness is the instrument | session 5 |
+| **Pinned-window probe harness** (`tests/tools/probe_paste.py`) | `design.md` §10 step 2. Injects real keystrokes into another process's window to reproduce the issue #11 evidence; cannot run unattended. Its non-negotiable rule: pin a target window handle and refuse to inject unless that window has focus. Session 5's probes inject keystrokes but only ever into a window this process owns, and each one checks it holds the foreground first — that is the same discipline at a smaller scale, not the harness | next session |
+| `install.bat` on the built archive (criterion 10, second clause) | Not run. It stops every `ptt_dictate` process, deletes and rewrites `%LOCALAPPDATA%\Programs\ptt_dictate`, replaces the Desktop and Startup shortcuts and relaunches — so running it during a verification pass would overwrite the working installation. `install.ps1` is byte-identical to `main` and predates the GUI work | manual — see below |
+| Criterion 10 on a **clean** Windows 11 machine | The archive was extracted and run on the machine that built it, which already has CUDA, a Python 3.14 install and the Hugging Face model cache. What is untested is a box with none of those | needs a second machine |
+| Criterion 7 | Requires a machine without a CUDA device. `V-M-62` covers the software half by construction | — |
+| Keypad shading with Num Lock off (`V-M-04`, `V-M-05`) | No numeric keypad on the test machine. `V-M-58` injects `Keypad 7` and `Keypad +` and both shade, but a synthetic key cannot answer what the OS reports for a **physical** keypad `7` with Num Lock off — which is the whole question | next desktop session |
+| `Pause` in the tray menu (`gui_handoff` §4) | Listed in §4, absent from every build, and never in `pystray`'s menu either. `stage0_review.md` §3.2 flagged it before session 1 as decision 2 of 5 and it was never answered. It needs no engine change — `Engine.__init__` already takes a `chord_held` seam, so a frontend passing `lambda chord: (not self._paused) and hotkey_mod.chord_held(chord)` gets it for free. **Either build it or strike it from §4** | decision |
+| `pystray` and `six` still ship inside `.venv` | `requirements.txt` dropped `pystray` and `app/ptt/ui/tray.py` is deleted, but `pip install -r` never uninstalls what a requirement removed, so 22 files and ~143 KB of a library nothing imports are in the archive. Harmless but wrong: the distribution should contain what `requirements.txt` says. Fixing it means rebuilding `.venv` from scratch, which is also the only way to prove the pinned set is complete | next release build |
+| The end of criterion 5: dictation through the rebound chord | `V-M-60` proves the click, the write and the detector. What no probe can supply is a voice. `V-M-24` and `V-M-36` cover it by hand for `Right Ctrl` | manual |
+| `FR-C1`, `FR-C4`, `FR-C5`, `FR-2` — insertion behaviour | Behaviours of *another process's* window: menu activation, caret loss, clipboard restoration, UIPI. Not unit-testable; the probe harness is the instrument | next session |
 | `NFR-1`, `NFR-2`, `NFR-3` — latency and pre-roll | Need real audio hardware and a stopwatch. The Model panel's Measure button is the closest thing and is `V-EN-07` | — |
-| `FR-9` — no zombie process on exit | Observable only against a real process tree | manual |
-| The `+` registration marks (`gui_handoff` §9) | Not implemented on any panel | session 5 or later |
-| **That a chosen device is the one recorded from** (`V-M-39`) | One physical microphone on the test machine, so every entry sounds identical — and `V-AU-04`'s open-time fallback means an unopenable device still dictates, from the default. Six entries were dictated through successfully; only `debug_log.txt` says which device each actually used, and it was not read at the time. Needs a second physical microphone to settle | next desktop session |
-| The warm stream switched off (`V-M-44`), the minimum hold switched off (`V-M-45`), the two Diagnostics buttons (`V-M-46`), unplugging the chosen device (`V-M-47`), and persistence across a restart (`V-M-48`) | Not run in session 4. Each is covered by the suite in section 4 at the engine level — `V-EN-09`, `V-AU-04`, `V-CF-14` — so what is missing is the behaviour of the real application, not the logic | next desktop session |
+| `FR-9` — no zombie process on exit | Observable only against a real process tree. Session 5 terminated the extracted instance and confirmed no `ptt_dictate` survived, but that was `TerminateProcess`, not the app's own Exit path | manual |
+| The `+` registration marks (`gui_handoff` §9) | Not implemented on any panel | later |
+| **That a chosen device is the one recorded from** (`V-M-39`) | One physical microphone on the test machine, so every entry sounds identical — and `V-AU-04`'s open-time fallback means an unopenable device still dictates, from the default. Only `debug_log.txt` says which device each actually used. Needs a second physical microphone to settle | next desktop session |
+| The warm stream switched off (`V-M-44`), the minimum hold switched off (`V-M-45`), the two Diagnostics buttons (`V-M-46`), unplugging the chosen device (`V-M-47`), and persistence across a restart (`V-M-48`) | Not run in session 4 and not run in session 5. Each is covered by the suite in section 4 at the engine level — `V-EN-09`, `V-AU-04`, `V-CF-14` — so what is missing is the behaviour of the real application, not the logic | next desktop session |
 | The four new tabs at the window's **minimum** size | `V-M-42` was run maximised. The minimum-size case is covered programmatically by `V-M-26` and, for the two older tabs only, by hand in `V-M-22` | next desktop session |
 | Per-application vocabulary scopes | `gui_handoff` §11 puts them out of scope for the first pass. The field is stored and validated and one value is accepted; a rule with any other scope is dropped and logged, so nothing silently applies more widely than it was written | — |
 | Making an Advanced value editable | Every one of them fixed a documented failure, so none is exposed. §6.5's rule stands: exposing one makes it a validated `Settings` field with a logged fallback, and `Shift+Insert` additionally has to warn on change | — |
 | "Start with Windows" as a control rather than a readout | Setting it means creating a `.lnk` through COM and re-applying `install.ps1`'s run-as-admin byte patch — the installer's logic, duplicated in the app | — |
+
+### What a person has to do
+
+Four things, in this order. The first two close criterion 10; the last two close the
+keypad and the no-CUDA holes and need hardware this machine does not have.
+
+1. Exit the running PTT Dictation from its tray icon. Confirm in Task Manager that no
+   `ptt_dictate.exe` remains. *(This is also `V-M-01`, re-run against the current build.)*
+2. Extract `ptt_dictate_dist.zip` somewhere short — `%USERPROFILE%\Downloads\ptt` — and
+   double-click `install.bat`. Accept the UAC prompt. Confirm: a **PTT Dictation**
+   shortcut on the Desktop, a second one in
+   `%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup`, both with **Run as
+   administrator** ticked in Properties → Shortcut → Advanced, and the app relaunching by
+   itself into the tray.
+3. On a machine with a numeric keypad: open Settings → Hotkey, turn Num Lock **off**, and
+   press keypad `7`. It must shade the `Home` cap, not the keypad `7` cap. Press either
+   `Enter`; both Enter caps must shade.
+4. On a machine with no NVIDIA GPU: launch the app and open Settings → Model. The
+   **GPU (CUDA)** radio must be greyed out with the reason beside it, **CPU** must be
+   selected, and `app/config.json` must say `"use_gpu": false`.
 
 ---
 
@@ -377,7 +455,8 @@ Stated rather than omitted. Anything here is a known hole, not an oversight.
 
 | Date | Commit | Change |
 |---|---|---|
-| 2026-08-24 | — | Audio, Vocabulary, Advanced and Diagnostics panels. `V-CF-11` … `V-CF-14`, `V-TR-07`, `V-TR-08`, `V-AU-01` … `V-AU-05`, `V-VC-01` … `V-VC-04`, `V-EN-08` … `V-EN-10`, `V-UI-11` … `V-UI-13` added; suite 176 → 325; three more mutations checked; `V-M-26` … `V-M-49` executed, 18 of 24 passing; the device picker reduced from fourteen rows to one after review |
+| 2026-08-24 | — | The acceptance pass. All ten criteria worked through; `V-M-50` … `V-M-65` executed instrumented, 13 passing and 3 partial; suite re-run at 325 passed; the distribution rebuilt, extracted and launched. Criterion 9 upgraded from asserted to measured. Three new holes recorded in section 7: `Pause` was never built, `pystray` still ships inside `.venv`, and `install.bat` has not been run against the archive |
+| 2026-08-24 | `840a626` | Audio, Vocabulary, Advanced and Diagnostics panels. `V-CF-11` … `V-CF-14`, `V-TR-07`, `V-TR-08`, `V-AU-01` … `V-AU-05`, `V-VC-01` … `V-VC-04`, `V-EN-08` … `V-EN-10`, `V-UI-11` … `V-UI-13` added; suite 176 → 325; three more mutations checked; `V-M-26` … `V-M-49` executed, 18 of 24 passing; the device picker reduced from fourteen rows to one after review |
 | 2026-08-23 | `3443a03` | Hotkey and Model panels; `V-M-01` … `V-M-25` executed |
 | 2026-08-23 | `0722294` | Unit suite added — 176 tests, `V-HK`, `V-CF`, `V-EN`, `V-TR`, `V-UI`; mutation-checked |
 | 2026-08-24 | — | This document created; test material moved out of `design.md` §8 and `development_history.md` |

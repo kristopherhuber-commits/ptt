@@ -14,7 +14,12 @@ This application is built for compatibility and stability across different envir
 * **Universal Clipboard Pasting**: Pastes using `Shift+Insert` to ensure full compatibility with WSL terminals and bash command prompts, while preserving and restoring your original clipboard content.
 * **Native Input Injection**: Bypasses the fragile Python `keyboard` library for pasting, using native Win32 `keybd_event` calls. This guarantees that your pasting never breaks when Windows resets the hook chain (e.g., when plugging in USB headsets like Jabra).
 * **Smart App Control Compatible**: Uses a launcher signed by the Python Software Foundation to bypass Windows security blocks natively.
-* **System Tray Interface**: Features a dynamic tray icon showing application status (Teal = Ready, Red = Recording, Yellow = Transcribing, Blue = Loading).
+* **Three-layer interface**, all built with Qt (PySide6):
+  * a **tray icon** showing application status (Teal = Ready, Red = Recording, Yellow = Transcribing, Blue = Loading), with the same right-click menu it has always had;
+  * a **hover popover** — glance at the tray icon and a small panel shows the state, the hotkey, the model, the microphone and the last transcription. It never takes keyboard focus, so you can keep typing into whatever you were typing into, and it draws over always-on-top windows;
+  * a **settings window** with six tabs, opened by clicking the popover or choosing **Settings…** from the tray menu. **Every control applies the moment you touch it** — there is no OK, Apply or Cancel, and nothing needs a restart.
+
+The tray was previously drawn by `pystray`. It is now a `QSystemTrayIcon`; the icons themselves are the same drawing code, pixel for pixel. `pystray` has been removed from the project.
 
 ---
 
@@ -117,10 +122,22 @@ privileges" instead of using the Startup folder, which is a change to
 
 * **Record**: **Hold `Right Ctrl`** and speak. The tray icon will turn **Red**.
 * **Transcribe**: **Release the keys**. The tray icon will turn **Yellow** while it transcribes and automatically pastes the text directly at your cursor.
-* **Settings**: Right-click the system tray icon to:
+* **Check the state**: **Hover** the tray icon. A panel appears next to it showing the current state, the bound hotkey, the model and the device, the microphone in use, and how long the last transcription took and how many words it produced. It has no controls — it is a display — and it will not steal focus from what you are typing into.
+* **Tray menu**: Right-click the system tray icon to:
   * Check the current state (`Status: Ready (CUDA)`, `Status: Recording...`, etc.) and the active `Hotkey:`.
   * Toggle between **`Use GPU (CUDA)`** and **`Use CPU`** modes. On a machine without a supported GPU the CUDA option is unavailable and CPU is used automatically.
+  * Open **`Settings…`**.
   * **Exit** the application.
+* **Settings window**: click the popover, or choose **Settings…** from the tray menu. Six tabs, and **every control applies immediately** — there is no OK button, no Apply, no Cancel, and no restart. Each change is written to `config.json` straight away and confirmed in the status bar.
+
+  | Tab | What it does |
+  |---|---|
+  | **Hotkey** | A full keyboard diagram. Click a key to bind it; only keys that type nothing on their own can be bound. Every key you press shades as you press it. A compatibility panel warns about chords that will interfere with ordinary typing. |
+  | **Model** | The Whisper size tiers, and the GPU/CPU choice. `Measure on this machine` times one transcription of a bundled 30-second clip. |
+  | **Audio** | The microphone picker, a live level meter, and three recording-behaviour switches. |
+  | **Vocabulary** | Replacement rules applied to the transcript before it is pasted — for names and jargon the model mishears. |
+  | **Advanced** | The engine's tuning constants, read live from the modules that own them. A readout, not a form. |
+  | **Diagnostics** | CUDA state, median latency, where the last paste went, and the tail of `debug_log.txt`. |
 * **Persistence**: The application creates a local `config.json` file in its directory to remember your CPU/GPU preference, hotkey and model across restarts. Settings it does not recognise are preserved, so a newer build's config survives a rollback.
 * **Changing the hotkey**: Open **Settings…** from the tray menu and click a key on the **Hotkey** tab's keyboard. It applies immediately — there is no OK button and no restart. Every key you press shades on the diagram as you press it, so you can see the app is reading your keyboard.
 
@@ -147,4 +164,32 @@ privileges" instead of using the Startup folder, which is a change to
 * [docs/gui_handoff/gui_handoff.md](docs/gui_handoff/gui_handoff.md) — the PySide6 GUI specification: the three UI layers (tray icon, hover popover, settings window), panel-by-panel behaviour, and the acceptance criteria. `docs/gui_handoff/ptt_dictation_ui_mockups.html` is the visual reference and `claude_code_prompt.md` is the staged build plan.
 
 The implementation lives in `app/ptt/`; `ptt_dictate.py` and `app/ptt_tray.py` are thin
-entry points over it. See [docs/design.md](docs/design.md) section 4 for the module layout.
+entry points over it. See [docs/design.md](docs/design.md) section 4 for the full module
+layout.
+
+### Where the interface lives
+
+The three layers described in section 1 are `app/ptt/ui/`, one module per piece:
+
+| Module | Layer |
+|---|---|
+| `ui/qt_app.py` | Owns the `QApplication`, and holds `EngineBridge` — the boundary between the engine's thread and the GUI thread. |
+| `ui/qt_tray.py` | Layer 1: the `QSystemTrayIcon`, its menu, and the state-to-icon map. Replaces the deleted `ui/tray.py`, which used `pystray`. |
+| `ui/qt_popover.py` | Layer 2: the frameless, non-activating hover panel. |
+| `ui/qt_window.py` | Layer 3: the `QMainWindow`, the tab bar and the status bar. |
+| `ui/qt_statusview.py` | The read-only state display — built once and embedded twice, as the popover's body and as the window's banner, so the two cannot drift apart. |
+| `ui/qt_theme.py` | Registers the bundled fonts and applies `style.qss`. |
+| `ui/panels/` | One module per tab: `hotkey`, `model`, `audio`, `vocabulary`, `advanced`, `diagnostics`. `panels/__init__.py` holds `InstantApplyPanel`, the one write-then-save-then-tell-the-engine sequence every control routes through. |
+
+**The engine never imports the UI.** It reports state through a callback the frontend
+supplies, which is what lets one core drive both the tray application and the console
+frontend.
+
+### Bundled fonts
+
+The interface uses **Barlow** and **Barlow Condensed** — Copyright 2017 The Barlow
+Project Authors (https://github.com/jpt/barlow), licensed under the
+**SIL Open Font License, Version 1.1**. The font files live in
+`app/assets/fonts/` and ship in the distribution together with their `OFL.txt` licence
+files, as the licence requires. If they fail to register the interface falls back to
+Segoe UI and says so in `debug_log.txt`.

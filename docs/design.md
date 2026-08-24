@@ -25,8 +25,11 @@ dependencies:
   keyboard:       "0.13.5"    # fallback only; see section 3
   pyperclip:      "1.11.0"    # clipboard read/restore
   PySide6-Essentials: "6.11.2"  # Qt6 GUI and QSystemTrayIcon
-  pillow:         "12.2.0"    # tray icon rendering (still: see section 4)
+  pillow:         "12.2.0"    # draws the four tray icons; see section 4
   nvidia-*-cu12:  "see requirements.txt"
+
+removed:
+  pystray:        "0.19.5"    # replaced by QSystemTrayIcon; see section 4
 
 model_parameters:
   default_model: "large-v3-turbo"
@@ -55,7 +58,7 @@ active_hotkey:
 | `build_portable.py` | Provisions `.venv` from `requirements.txt`, installs the signed PSF interpreter, bundles `ptt_dictate_dist.zip`. |
 | `run_tray.bat` | Self-elevating launcher; runs `.venv\Scripts\ptt_dictate.exe app\ptt_tray.py`. |
 | `install.bat` / `install.ps1` | Self-elevating installer; copies `.venv` + `app` to `%LOCALAPPDATA%\Programs\ptt_dictate`, creates Desktop and Startup shortcuts marked run-as-administrator (`FR-C5`). |
-| `app/assets/` | `style.qss`, the bundled Barlow faces, and `benchmark_sample.wav`. Shipped by `build_portable.py`'s `os.walk` over `app/`. |
+| `app/assets/` | `style.qss`, the bundled Barlow faces with **both `OFL.txt` licence files**, and `benchmark_sample.wav`. Shipped by `build_portable.py`'s `os.walk` over `app/`, which is why nothing here needs an entry in `items_to_zip`. The licence files travelling with the fonts is a condition of the SIL OFL, not housekeeping; verified in the built archive as `V-M-64`. |
 | `tests/` | The unit suite. See [verification.md](verification.md). |
 | `requirements-dev.txt` | pytest and the packages the tests import. Never shipped — see section 8. |
 | `docs/` | This document, `requirements.md`, `verification.md`, `development_history.md`, `gui_handoff/`. |
@@ -137,6 +140,66 @@ portable environment, not a wheel, so the packaging benefit of `src/` does not a
 
 The engine must not import the UI. It reports state through a callback the frontend
 supplies, which is what allows one core to serve both a tray icon and a console.
+
+### 4.1 The UI package
+
+`app/ptt/ui/` is three layers and a theme, and the split in the table above is exactly
+those layers. `gui_handoff.md` §§4–6 is the specification; this is how it landed.
+
+| Layer | Module | What it is |
+|---|---|---|
+| — | `qt_app.py` | The `QApplication` owner and `EngineBridge`. Not a layer: the boundary. |
+| 1 | `qt_tray.py` | `QSystemTrayIcon`, four state icons, the right-click menu. |
+| 2 | `qt_popover.py` | Frameless, non-activating hover panel. |
+| 3 | `qt_window.py` | `QMainWindow`: banner, tab bar, six panels, status bar. |
+| 2 + 3 | `qt_statusview.py` | The read-only display, built once and embedded in both. |
+| — | `qt_theme.py` | Font registration and `style.qss`, applied to the `QApplication`. |
+
+Four rules hold it together, each of which fails silently rather than loudly if broken:
+
+1. **Nothing on the engine thread touches a widget.** `Engine.run()` invokes `on_state`
+   from its own thread and its docstring makes no promise about which one that is.
+   `EngineBridge.on_state` therefore only emits; Qt copies the arguments into a
+   `QMetaCallEvent` and the slot runs on the GUI thread. Every connection from a bridge
+   signal is made with an explicit `Qt.QueuedConnection` — `AutoConnection` resolves
+   correctly today but degrades silently to a direct call if anything later moves the
+   receiver. `Engine._emit` wraps the callback in `try/except Exception` and only logs,
+   so a violation that raises produces **no visible symptom**: dictation keeps working
+   while the UI stops updating. The worst violations — building a `QPixmap` off-thread,
+   replacing a `QMenu` the event loop is dispatching into — are not Python exceptions at
+   all. Verified as `V-M-57`.
+2. **`qt_statusview.StatusView` is the only thing that draws the state rows**, and both
+   the popover and the window's banner embed it. Two implementations of the same six rows
+   would drift, and the user asked specifically for the popover-to-window transition to
+   feel like one object growing.
+3. **No colour is written in Python**, including colours a `paintEvent` draws. `StatusDot`
+   and the model table's delegates read theirs off a widget through `qproperty-`, written
+   from `style.qss`. A delegate is not a widget, so no selector can reach one directly —
+   the indirection is what keeps the rule literal.
+4. **Every control applies instantly, through one method.** There is no OK, Apply or
+   Cancel in the settings window. `InstantApplyPanel.apply_now` is the single path:
+   write the field, `Settings.save()`, then tell the engine if it needs to know. That
+   order is the contract — reversing the last two races a model reload against a disk
+   write.
+
+**`pystray` has been removed**, along with `app/ptt/ui/tray.py`. `gui_handoff.md` §11
+required it: the two tray implementations were never to coexist, and git history is the
+fallback. Two things about the port are worth recording, because both look like
+gratuitous complexity and are not:
+
+- **The icon drawing code is unchanged.** `create_icon_image` was moved across verbatim
+  and still returns a PIL image, which is why `pillow` is still a dependency. The four
+  images it produces are byte-identical to the pystray build's (`V-M-50`).
+- **`ICON_SIZES = (16, 24, 32, 48, 64)` is the faithful port, not an embellishment.**
+  pystray never handed Windows the 64 px image: it saved an `.ICO`, and PIL's ICO writer
+  emits one `thumbnail(size, LANCZOS)` frame per default size not larger than the source.
+  Reproducing those five frames is what preserves the appearance; handing Qt a single
+  64 px pixmap and letting it scale at paint time would have been the change.
+
+One item of §4 is **not** built: the menu has no `Pause`. It never existed in the pystray
+menu either, and `stage0_review.md` §3.2 raised it as an open decision before session 1
+that was never answered. It needs no engine change if it is wanted — `Engine.__init__`
+already takes a `chord_held` seam. Recorded in `verification.md` §7.
 
 Three structural constraints hold this layout together. Each is checkable, and each
 exists because breaking it fails silently rather than loudly:
@@ -378,7 +441,16 @@ wholesale, so `pip install pytest` there ships the framework to every target PC,
 `CON-3` forbids adding it to `requirements.txt`. `requirements-dev.txt` holds it instead,
 and `items_to_zip` is an explicit allowlist, so neither it nor `tests/` reaches a
 distribution. `pyproject.toml` supplies `pythonpath = ["app"]` so `import ptt` resolves
-without installing anything.
+without installing anything. Confirmed against the built archive as `V-M-64`: no
+`tests/`, no `requirements-dev.txt`, no `pyproject.toml`, no `docs/`.
+
+The allowlist is only half of it, and the other half has a hole. `.venv` is zipped
+**wholesale**, and `pip install -r requirements.txt` does not uninstall a package a
+requirement no longer names — so dropping `pystray` from `requirements.txt` did not
+remove it from `.venv`, and it is still in the distribution. Nothing imports it, but a
+distribution that does not match `requirements.txt` cannot be reasoned about from
+`requirements.txt`. Rebuilding `.venv` from scratch is the fix, and is also the only way
+to prove the pinned set is complete. Recorded in `verification.md` §7.
 
 **Manual Win32 probes** (`tests/tools/probe_paste.py`, **not yet written**). Menu
 activation, caret loss and paste delivery are behaviours of *another process's* window and
@@ -425,3 +497,14 @@ put `NFR-6`/`NFR-7` back in play for no gain.
    **Done.** The picker is the settings window's Hotkey panel — a keyboard diagram with
    click-to-bind and instant apply, not the modal Save/Cancel dialog section 6 originally
    described. The classifier is `hotkey.classify()`.
+4. ~~Build the Qt interface: the tray, the popover, the window and its six panels, and
+   retire `pystray`.~~ **Done**, over four sessions, to
+   [gui_handoff.md](gui_handoff/gui_handoff.md). See section 4.1.
+5. **Verify and package.** Worked through, and the results are
+   [verification.md](verification.md) §5.3 and §6. All ten acceptance criteria were
+   exercised. Criteria 2, 3, 6, 8 and 9 are closed. Criteria 4 and 5 pass with one named
+   residual each — a physical numeric keypad, and a human voice. Criterion 7 needs a
+   machine with no CUDA device, criterion 10 needs a clean Windows 11 machine and a run
+   of `install.bat`, and criterion 1 is held open by an unanswered spec question rather
+   than by hardware: `gui_handoff` §4 lists a `Pause` menu item that has never existed.
+   §7 of that document is the list, and it ends with the four steps a person has to take.
