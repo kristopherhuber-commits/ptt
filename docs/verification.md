@@ -372,8 +372,14 @@ microphone, no numeric keypad.
 | `V-M-67` | Render the same shots from a pristine `HEAD` worktree and diff | ✅ pass — the only difference is the marks. Which is also how the defect below was separated from this session's change |
 | `V-M-68` | Fix the popover's STATE-row overlap, then re-render it at 340 px with this machine's real 72-character device name | ✅ pass — headline occupies y 113–134 and the detail starts at y 157, so nothing overlaps; every value label is one line high; the panel's `sizeHint` is 255 px against its fixed 340, so it demands no width it does not have |
 | `V-M-69` | Confirm long values are elided rather than clipped, and that nothing is lost | ✅ pass — the device name paints as `Microphone Array (Intel(R…` at 186 px inside a 190 px label, `full_text()` still returns all 74 characters, and the **same widget in the settings window at 880 px shows the whole string**. Truncation is now visible where before it was silent |
+| `V-M-70` | Delete `.venv` entirely, rebuild it from `requirements.txt`, and diff the installed set against the pinned one | ✅ pass — 2.45 GB and 10,913 files removed and rebuilt. All 11 pinned packages present at their pinned versions; **`pystray` and `six` are gone**, 39 packages down to 37. Several *transitive* deps moved (`onnxruntime` 1.28.0 → 1.29.0, `huggingface-hub` 1.27.0 → 1.28.0, `av` 18.0.0 → 18.1.0, `protobuf`, `idna`, `filelock`), which is expected — only the direct requirements are pinned, and it is the reason the extract-and-run check below was redone rather than assumed |
+| `V-M-71` | Rebuild the archive with the application **closed**, and check the interpreter copies | ✅ pass — 8,511 entries, 1462.04 MB, and **no `in use/locked` warnings**: all six interpreter files copied properly, which the session's earlier build could not do. Archive re-audited: four registered faces, 36 TTFs, both `OFL.txt`, `benchmark_sample.wav`, `style.qss`; no `tests/`, `requirements*`, `docs/`, `pyproject.toml`, `config.json`, `debug_log*`, `pyvenv.cfg`, `pystray`, `six.py` or `ui/tray.py`. `ElidedLabel` and `qt_marks.py` both present in the shipped source |
+| `V-M-72` | Extract to `%USERPROFILE%\Downloads\ptt` and launch it | ✅ pass — 8,511 files, no extraction errors. Registered all four bundled faces, loaded `style.qss` (20,129 chars), resolved CUDA from its own `.venv`, loaded `large-v3-turbo` on CUDA in 3 s, showed the tray icon on the first attempt, wrote both correct `THREAD-CHECK` lines, and created no `config.json` |
+| `V-M-73` | **The idle release, on the shipped build.** First launch opened no input stream at all; `GetLastInputInfo` reported 544 s of idle against `IDLE_THRESHOLD_SEC` of 240 | ✅ pass — and worth recording as the shape of a scare rather than a defect. The missing stream looked like a regression against the earlier build until the idle figure explained it. Relaunched while tapping a key every 5 s: idle fell to 5 s and the stream opened in the same second as the model load. `NFR-4` is now demonstrated end to end on a real distribution, where before it was covered only at the engine level by `V-EN-09` |
+| `V-M-74` | **`install.bat` against the rebuilt archive** — criterion 10's second clause, run by hand with the UAC prompt accepted | ✅ pass — both shortcuts rewritten at the same second (Desktop and Startup), each with the run-as-administrator byte set, both targeting `%LOCALAPPDATA%\Programs\ptt_dictate
+un_tray.bat`, and the app relaunched itself into the tray. The installed copy is **clean, not a hybrid**: 9,130 files, of which 620 are runtime `.pyc`; excluding those, 8,510 against the ~8,508 the archive supplies, the remainder being `config.json` and `debug_log.txt` written on first run. **Zero files predating the install**, and no `ui/tray.py`, `pystray` or `six.py` left from the previous installation — so `install.ps1`'s delete-then-copy really deleted. It carries `ElidedLabel` and `qt_marks.py` |
 
-**17 passed, 3 partial, 0 failed.**
+**22 passed, 3 partial, 0 failed.**
 
 Two things the build surfaced that are worth keeping.
 
@@ -409,7 +415,7 @@ unless another item is named.
 | 7 | On a machine without CUDA the GPU toggle is disabled with a visible reason | ⬜ **not verifiable here** — this machine has CUDA. The software half passes simulated (`V-M-62`); `V-EN-06` covers the engine half |
 | 8 | `config.json` round-trips with the current build; unknown keys survive | ✅ `V-M-63` against the live file, with no warnings logged; `V-CF-02`, `V-CF-14`; and verified against the pre-GUI `config.py` in both directions as `V-M-35` |
 | 9 | No UI object is touched from the engine thread | ✅ **upgraded from asserted to measured.** `V-M-57` records the two thread identities on either side of the queued hop and they differ; every one of the three bridge signals is connected with an explicit `QueuedConnection`. The runtime `assert` in `qt_tray.on_state_changed` and the paired `THREAD-CHECK` log lines both stand, and the shipped build wrote them too (`V-M-65`) |
-| 10 | `build_portable.py` produces a zip that runs on a clean Windows 11 machine, and `install.bat` still creates both shortcuts | 🟡 **partial.** The archive builds, extracts and runs — model on CUDA, bundled fonts and stylesheet, tray icon (`V-M-64`, `V-M-65`) — but **on this machine, which is not a clean one**, and `install.bat` was not run. Both remain; see section 7 |
+| 10 | `build_portable.py` produces a zip that runs on a clean Windows 11 machine, and `install.bat` still creates both shortcuts | ✅ The archive was rebuilt from a **from-scratch `.venv`** with the application closed, so no interpreter copy was skipped and neither `pystray` nor `six` ships any more (`V-M-70`, `V-M-71`). It extracts and runs — fonts, stylesheet, CUDA, model, tray icon (`V-M-72`) — and `install.bat` was run against it: both shortcuts rewritten with the run-as-administrator byte, and a clean installed copy with zero stale files (`V-M-74`). **The residual is honest and unchanged: this is the machine that built it.** A genuinely clean Windows 11 box, with no CUDA runtime and no Hugging Face cache, is still untested |
 
 ---
 
@@ -420,11 +426,9 @@ Stated rather than omitted. Anything here is a known hole, not an oversight.
 | Gap | Why | Owner |
 |---|---|---|
 | **Pinned-window probe harness** (`tests/tools/probe_paste.py`) | `design.md` §10 step 2. Injects real keystrokes into another process's window to reproduce the issue #11 evidence; cannot run unattended. Its non-negotiable rule: pin a target window handle and refuse to inject unless that window has focus. Session 5's probes inject keystrokes but only ever into a window this process owns, and each one checks it holds the foreground first — that is the same discipline at a smaller scale, not the harness | next session |
-| `install.bat` on the built archive (criterion 10, second clause) | Not run. It stops every `ptt_dictate` process, deletes and rewrites `%LOCALAPPDATA%\Programs\ptt_dictate`, replaces the Desktop and Startup shortcuts and relaunches — so running it during a verification pass would overwrite the working installation. `install.ps1` is byte-identical to `main` and predates the GUI work | manual — see below |
-| Criterion 10 on a **clean** Windows 11 machine | The archive was extracted and run on the machine that built it, which already has CUDA, a Python 3.14 install and the Hugging Face model cache. What is untested is a box with none of those | needs a second machine |
+| Criterion 10 on a **clean** Windows 11 machine | The archive was extracted, run and installed on the machine that built it, which already has CUDA, a Python 3.14 install and the Hugging Face model cache. What is untested is a box with none of those. Everything else in criterion 10 is now closed | needs a second machine |
 | Criterion 7 | Requires a machine without a CUDA device. `V-M-62` covers the software half by construction | — |
 | Keypad shading with Num Lock off (`V-M-04`, `V-M-05`) | No numeric keypad on the test machine. `V-M-58` injects `Keypad 7` and `Keypad +` and both shade, but a synthetic key cannot answer what the OS reports for a **physical** keypad `7` with Num Lock off — which is the whole question | next desktop session |
-| `pystray` and `six` still ship inside `.venv` | `requirements.txt` dropped `pystray` and `app/ptt/ui/tray.py` is deleted, but `pip install -r` never uninstalls what a requirement removed, so 22 files and ~143 KB of a library nothing imports are in the archive. Harmless but wrong: the distribution should contain what `requirements.txt` says. Fixing it means rebuilding `.venv` from scratch, which is also the only way to prove the pinned set is complete | next release build |
 | The end of criterion 5: dictation through the rebound chord | `V-M-60` proves the click, the write and the detector. What no probe can supply is a voice. `V-M-24` and `V-M-36` cover it by hand for `Right Ctrl` | manual |
 | `FR-C1`, `FR-C4`, `FR-C5`, `FR-2` — insertion behaviour | Behaviours of *another process's* window: menu activation, caret loss, clipboard restoration, UIPI. Not unit-testable; the probe harness is the instrument | next session |
 | `NFR-1`, `NFR-2`, `NFR-3` — latency and pre-roll | Need real audio hardware and a stopwatch. The Model panel's Measure button is the closest thing and is `V-EN-07` | — |
@@ -438,23 +442,19 @@ Stated rather than omitted. Anything here is a known hole, not an oversight.
 
 ### What a person has to do
 
-Four things, in this order. The first two close criterion 10; the last two close the
-keypad and the no-CUDA holes and need hardware this machine does not have.
+Two things, and both need hardware this machine does not have. The two that closed
+criterion 10 were done on 2026-08-24 and are recorded as `V-M-70` … `V-M-74`.
 
-1. Exit the running PTT Dictation from its tray icon. Confirm in Task Manager that no
-   `ptt_dictate.exe` remains. *(This is also `V-M-01`, re-run against the current build.)*
-2. Extract `ptt_dictate_dist.zip` somewhere short — `%USERPROFILE%\Downloads\ptt` — and
-   double-click `install.bat`. Accept the UAC prompt. Confirm: a **PTT Dictation**
-   shortcut on the Desktop, a second one in
-   `%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup`, both with **Run as
-   administrator** ticked in Properties → Shortcut → Advanced, and the app relaunching by
-   itself into the tray.
-3. On a machine with a numeric keypad: open Settings → Hotkey, turn Num Lock **off**, and
+1. On a machine with a numeric keypad: open Settings → Hotkey, turn Num Lock **off**, and
    press keypad `7`. It must shade the `Home` cap, not the keypad `7` cap. Press either
-   `Enter`; both Enter caps must shade.
-4. On a machine with no NVIDIA GPU: launch the app and open Settings → Model. The
+   `Enter`; both Enter caps must shade. *(Closes `V-M-04`, `V-M-05`.)*
+2. On a machine with no NVIDIA GPU: launch the app and open Settings → Model. The
    **GPU (CUDA)** radio must be greyed out with the reason beside it, **CPU** must be
-   selected, and `app/config.json` must say `"use_gpu": false`.
+   selected, and `app/config.json` must say `"use_gpu": false`. *(Closes criterion 7.)*
+
+A third, whenever a genuinely clean Windows 11 box is available: extract the archive and
+run `install.bat` on a machine with no CUDA runtime, no Python and no Hugging Face cache.
+That is the last part of criterion 10 that this machine cannot answer about itself.
 
 ---
 
@@ -462,6 +462,7 @@ keypad and the no-CUDA holes and need hardware this machine does not have.
 
 | Date | Commit | Change |
 |---|---|---|
+| 2026-08-24 | — | Release preparation for v2.0. The popover's self-overlap fixed with `ElidedLabel`; `.venv` rebuilt from scratch, dropping `pystray` and `six`; the archive rebuilt with the application closed, so no interpreter copy was skipped; extracted, run, and `install.bat` exercised against it. `V-M-70` … `V-M-74` added. **Criterion 10 closed** — every acceptance criterion is now green except 7, which needs a machine without CUDA |
 | 2026-08-24 | — | `Pause` struck from `gui_handoff` §4 and from this document — declined, not deferred; criterion 1 and `V-M-52` go green. The `+` registration marks built (`qt_marks.py`, `V-UI-14`, `V-M-66`, `V-M-67`), closing the last item §9 tracked as outstanding; suite 325 → 333, four more mutations checked. A pre-existing popover layout defect found while rendering them and recorded in section 7 |
 | 2026-08-24 | `d80aceb` | The acceptance pass. All ten criteria worked through; `V-M-50` … `V-M-65` executed instrumented, 13 passing and 3 partial; suite re-run at 325 passed; the distribution rebuilt, extracted and launched. Criterion 9 upgraded from asserted to measured. Three new holes recorded in section 7: `Pause` was never built, `pystray` still ships inside `.venv`, and `install.bat` has not been run against the archive |
 | 2026-08-24 | `840a626` | Audio, Vocabulary, Advanced and Diagnostics panels. `V-CF-11` … `V-CF-14`, `V-TR-07`, `V-TR-08`, `V-AU-01` … `V-AU-05`, `V-VC-01` … `V-VC-04`, `V-EN-08` … `V-EN-10`, `V-UI-11` … `V-UI-13` added; suite 176 → 325; three more mutations checked; `V-M-26` … `V-M-49` executed, 18 of 24 passing; the device picker reduced from fourteen rows to one after review |
