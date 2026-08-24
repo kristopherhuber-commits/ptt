@@ -25,9 +25,11 @@ from PySide6.QtWidgets import (
     QFrame, QGridLayout, QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget,
 )
 
-#: Placeholder for a value this build cannot obtain yet. The Microphone and Last
-#: rows need engine changes that are scheduled for a later session; showing an
-#: em dash is honest, where inventing a plausible value would not be.
+#: Placeholder for a value this build cannot obtain. Every row can be filled in
+#: now -- Microphone and Last were the two that could not be until the Audio and
+#: Diagnostics panels gave the engine somewhere to report them from -- but a
+#: value that is genuinely unknown still shows an em dash rather than a
+#: plausible invention.
 UNKNOWN = "—"
 
 
@@ -62,8 +64,8 @@ class UiState:
     hotkey: str = UNKNOWN
     model: str = UNKNOWN
     device: str = ""
-    microphone: str = UNKNOWN     # needs a device name the recorder cannot yet report
-    last: str = UNKNOWN           # needs a duration the engine logs but never emits
+    microphone: str = UNKNOWN     # Engine.input_device_name(), once a stream is open
+    last: str = UNKNOWN           # Engine.last_summary, once something has been said
 
     def detail(self):
         """

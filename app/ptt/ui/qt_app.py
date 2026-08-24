@@ -45,7 +45,7 @@ from ptt import hotkey as hotkey_mod
 from ptt.logging_setup import log_debug
 from ptt.ui import qt_theme
 from ptt.ui.qt_popover import Popover
-from ptt.ui.qt_statusview import UiState
+from ptt.ui.qt_statusview import UNKNOWN, UiState
 from ptt.ui.qt_tray import QtTray, _log_thread
 from ptt.ui.qt_window import SettingsWindow
 
@@ -178,9 +178,17 @@ class QtApp:
         self.ui.hotkey = hotkey_mod.chord_label(self._settings.hotkey)
         self.ui.model = self._settings.model
         if self._engine is not None:
-            # A plain attribute the engine rebinds; reading it here is the same
-            # safe hand-off config.py's Settings docstring describes.
+            # Plain attributes the engine rebinds; reading them here is the same
+            # safe hand-off config.py's Settings docstring describes. The
+            # microphone and last-transcription rows showed an em dash until
+            # session 4, because nothing reported either -- the Audio panel's
+            # device selection and the Diagnostics panel's latency history are
+            # what make them obtainable, and section 5 asks for both.
             self.ui.device = self._engine.current_device
+            self.ui.microphone = (
+                self._engine.input_device_name() or "— stream closed —"
+            )
+            self.ui.last = self._engine.last_summary or UNKNOWN
         self._push_ui()
         # The engine may have overridden a setting the panels display -- a CUDA
         # load failure persists use_gpu=False from the engine thread -- so the
@@ -188,10 +196,19 @@ class QtApp:
         self._window.refresh_panels()
 
     def _on_settings_changed(self):
-        """A panel saved. Repaint what displays a setting without owning it."""
+        """
+        A panel saved. Repaint what displays a setting without owning it.
+
+        The other panels are refreshed too, because settings now cross tabs:
+        the Audio tab's two checkboxes decide whether the constants the Advanced
+        tab lists are being applied, and a page that still said a value was in
+        force after it had been switched off elsewhere would be the two surfaces
+        disagreeing -- the thing this window exists to make impossible.
+        """
         self.ui.hotkey = hotkey_mod.chord_label(self._settings.hotkey)
         self.ui.model = self._settings.model
         self._push_ui()
+        self._window.refresh_panels()
         self._tray.refresh_menu()
 
     def _on_benchmark_done(self, device, seconds):

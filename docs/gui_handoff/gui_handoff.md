@@ -9,8 +9,8 @@ Design reference: `PTT Dictation UI v1 (standalone).html` (open in a browser) or
 rendering; turn 3 is the same design with every tab built out; turn 2 is the
 three-layer interaction wired together.
 
-**Status.** Layers 1 and 2, the window shell, and the Hotkey and Model panels are
-built. The Audio, Vocabulary, Advanced and Diagnostics panels are not. Sections
+**Status.** All three layers and all six panels are built. What remains is §10's
+acceptance pass and packaging, and the `+` registration marks in §9. Sections
 marked **As built** record where the shipped code differs from what this document
 originally specified and why; §12's rule applies — the code is right, and these
 notes are this document being brought into line with it. Nothing specified here
@@ -72,16 +72,23 @@ app/ptt/ui/
                        #   every control routes through. See §6.
         hotkey.py      # Keyboard diagram.                  BUILT
         model.py       # Model table.                       BUILT
-        audio.py       # Device picker + level meter.       to build
-        vocabulary.py  # Replacement rules table.           to build
-        advanced.py    # Engine constants.                  to build
-        diagnostics.py # Log tail + probe readouts.         to build
+        audio.py       # Device picker + level meter.       BUILT
+        vocabulary.py  # Replacement rules table.           BUILT
+        advanced.py    # Engine constants.                  BUILT
+        diagnostics.py # Log tail + probe readouts.         BUILT
 
 app/assets/
     style.qss          # The whole visual layer (see §9).
     fonts/             # Barlow + Barlow Condensed, with both OFL.txt licences.
     benchmark_sample.wav
 ```
+
+**As built:** one module was added outside `ui/` — `app/ptt/vocabulary.py`, holding
+the `Rule` type, its validation and the substitution itself. It is pure and has no
+Qt import, for the reason §6.4 gives: the matching rules are a fact about the
+application rather than about the widgets that edit them, and putting them beside
+the panel would make them untestable without an event loop. It sits next to
+`hotkey.py`, which is the same shape for the same reason.
 
 **As built:** `style.qss` and the fonts live under `app/assets/`, not inside
 `app/ptt/ui/`. `design.md` §4 makes `paths.py` the only module allowed to compute
@@ -537,6 +544,85 @@ Selecting a specific device is a new capability — the recorder currently takes
 the default. Add a device index to `Settings` and to `audio.Recorder`, keeping
 `None` meaning "system default" so existing configs behave exactly as now.
 
+**As built.** Four notes, two of them corrections this document needs.
+
+*The two behaviour checkboxes gate their constants; they do not write zero into
+them.* Stage 0 §4.2 is right that `IDLE_THRESHOLD_SEC` and `MIN_RECORD_SEC` are
+durations, and that a checkbox writing 0 would switch off `NFR-4` and `FR-3` —
+a zero idle threshold closes and reopens the device on every poll iteration,
+which is issue #6 at 50 Hz. It is also right that what the user wants to say
+about them is on or off. Both are true at once, so `keep_stream_warm` and
+`ignore_short_holds` are booleans that decide whether their constant applies,
+the constants keep their values, and §6.5's table shows each value **and says
+when it is currently bypassed**. Turning the warm stream off means the stream is
+opened by `rec.start()` when the chord goes down and released when the recording
+ends — the real cost, paid deliberately, rather than a constant set to nonsense.
+
+*The click is implemented.* §6.3 says to skip it "if it needs new audio-output
+code". It needs ten lines of `winsound.MessageBeep`, which is Windows stdlib and
+so is neither a dependency nor a build change, and it is asynchronous — measured
+at 80 µs, so it is safe on the poll thread, where a blocking beep would delay
+`rec.start()` and eat the first word. It is off by default and the panel says
+why: it plays through the Windows output device, so an open desktop microphone
+can hear it and it lands in the recording.
+
+*The meter polls; nothing signals it.* Stage 0 §4.5's objection is accepted in
+full. `Recorder._callback` computes a peak and rebinds a float; the panel reads
+it on a 30 Hz `QTimer`. Emitting a Qt signal from PortAudio's realtime callback
+allocates, locks and wakes the GUI thread several hundred times a second, and a
+callback that overruns its deadline drops audio — which in a dictation app means
+dropped words. It is also the shape the chord's live re-read already uses.
+The scale is dB rather than linear amplitude: speech peaks around 0.05–0.2, which
+on a linear bar is a twitch at the left-hand end and reads as a broken microphone.
+
+*The picker shows a filtered list, and the filter is measured rather than
+chosen.* PortAudio reports every device **once per Windows audio API**. On the
+development laptop that is fourteen rows for one array microphone: two
+placeholders meaning "the default device", two `PC Speaker` **outputs** whose
+kernel-streaming pins advertise input channels, a `Stereo Mix` loopback, and one
+entry that cannot be opened at all. A user cannot be asked to choose between
+fourteen rows describing one microphone, so `audio.pickable_devices` offers the
+copies from a single host API. Which one was decided by opening each:
+
+| Host API | At 16 kHz | Device name |
+| --- | --- | --- |
+| Windows DirectSound | opens | full, 72 characters |
+| MME | opens | **truncated at 31 characters** |
+| Windows WASAPI | **fails** — `Invalid sample rate [PaErrorCode -9997]` | full |
+| Windows WDM-KS | mixed; one entry refuses outright | raw pin names |
+
+WASAPI is the modern API and the tempting default, and it is unusable here:
+PortAudio opens it in shared mode, where the stream must match the device's mix
+format, and this microphone's is 48 kHz. `SAMPLE_RATE` is Whisper's 16 kHz and is
+not negotiable, so a WASAPI row is a row that cannot record. DirectSound is
+preferred, MME is the fallback, and WDM-KS is never offered.
+
+MME's truncation is where the popover's `Microphone` row got
+`Microphone Array (Intel® Smart `, cut off mid-word — the default device resolves
+through MME. `audio._expand_name` recovers the full name from another API's copy
+of the same device, and only for names at exactly the 31-character limit, so it
+cannot lengthen a name that was simply short.
+
+Nothing is hidden silently: the whole enumeration is written to debug_log.txt
+once per run with every index and a `[hidden]` marker, `audio_device` accepts any
+of those numbers, and a device set that way is shown in the picker with its host
+API named so it is not mistaken for a row the picker offered.
+
+*A device is opened defensively, and the saved index is never rewritten.* A
+PortAudio index is not a stable identifier — the numbering shifts when a device
+is plugged in or removed — so a saved index is checked before it is used, and
+falls back to the Windows default with a logged reason if it no longer names an
+input. That is not sufficient on its own: **PortAudio lists devices it cannot
+open.** Several WDM-KS entries on the development machine advertise two input
+channels and then fail with `Invalid device [PaErrorCode -9996]`, and without a
+second fallback, picking one from the combo box left the application with no
+stream at all — the hotkey doing nothing, nothing on screen to say why. So the
+open falls back to the default too, the same shape as
+`transcribe.load_model_with_fallback`. The setting is not rewritten either way:
+an unplugged headset comes back, and forgetting the user's choice because it was
+missing once is the worse failure. The device the stream actually opened on is
+logged every time and shown on the panel and in the popover's `Microphone` row.
+
 ### 6.4 Vocabulary panel
 
 New capability. A `QTableView` of replacement rules: heard → typed, plus a scope
@@ -547,6 +633,40 @@ key in `config.json`, validated field by field like everything else.
 
 Keep the substitution pure and in its own function so it is unit-testable without
 a model, matching how `clean_text` and `parse_chord` are already written.
+
+**As built.** The substitution runs **inside `transcribe.transcribe_audio`**,
+immediately after `clean_text`. Stage 0 §3.7 is right that there is no seam
+between the two functions this section names: `clean_text` is called from inside
+`transcribe_audio`, not by the engine, so "after one and before the other" has
+exactly one place it can mean. `engine.py` changes by one argument rather than
+gaining a concept, and the question §3.7 also raises answers itself — `on_text`
+receives the substituted string, so a console frontend cannot print one thing and
+paste another.
+
+Four things this section left open, settled in `ptt/vocabulary.py`'s docstring and
+pinned by `tests/test_vocabulary.py`:
+
+- **One pass.** All rules compile to a single alternation, so a replacement is
+  never itself replaced. Rules cannot chain and two rules that map into each
+  other terminate.
+- **The longest phrase wins**, ties by position in the list. Without it, adding
+  `w s l two` beside an existing `w s l` would silently never fire, and there is
+  no reordering control in this pass that would let the user find out why.
+- **The replacement is literal.** The mockup's `new paragraph` → `\n\n` row does
+  not work: interpreting it needs an escape language and a rule for a literal
+  backslash, which is a language rather than a setting.
+- **Scope.** §11 puts per-application behaviour rules out of scope, so the column
+  is drawn, the field is stored and validated, and one value is accepted. A rule
+  carrying any other scope is **dropped** on load with a logged reason rather
+  than being widened to Always — every other fallback in this codebase restores
+  a default that does less, and coercing a scoped rule into an unscoped one would
+  do more.
+
+Deleting offers an undo rather than a prompt, which is what this document's §6
+asks for "where practical"; restoring one row to the index it came from is
+practical. The panel also carries a preview line, which is not in the mockup: it
+is the only way to see what a rule does without dictating, and a feature whose
+effect is invisible until it has already altered your text needs one.
 
 ### 6.5 Advanced panel
 
@@ -569,6 +689,44 @@ editable, it becomes a `Settings` field with validation and a logged fallback �
 not a raw write. Shift+Insert in particular is load-bearing for WSL and bash
 terminals; if you expose it, warn on change.
 
+**As built: nothing on this panel is editable, and the warning is therefore not
+needed.** The paragraph above is the argument for that rather than against it.
+`BEAM_SIZE` and `LANGUAGE` change what the model produces and nothing else in
+this window would explain a transcript that got worse; `MIN_RECORD_SEC` and
+`IDLE_THRESHOLD_SEC` are bounded at both ends by issue #6 on one side and `FR-3`
+and `NFR-4` on the other, and what a user actually wants to say about them is on
+or off, which is what §6.3's two checkboxes now are; and `Shift+Insert` is where
+most of what this application types ends up working at all. Exposing any of them
+is a `Settings` field with validation and a logged fallback, and none of them has
+one yet.
+
+Two consequences:
+
+- Each of the two gated rows shows its value **and** says when the Audio tab has
+  switched it off — `240 s · bypassed from the Audio tab`. Without that the two
+  panels would disagree about what is in force, which is the thing this window
+  exists to make impossible.
+- Every value is read from the module that owns it rather than transcribed
+  beside it, so a change to `transcribe.BEAM_SIZE` appears here with no edit to
+  the panel. That needed one small change: `vad_filter` was a literal in
+  `transcribe_audio`'s call and is now `transcribe.VAD_FILTER`, because a panel
+  reporting "On" from a hard-coded string is reporting nothing.
+
+**"Start with Windows" is a readout, not a checkbox.** This section says it
+*reflects* whether the shortcut is present, which is a file-existence check, and
+stage 0 §5.13 is right that *setting* it means creating a `.lnk` through
+`WScript.Shell` COM and re-applying `install.ps1`'s run-as-admin byte patch —
+installer logic duplicated inside the app. A checkbox that cannot be clicked is
+worse than a value: Windows delivers no mouse events to a disabled widget, so its
+tooltip never appears and it explains nothing, which is the lesson the Model
+panel's Delete button already recorded. The path is reached through
+`paths.startup_shortcut_path()`, since `paths` owns every application-relative
+path.
+
+The mockup's **Restore defaults** button is not drawn. A read-only page has
+nothing to restore, and wiring it to the Audio tab's checkboxes would be a
+button on one page that changes another.
+
 ### 6.6 Diagnostics panel
 
 - Three readouts: CUDA device count and compute type, median transcription
@@ -577,6 +735,34 @@ terminals; if you expose it, warn on change.
 - Buttons: open log folder, reload model.
 
 Read the log through `paths` — do not construct the path independently.
+
+**As built.** The three readouts come from the **engine**, not from parsing the
+log. Stage 0 §5.10 poses the choice and the answer is the second one: `OBS-4`
+guarantees `debug_log.txt` is plain text, not that any line in it has a stable
+format, so a median rebuilt by regex over `Transcription finished in ...` would
+break silently the first time that message was reworded — and a diagnostics
+panel that lies is worse than one that says "nothing dictated yet". The engine
+already computed both figures on the way to logging them, so it keeps them:
+`Engine.median_latency()` over the last twenty dictations (median, not mean —
+the first transcription after a model load carries warm-up cost that is not
+representative) and `Engine.last_paste_target`. Benchmarks are excluded, because
+a 30-second clip is not a dictation. The CUDA readout is
+`transcribe.cuda_device_count()`, split out of `cuda_available()` so the number
+is returned rather than read back out of the line that logs it.
+
+The log is read through `paths.debug_log_path()` and the folder is opened at
+`paths.APP_DIR`, not at `os.path.dirname` of the log — taking the directory of a
+path `paths` returned would still be this panel computing one. The tail is read
+from a window at the **end** of the file rather than the whole of it, since it
+refreshes every 1.5 seconds while the tab is on screen, and the partial first
+line a byte-offset seek produces is dropped: half a log entry reads as a
+corrupted log rather than as a window into a long one.
+
+Two side effects of the engine keeping those figures, both of which close §5
+rows that have shown an em dash since session 2: the popover's `Microphone` row
+now names the device the stream is actually open on, and its `Last` row shows the
+duration and word count of the last transcription. §5's table asks for both and
+nothing could supply them until this session.
 
 ## 7. State → UI contract
 

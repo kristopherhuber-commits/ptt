@@ -10,7 +10,10 @@ produces a cap that never shades and a chord that cannot be bound, and neither
 raises anything.
 """
 
-from ptt import hotkey
+from ptt import config, engine as engine_mod, hotkey, inject, paths, transcribe
+from ptt.ui.panels import advanced as advanced_panel
+from ptt.ui.panels import audio as audio_panel
+from ptt.ui.panels import diagnostics as diagnostics_panel
 from ptt.ui.panels import hotkey as hotkey_panel
 from ptt.ui.panels import model as model_panel
 
@@ -140,3 +143,174 @@ def test_format_bytes_switches_to_gigabytes_at_the_boundary():
 def test_a_measured_size_is_not_marked_as_an_estimate():
     """The `~` prefix belongs to the catalogue's estimate and nothing else."""
     assert not model_panel._format_bytes(1024 * 1024).startswith("~")
+
+
+# -- the audio panel's level meter -------------------------------------------
+
+def test_silence_reads_as_the_floor_rather_than_minus_infinity():
+    """`20*log10(0)` is not a number a readout can print."""
+    assert audio_panel.to_dbfs(0.0) == audio_panel.METER_FLOOR_DB
+    assert audio_panel.to_dbfs(-1.0) == audio_panel.METER_FLOOR_DB
+
+
+def test_full_scale_is_zero_dbfs():
+    """Digital full scale is 0 dB, so every real reading is negative."""
+    assert audio_panel.to_dbfs(1.0) == 0.0
+    assert audio_panel.to_dbfs(0.5) < 0.0
+
+
+def test_a_quiet_signal_is_floored_rather_than_reported_precisely():
+    """Below the floor the microphone is reporting its own noise."""
+    assert audio_panel.to_dbfs(0.000001) == audio_panel.METER_FLOOR_DB
+
+
+def test_the_meter_is_dark_only_in_silence():
+    """
+    Anything audible lights at least one bar. A meter that showed nothing for a
+    quiet-but-working microphone reads as a broken microphone.
+    """
+    assert audio_panel.meter_fill(0.0) == 0
+    assert audio_panel.meter_fill(0.001) >= 1
+
+
+def test_the_meter_is_full_at_full_scale():
+    assert audio_panel.meter_fill(1.0) == audio_panel.METER_BARS
+
+
+def test_ordinary_speech_lands_in_the_middle_of_the_meter():
+    """
+    Why the scale is dB and not linear amplitude: speech peaks around 0.05-0.2,
+    which on a linear bar is a twitch at the left-hand end.
+    """
+    bars = audio_panel.METER_BARS
+    for peak in (0.05, 0.1, 0.2):
+        assert bars * 0.25 <= audio_panel.meter_fill(peak) <= bars * 0.85, peak
+
+
+def test_the_meter_never_overflows_its_bars():
+    for peak in (0.0, 0.5, 1.0, 2.0):
+        assert 0 <= audio_panel.meter_fill(peak) <= audio_panel.METER_BARS
+
+
+def test_the_default_device_entry_is_not_an_index():
+    """
+    `None` is what every configuration written before this build carries by
+    omission, so it has to stay the meaning of "follow the Windows default".
+    """
+    assert config.Settings(path="x").audio_device is None
+
+
+# -- the advanced panel's table ----------------------------------------------
+
+def advanced_rows(**overrides):
+    settings = config.Settings(path="x", **overrides)
+    return {row.name: row for row in advanced_panel.rows(settings)}
+
+
+def test_every_advanced_row_reports_the_live_constant():
+    """
+    The whole point of the panel: a value transcribed beside a constant drifts
+    away from it silently, and this is the page a user consults precisely when
+    they doubt what is in force.
+    """
+    rows = advanced_rows()
+    assert rows["Beam size"].value == str(transcribe.BEAM_SIZE)
+    assert rows["Language"].value == transcribe.LANGUAGE
+    assert rows["Paste method"].value == inject.PASTE_CHORD_LABEL
+    assert rows["Minimum hold"].value.startswith(f"{engine_mod.MIN_RECORD_SEC:.2f}")
+    assert rows["Release microphone when idle"].value.startswith(
+        f"{engine_mod.IDLE_THRESHOLD_SEC:.0f}")
+
+
+def test_the_voice_activity_filter_row_reports_the_flag_inference_uses():
+    """`vad_filter` was a literal in the call; the panel needs it to be a value."""
+    assert transcribe.VAD_FILTER is True
+    assert advanced_rows()["Voice activity filter"].value == "On"
+
+
+def test_a_constant_the_audio_tab_has_switched_off_says_so():
+    """
+    The two panels cannot be allowed to disagree about what is in force. The
+    value has not changed -- it is simply not being applied -- so the row shows
+    both facts rather than hiding one.
+    """
+    bypassed = advanced_rows(ignore_short_holds=False, keep_stream_warm=False)
+    assert advanced_panel.BYPASSED in bypassed["Minimum hold"].value
+    assert advanced_panel.BYPASSED in bypassed["Release microphone when idle"].value
+
+    applied = advanced_rows()
+    assert advanced_panel.BYPASSED not in applied["Minimum hold"].value
+    assert advanced_panel.BYPASSED not in applied["Release microphone when idle"].value
+
+
+def test_every_advanced_row_says_what_it_is_for():
+    """A constant with no explanation is a number the user cannot act on."""
+    for row in advanced_panel.rows(config.Settings(path="x")):
+        assert row.name and row.note and row.value
+
+
+def test_the_startup_row_reads_the_shortcut_through_paths(monkeypatch, tmp_path):
+    """
+    `paths` owns every application-relative path, including this one -- the
+    panel must not assemble `%APPDATA%` for itself.
+    """
+    shortcut = tmp_path / "PTT Dictation.lnk"
+    monkeypatch.setattr(paths, "startup_shortcut_path", lambda: str(shortcut))
+    assert advanced_rows()["Start with Windows"].value == "Not present"
+
+    shortcut.write_text("", encoding="utf-8")
+    assert advanced_rows()["Start with Windows"].value == "Present"
+
+
+# -- the diagnostics panel's log tail ----------------------------------------
+
+def write_log(tmp_path, lines):
+    path = tmp_path / "debug_log.txt"
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return str(path)
+
+
+def test_the_tail_returns_the_last_lines_in_file_order(tmp_path):
+    path = write_log(tmp_path, [f"line {n}" for n in range(50)])
+    assert diagnostics_panel.tail_lines(path, limit=3) == \
+        ["line 47", "line 48", "line 49"]
+
+
+def test_a_short_log_is_returned_whole(tmp_path):
+    path = write_log(tmp_path, ["only one"])
+    assert diagnostics_panel.tail_lines(path, limit=200) == ["only one"]
+
+
+def test_the_tail_reads_from_the_end_rather_than_the_whole_file(tmp_path):
+    """
+    A session that dictated all day reaches megabytes, and this runs every 1.5
+    seconds while the tab is open.
+    """
+    path = write_log(tmp_path, [f"line {n:04d}" for n in range(5000)])
+    lines = diagnostics_panel.tail_lines(path, limit=5, window=512)
+    assert lines == [f"line {n}" for n in range(4995, 5000)]
+
+
+def test_a_partial_first_line_is_dropped(tmp_path):
+    """
+    Seeking to a byte offset lands in the middle of a line, and half a log
+    entry reads as a corrupted log rather than as a window into a long one.
+    """
+    path = write_log(tmp_path, ["x" * 400, "the whole line", "and another"])
+    lines = diagnostics_panel.tail_lines(path, limit=50, window=64)
+    assert all(not line.startswith("x") for line in lines), lines
+
+
+def test_a_missing_log_is_empty_rather_than_an_exception(tmp_path):
+    """The log being absent is itself worth seeing; it must not take the window down."""
+    assert diagnostics_panel.tail_lines(str(tmp_path / "nope.txt")) == []
+
+
+def test_an_undecodable_byte_does_not_lose_the_line(tmp_path):
+    """
+    `log_debug` writes UTF-8, but a log truncated by a crash mid-character
+    still has to be readable -- this panel is where you look after a crash.
+    """
+    path = tmp_path / "debug_log.txt"
+    path.write_bytes(b"good line\n\xff\xfe broken\n")
+    assert len(diagnostics_panel.tail_lines(str(path))) == 2

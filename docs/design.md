@@ -113,6 +113,7 @@ portable environment, not a wheel, so the packaging benefit of `src/` does not a
 | `app/ptt/runtime.py` | `main_guard()`. The only module permitted to call `os._exit` (`FR-9`). |
 | `app/ptt/config.py` | Settings dataclass; load, validate, save, migrate `config.json`. |
 | `app/ptt/hotkey.py` | VK table, chord parse/format, `GetAsyncKeyState` polling, safety classifier. |
+| `app/ptt/vocabulary.py` | Replacement-rule type, validation and the substitution itself. Pure, like `hotkey.py`: no Qt, no config file, no model. |
 | `app/ptt/inject.py` | The only module permitted to call `keybd_event`. Paste, modifier neutralisation, `suppress_alt_menu`, focus diagnostics. |
 | `app/ptt/audio.py` | `Recorder`: stream lifecycle, pre-roll buffer, idle release. |
 | `app/ptt/transcribe.py` | Model load, CUDA detection, CPU fallback, text cleanup. |
@@ -127,6 +128,10 @@ portable environment, not a wheel, so the packaging benefit of `src/` does not a
 | `app/ptt/ui/panels/__init__.py` | `InstantApplyPanel`: the one write-field-then-save-then-tell-the-engine sequence every control uses. |
 | `app/ptt/ui/panels/hotkey.py` | Qt keyboard-diagram picker; live `GetAsyncKeyState` shading. |
 | `app/ptt/ui/panels/model.py` | Whisper size tiers, GPU/CPU choice, measured latency. |
+| `app/ptt/ui/panels/audio.py` | Input-device picker, live level meter, the three recording-behaviour checkboxes. |
+| `app/ptt/ui/panels/vocabulary.py` | The replacement-rule table. The matching itself lives in `ptt/vocabulary.py`. |
+| `app/ptt/ui/panels/advanced.py` | The engine's constants, read from the modules that own them. Writes nothing. |
+| `app/ptt/ui/panels/diagnostics.py` | CUDA state, median latency, last paste target, and the tail of `debug_log.txt`. |
 | `app/ptt_tray.py` | Entry point: builds the tray UI, starts the engine. Unchanged invocation path. |
 | `ptt_dictate.py` | Entry point: prints state to the console, starts the engine. |
 

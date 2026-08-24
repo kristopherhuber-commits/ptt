@@ -212,12 +212,6 @@ QLabel#panelBlurb {
     font-size: 14px;
 }
 
-QLabel#panelPlaceholder {
-    color: rgba(29, 31, 32, 0.55);
-    font-family: Consolas, "Courier New", monospace;
-    font-size: 13px;
-}
-
 
 /* -- status bar ------------------------------------------------------- */
 
@@ -260,6 +254,34 @@ QLabel#caption {
 QLabel#panelNote {
     color: rgba(29, 31, 32, 0.55);
     font-size: 12px;
+}
+
+/* a hairline-bordered group: the level meter, the behaviour checkboxes, the
+   Advanced list and each Diagnostics readout */
+QFrame#panelBox {
+    background: transparent;
+    border: 1px solid rgba(29, 31, 32, 0.16);
+}
+
+/* a value read from the engine rather than chosen by the user: the dBFS
+   readout, the Advanced constants, the Diagnostics figures */
+QLabel#panelValue {
+    color: #2c455d;
+    font-family: Consolas, "Courier New", monospace;
+    font-size: 12px;
+}
+
+/* one row of the Advanced list. Qt style sheets have no :last-child, so the
+   last row carries a dynamic property instead -- without it its hairline
+   doubles up with the frame's own border. */
+QFrame#settingRow {
+    background: transparent;
+    border: none;
+    border-bottom: 1px solid rgba(29, 31, 32, 0.16);
+}
+
+QFrame#settingRow[last="true"] {
+    border-bottom: none;
 }
 
 
@@ -508,4 +530,119 @@ QHeaderView::section {
 QScrollArea#panelScroll, QScrollArea#panelScroll > QWidget > QWidget {
     background: #f2f2f3;
     border: none;
+}
+
+
+/* -- the audio level meter --------------------------------------------
+   Painted by LevelMeter.paintEvent, coloured from here through Qt
+   properties -- the same indirection the status dot and the model
+   table's delegates use, so no colour lives in Python.
+
+   The top two bars are amber rather than accent, and deliberately: they
+   are the clipping end of the scale, and that is the tray's functional
+   signalling ramp rather than the design system's decorative one, for
+   the reason section 7 gives.
+   -------------------------------------------------------------------- */
+
+QWidget#levelMeter {
+    background: transparent;
+    qproperty-barColour: #5980a6;
+    qproperty-hotColour: #d97706;
+    qproperty-trackColour: #d4d4d7;
+}
+
+
+/* -- the microphone picker and the vocabulary preview -----------------
+   Square, hairline-bordered, on the light ground: an input is a
+   different shape from a button but the same material.
+   -------------------------------------------------------------------- */
+
+QWidget#panel QComboBox, QWidget#panel QLineEdit {
+    background: #f2f2f3;
+    color: #1d1f20;
+    border: 1px solid rgba(29, 31, 32, 0.16);
+    font-size: 13px;
+    padding: 6px 10px;
+    selection-background-color: #5980a6;
+    selection-color: #f2f2f3;
+}
+
+QWidget#panel QComboBox:hover, QWidget#panel QLineEdit:hover {
+    border: 1px solid rgba(29, 31, 32, 0.45);
+}
+
+QWidget#panel QComboBox:focus, QWidget#panel QLineEdit:focus {
+    border: 1px solid #5980a6;
+}
+
+QWidget#panel QComboBox::drop-down {
+    border: none;
+    width: 20px;
+}
+
+/* The popup list is a view, not the box, so it needs its own rule --
+   without one it falls back to the platform palette and arrives white
+   with a native frame in the middle of a square, flat window. */
+QWidget#panel QComboBox QAbstractItemView {
+    background: #f2f2f3;
+    color: #1d1f20;
+    border: 1px solid rgba(29, 31, 32, 0.16);
+    outline: none;
+    selection-background-color: #eef6ff;
+    selection-color: #1d1f20;
+}
+
+
+/* -- the vocabulary table ---------------------------------------------
+   Shares the model table's typography: they are the same kind of object
+   and a settings window with two table styles looks like two windows.
+   The editor is styled too, or a double-clicked cell opens a native
+   white line edit inside a flat grey row.
+   -------------------------------------------------------------------- */
+
+QTableView#vocabTable {
+    background: #f2f2f3;
+    alternate-background-color: #f2f2f3;
+    border: 1px solid rgba(29, 31, 32, 0.16);
+    gridline-color: transparent;
+    outline: none;
+    font-family: Consolas, "Courier New", monospace;
+    font-size: 12px;
+}
+
+QTableView#vocabTable::item {
+    border-bottom: 1px solid rgba(29, 31, 32, 0.16);
+    padding: 0px 6px;
+}
+
+QTableView#vocabTable::item:selected {
+    background: #eef6ff;
+    color: #1d1f20;
+}
+
+QTableView#vocabTable QLineEdit {
+    background: #eef6ff;
+    color: #1d1f20;
+    border: 1px solid #5980a6;
+    font-family: Consolas, "Courier New", monospace;
+    font-size: 12px;
+    padding: 0px 4px;
+}
+
+
+/* -- the diagnostics log ----------------------------------------------
+   The one place in the window showing raw machine output, so it gets the
+   dark read-only ground the popover and the banner use: it is not
+   interactive, and the colour rule is what says so.
+   -------------------------------------------------------------------- */
+
+QPlainTextEdit#logView {
+    background: #1d2d3d;
+    color: #e7eaee;
+    border: 1px solid #2c455d;
+    font-family: Consolas, "Courier New", monospace;
+    font-size: 11px;
+    padding: 8px;
+    selection-background-color: #5980a6;
+    selection-color: #f2f2f3;
 }

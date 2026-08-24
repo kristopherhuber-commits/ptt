@@ -12,7 +12,7 @@ import wave
 import numpy as np
 import pytest
 
-from ptt import paths, transcribe
+from ptt import paths, transcribe, vocabulary
 
 
 # -- clean_text: retrospective issue #4 -------------------------------------
@@ -187,3 +187,75 @@ def test_installed_sizes_reports_nothing_when_no_model_is_present(monkeypatch, t
     sizes = transcribe.installed_sizes()
     assert all(v > 0 for v in sizes.values())
     assert set(sizes).issubset(set(transcribe.MODEL_NAMES))
+
+
+# -- transcribe_audio: where the vocabulary is applied ------------------------
+
+class FakeSegment:
+    """One segment of a model's output. `transcribe_audio` reads only `.text`."""
+
+    def __init__(self, text):
+        self.text = text
+
+
+class FakeModel:
+    """
+    A model that returns fixed segments and records how it was called.
+
+    Enough of `WhisperModel` to exercise the substitution point without either
+    heavy package present -- which is the whole reason `transcribe.py` keeps
+    those imports inside functions.
+    """
+
+    def __init__(self, *texts):
+        self._texts = texts
+        self.kwargs = {}
+
+    def transcribe(self, _audio, **kwargs):
+        self.kwargs = kwargs
+        return [FakeSegment(t) for t in self._texts], None
+
+
+def test_transcribe_audio_joins_the_segments_and_cleans_them():
+    model = FakeModel("Testing one two", " three .......")
+    assert transcribe.transcribe_audio(model, None) == "Testing one two three"
+
+
+def test_transcribe_audio_passes_the_flags_the_advanced_panel_reports():
+    """
+    The panel reads `BEAM_SIZE`, `VAD_FILTER` and `LANGUAGE` from this module
+    and calls them the values in force; this is what makes that true.
+    """
+    model = FakeModel("x")
+    transcribe.transcribe_audio(model, None)
+    assert model.kwargs["beam_size"] == transcribe.BEAM_SIZE
+    assert model.kwargs["vad_filter"] == transcribe.VAD_FILTER
+    assert model.kwargs["language"] == transcribe.LANGUAGE
+    assert model.kwargs["condition_on_previous_text"] is False
+
+
+def test_the_vocabulary_is_applied_inside_transcribe_audio():
+    """
+    gui_handoff 6.4 puts substitution after `clean_text` and before
+    `paste_text`. `clean_text` is called from in here, so this is the only
+    point that is genuinely both.
+    """
+    model = FakeModel("run it in w s l")
+    rules = (vocabulary.Rule("w s l", "WSL"),)
+    assert transcribe.transcribe_audio(model, None, rules) == "run it in WSL"
+
+
+def test_substitution_happens_after_the_cleanup_not_before():
+    """
+    Order matters and is testable: the rule below can only match once the run
+    of full stops large-v3 leaves on trailing silence has been stripped.
+    """
+    model = FakeModel("say w s l...... now")
+    rules = (vocabulary.Rule("w s l now", "WSL now"),)
+    assert transcribe.transcribe_audio(model, None, rules) == "say WSL now"
+
+
+def test_no_vocabulary_leaves_the_cleaned_text_alone():
+    """The benchmark path passes no rules, so it measures the dictation path."""
+    model = FakeModel("nothing to replace")
+    assert transcribe.transcribe_audio(model, None) == "nothing to replace"

@@ -26,6 +26,7 @@ from typing import NamedTuple
 import numpy as np
 
 from ptt import paths
+from ptt import vocabulary as vocabulary_mod
 from ptt.logging_setup import log_debug
 
 
@@ -67,6 +68,12 @@ DEFAULT_MODEL = "large-v3-turbo"
 
 LANGUAGE = "en"          # None for autodetect
 BEAM_SIZE = 5
+
+#: Whisper's own voice-activity filter, which trims silence before inference.
+#: A module constant rather than a literal in the call below so the Advanced
+#: panel can report the value that is actually in force instead of a word
+#: transcribed into the UI beside it.
+VAD_FILTER = True
 
 #: float16 is required on Blackwell (sm_120); int8 crashes there with
 #: CUBLAS_STATUS_NOT_SUPPORTED (CON-4).
@@ -137,18 +144,28 @@ def ensure_cuda_dll_dirs():
                 log_debug(f"Directory does not exist: {d}")
 
 
-def cuda_available():
-    """Verify if CTranslate2 can see an NVIDIA GPU."""
+def cuda_device_count():
+    """
+    How many CUDA devices CTranslate2 can see. 0 if none, or if the check fails.
+
+    The Diagnostics panel shows the number itself, so it is returned rather than
+    read back out of the log line `cuda_available` writes.
+    """
     ensure_cuda_dll_dirs()
     try:
         import ctranslate2          # deliberately not at module scope
-        count = ctranslate2.get_cuda_device_count()
-        log_debug(f"ctranslate2 detected CUDA devices count: {count}")
-        return count > 0
+        return int(ctranslate2.get_cuda_device_count())
     except Exception as e:
         log_debug(f"ctranslate2 CUDA check raised exception: {str(e)}")
         log_debug(traceback.format_exc())
-        return False
+        return 0
+
+
+def cuda_available():
+    """Verify if CTranslate2 can see an NVIDIA GPU."""
+    count = cuda_device_count()
+    log_debug(f"ctranslate2 detected CUDA devices count: {count}")
+    return count > 0
 
 
 def _whisper_model_cls():
@@ -343,13 +360,32 @@ def clean_text(text):
     return re.sub(r'\.{2,}', '', text.strip()).strip()
 
 
-def transcribe_audio(model, audio):
-    """Run inference over a float32 mono buffer and return cleaned text."""
+def transcribe_audio(model, audio, rules=()):
+    """
+    Run inference over a float32 mono buffer and return the text to paste.
+
+    `rules` is the vocabulary (`config.Settings.vocabulary`); the substitution
+    happens here, immediately after `clean_text`, because that is the only point
+    that is genuinely both "after `clean_text`" and "before `inject.paste_text`"
+    as gui_handoff section 6.4 requires. `clean_text` is called from inside this
+    function rather than from the engine, so there is no seam between them for a
+    frontend to wrap.
+
+    Doing it here also settles what section 6.4 did not say: the string handed
+    to `on_text` is the string that gets pasted. A console frontend printing one
+    and pasting another is the "the log said it worked" failure OBS-1 exists to
+    close.
+
+    Defaults to no rules so the benchmark path, which measures inference rather
+    than dictation, is unaffected by the user's vocabulary.
+    """
     segments, _ = model.transcribe(
         audio,
         language=LANGUAGE,
         beam_size=BEAM_SIZE,
-        vad_filter=True,
+        vad_filter=VAD_FILTER,
         condition_on_previous_text=False
     )
-    return clean_text("".join(s.text for s in segments))
+    return vocabulary_mod.apply_rules(
+        clean_text("".join(s.text for s in segments)), rules
+    )

@@ -17,7 +17,7 @@ import numpy as np
 import pytest
 
 from ptt import audio as audio_mod
-from ptt import config, engine as engine_mod, inject, transcribe
+from ptt import config, engine as engine_mod, inject, transcribe, vocabulary
 
 
 TIMEOUT = 5.0
@@ -36,19 +36,35 @@ def wait_for(predicate, timeout=TIMEOUT, what="condition"):
 class FakeRecorder:
     """A Recorder that never touches PortAudio."""
 
-    def __init__(self, samplerate=16_000, samples=None):
+    def __init__(self, samplerate=16_000, device=None, samples=None):
         self.samplerate = samplerate
+        self.device = device
+        self.device_name = ""
+        self.level = 0.0
         self.recording = False
         self.opened = False
+        self.opens = 0
         self._samples = samples if samples is not None else np.zeros(16_000, np.float32)
 
+    @property
+    def is_open(self):
+        return self.opened
+
     def open_stream(self):
+        if not self.opened:
+            self.opens += 1
         self.opened = True
+        self.device_name = f"fake device {self.device}"
 
     def close_stream(self):
         self.opened = False
+        self.device_name = ""
 
     def start(self):
+        # The real Recorder opens the stream itself when one is not already
+        # open, which is what the warm-stream checkbox relies on.
+        if not self.opened:
+            self.open_stream()
         self.recording = True
 
     def stop(self):
@@ -71,6 +87,8 @@ def harness(monkeypatch, tmp_path):
         "texts": [],
         "benchmarks": [],
         "loads": [],            # every (model, use_gpu) the loader was asked for
+        "rules": [],            # the vocabulary each transcription was given
+        "clicks": [],           # every start-of-recording click played
     }
     recorder = FakeRecorder()
 
@@ -78,12 +96,19 @@ def harness(monkeypatch, tmp_path):
         state["loads"].append((model_size, use_gpu))
         return object(), "cuda" if (use_gpu and cuda_supported) else "cpu", "Ready (CPU)"
 
+    def fake_transcribe(model, audio, rules=()):
+        state["rules"].append(tuple(rules))
+        return "hello there"
+
     monkeypatch.setattr(transcribe, "load_model_with_fallback", fake_load)
-    monkeypatch.setattr(transcribe, "transcribe_audio", lambda model, audio: "hello there")
+    monkeypatch.setattr(transcribe, "transcribe_audio", fake_transcribe)
     monkeypatch.setattr(transcribe, "load_benchmark_clip",
                         lambda: np.zeros(16_000, np.float32))
     monkeypatch.setattr(audio_mod, "get_idle_duration", lambda: 0.0)
-    monkeypatch.setattr(audio_mod, "Recorder", lambda samplerate: recorder)
+    monkeypatch.setattr(audio_mod, "Recorder",
+                        lambda samplerate, device=None: recorder)
+    monkeypatch.setattr(audio_mod, "play_start_click",
+                        lambda: state["clicks"].append(1))
     monkeypatch.setattr(inject, "suppress_alt_menu", lambda: None)
     monkeypatch.setattr(inject, "target_accepts_keys", lambda: True)
     monkeypatch.setattr(inject, "paste_text", lambda text: state.setdefault(
@@ -236,6 +261,198 @@ def test_the_engine_returns_to_idle_after_a_benchmark(harness):
     wait_for(lambda: harness["states"][-1][0] == "idle", what="a return to idle")
 
 
+# -- the input device --------------------------------------------------------
+
+def test_the_loop_picks_up_a_new_input_device_without_restart(harness):
+    """
+    The same live re-read the chord gets. Switching microphone must not need a
+    restart and must not reload the model -- the Audio panel calls `apply_now`
+    with `reload_model=False` and relies entirely on this.
+    """
+    before = len(harness["loads"])
+    harness["settings"].audio_device = 3
+
+    wait_for(lambda: harness["recorder"].device == 3,
+             what="the loop to pick up the new device")
+    assert len(harness["loads"]) == before, "a device change reloaded the model"
+
+
+def test_changing_the_device_reopens_the_stream(harness):
+    """
+    A device chosen while the stream is open has to close it: PortAudio binds
+    the device when the stream is created, so a running stream would keep
+    recording from the old microphone until something else happened to close it.
+    """
+    wait_for(lambda: harness["recorder"].opened, what="the stream to open")
+    opens = harness["recorder"].opens
+
+    harness["settings"].audio_device = 2
+    wait_for(lambda: harness["recorder"].opens > opens, what="a reopen")
+    assert harness["recorder"].device == 2
+
+
+def test_a_device_chosen_mid_recording_applies_to_the_next_one(harness):
+    """
+    PortAudio binds the device when the stream is created, so a change made
+    while the hotkey is held cannot affect the recording in progress. It must
+    still be picked up afterwards -- rebinding it during the recording instead
+    would leave the two indexes matching and the old stream open for ever.
+    """
+    wait_for(lambda: harness["recorder"].opened, what="the stream to open")
+    harness["down"].add("rctrl")
+    wait_for(lambda: harness["recorder"].recording, what="recording to start")
+
+    harness["settings"].audio_device = 1
+    opens = harness["recorder"].opens
+    assert harness["recorder"].device is None, "the device changed mid-recording"
+
+    harness["down"].clear()
+    wait_for(lambda: harness["recorder"].device == 1,
+             what="the device to be picked up after the release")
+    wait_for(lambda: harness["recorder"].opens > opens, what="a reopen")
+
+
+# -- the audio behaviour checkboxes ------------------------------------------
+
+def test_the_warm_stream_holds_the_device_open_between_recordings(harness):
+    """NFR-2: the stream is open before the user presses anything (issue #6)."""
+    wait_for(lambda: harness["recorder"].opened, what="the stream to open")
+
+
+def test_turning_the_warm_stream_off_releases_the_device_when_idle(harness):
+    """
+    Off means the microphone is not held: the loop closes it, and `rec.start()`
+    opens it again for the recording itself. A threshold of zero would instead
+    close and reopen it on every poll iteration, which is issue #6 at 50 Hz.
+    """
+    wait_for(lambda: harness["recorder"].opened, what="the stream to open")
+    harness["settings"].keep_stream_warm = False
+    wait_for(lambda: not harness["recorder"].opened, what="the stream to close")
+
+
+def test_a_recording_still_works_with_the_warm_stream_off(harness):
+    """The cost of turning it off is latency, not a broken hotkey."""
+    harness["settings"].keep_stream_warm = False
+    wait_for(lambda: not harness["recorder"].opened, what="the stream to close")
+
+    harness["down"].add("rctrl")
+    wait_for(lambda: harness["recorder"].recording, what="recording to start")
+    assert harness["recorder"].opened, "start() did not open the stream"
+
+    harness["down"].clear()
+    wait_for(lambda: harness["texts"] == ["hello there"], what="the transcript")
+    # And the loop closes it again rather than leaving it open for ever, which
+    # is what happens if the loop's own flag never learns about start()'s open.
+    wait_for(lambda: not harness["recorder"].opened,
+             what="the stream to be released again")
+
+
+def test_turning_the_minimum_hold_off_transcribes_a_short_tap(harness):
+    """FR-3 is a default, not a law -- but switching it off is a saved setting."""
+    harness["recorder"]._samples = np.zeros(
+        int(16_000 * engine_mod.MIN_RECORD_SEC / 2), np.float32)
+    harness["settings"].ignore_short_holds = False
+
+    harness["down"].add("rctrl")
+    wait_for(lambda: harness["recorder"].recording, what="recording to start")
+    harness["down"].clear()
+
+    wait_for(lambda: harness["texts"] == ["hello there"],
+             what="the short tap to be transcribed")
+
+
+def test_an_empty_recording_is_never_transcribed(harness):
+    """
+    Turning the minimum hold off means "do not discard short recordings", not
+    "hand an empty array to inference" -- which is the one input the model has
+    no answer for.
+    """
+    harness["recorder"]._samples = np.empty(0, np.float32)
+    harness["settings"].ignore_short_holds = False
+
+    harness["down"].add("rctrl")
+    wait_for(lambda: harness["recorder"].recording, what="recording to start")
+    harness["down"].clear()
+
+    wait_for(lambda: harness["states"][-1][0] == "idle", what="a return to idle")
+    assert harness["texts"] == []
+
+
+def test_the_start_click_plays_only_when_it_is_switched_on(harness):
+    harness["down"].add("rctrl")
+    wait_for(lambda: harness["recorder"].recording, what="recording to start")
+    harness["down"].clear()
+    wait_for(lambda: harness["texts"], what="the transcript")
+    assert harness["clicks"] == []
+
+    harness["settings"].start_click = True
+    harness["down"].add("rctrl")
+    wait_for(lambda: harness["clicks"], what="the click")
+
+
+# -- the vocabulary ----------------------------------------------------------
+
+def test_the_vocabulary_is_read_from_settings_at_transcription_time(harness):
+    """
+    The rules reach `transcribe_audio`, which is where the substitution happens
+    -- the only point that is both after `clean_text` and before `paste_text`.
+    Read live, like the chord, so an edit applies to the next thing said.
+    """
+    rules = (vocabulary.Rule("w s l", "WSL"),)
+    harness["settings"].vocabulary = rules
+
+    harness["down"].add("rctrl")
+    wait_for(lambda: harness["recorder"].recording, what="recording to start")
+    harness["down"].clear()
+    wait_for(lambda: harness["rules"], what="a transcription")
+
+    assert harness["rules"][-1] == rules
+
+
+# -- what the diagnostics panel reads ----------------------------------------
+
+def test_the_engine_remembers_what_the_last_dictation_cost(harness):
+    """
+    Both figures are already logged. They are kept as well, because OBS-4
+    guarantees debug_log.txt is plain text and not that any line in it has a
+    stable format -- a panel that parsed them back out would break silently the
+    first time a message was reworded.
+    """
+    assert harness["engine"].median_latency() is None
+
+    harness["down"].add("rctrl")
+    wait_for(lambda: harness["recorder"].recording, what="recording to start")
+    harness["down"].clear()
+    wait_for(lambda: harness.get("pasted"), what="a paste")
+
+    assert harness["engine"].median_latency() is not None
+    assert harness["engine"].last_paste_target == "TestClass"
+    assert "words" in harness["engine"].last_summary
+
+
+def test_the_latency_history_is_capped(harness):
+    """A median over the last twenty, not over the whole session."""
+    engine = harness["engine"]
+    engine._record_transcription(1.0, "one two three")
+    for _ in range(engine_mod.LATENCY_SAMPLES + 5):
+        engine._record_transcription(2.0, "one two three")
+    assert len(engine._latencies) == engine_mod.LATENCY_SAMPLES
+    assert engine.median_latency() == 2.0
+
+
+def test_the_level_and_device_readouts_tolerate_no_recorder(tmp_path):
+    """
+    The settings window can be built and shown before `run()` has made one, and
+    a panel that raised there would take the window down over a meter.
+    """
+    settings = config.Settings(path=str(tmp_path / "config.json"))
+    engine = engine_mod.Engine(settings, cuda_supported=False, on_state=lambda s, t: None)
+    assert engine.input_level() == 0.0
+    assert engine.input_device_name() == ""
+    assert engine.stream_is_open() is False
+    assert engine.median_latency() is None
+
+
 # -- the frontend cannot kill the loop ---------------------------------------
 
 def test_a_raising_state_callback_does_not_kill_the_poll_loop(monkeypatch, tmp_path):
@@ -247,7 +464,8 @@ def test_a_raising_state_callback_does_not_kill_the_poll_loop(monkeypatch, tmp_p
         transcribe, "load_model_with_fallback",
         lambda m, g, c, on_fallback=None: (object(), "cpu", "Ready (CPU)"))
     monkeypatch.setattr(audio_mod, "get_idle_duration", lambda: 9999.0)
-    monkeypatch.setattr(audio_mod, "Recorder", lambda samplerate: FakeRecorder())
+    monkeypatch.setattr(audio_mod, "Recorder",
+                        lambda samplerate, device=None: FakeRecorder())
 
     asked = []
     settings = config.Settings(path=str(tmp_path / "config.json"))

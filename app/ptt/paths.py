@@ -50,6 +50,25 @@ def local_model_dir(model_size):
     return os.path.join(APP_DIR, "models", model_size)
 
 
+def startup_shortcut_path():
+    """
+    The Startup-folder shortcut `install.ps1` creates, whose presence the
+    Advanced panel reports.
+
+    Built from `%APPDATA%` rather than through a shell-folder COM lookup: this
+    module owns paths and depends on nothing, and `install.ps1` writes the file
+    with `[Environment]::GetFolderPath('Startup')`, which resolves to the same
+    directory. The panel only reports whether it is there -- creating or
+    removing it is the installer's job, and duplicating its `.lnk` construction
+    and its run-as-admin byte patch inside the app is not in this pass.
+    """
+    return os.path.join(
+        os.environ.get("APPDATA", ""),
+        "Microsoft", "Windows", "Start Menu", "Programs", "Startup",
+        "PTT Dictation.lnk",
+    )
+
+
 def assets_dir():
     """Directory holding the bundled fonts, stylesheet and benchmark clip."""
     return os.path.join(APP_DIR, "assets")

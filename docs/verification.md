@@ -89,7 +89,9 @@ element is often pinned by several tests, and the ID is what other documents cit
 | `V-CF` | configuration | `design.md` §7 |
 | `V-EN` | the state machine | `design.md` §4, §6 |
 | `V-TR` | transcription and the model catalogue | `design.md` §6, `gui_handoff` §6.2 |
-| `V-UI` | the GUI's derived logic and data tables | `gui_handoff` §5, §6.1, §6.2 |
+| `V-AU` | microphone capture and device selection | `design.md` §4, `gui_handoff` §6.3 |
+| `V-VC` | the replacement-rule vocabulary | `gui_handoff` §6.4 |
+| `V-UI` | the GUI's derived logic and data tables | `gui_handoff` §5, §6.1 – §6.6 |
 | `V-M`  | manual, executed by hand against the running app | — |
 
 ---
@@ -124,6 +126,10 @@ element is often pinned by several tests, and the ID is what other documents cit
 | `V-CF-08` | §7 — `benchmarks` validated per entry | One malformed entry is dropped with its own log line; good entries beside it survive | `test_config.py::test_a_bad_benchmark_entry_is_dropped_and_logged` (6 shapes), `::test_a_bad_entry_does_not_take_the_good_ones_with_it` | `OBS-3` |
 | `V-CF-09` | §7 — **`save()` is atomic** | A save that fails part-way through writing leaves the previous file intact and readable, and removes its temporary file | `test_config.py::test_a_save_that_fails_mid_write_leaves_the_previous_file_intact`, `::test_a_failed_save_leaves_no_temporary_file_behind`, `::test_a_successful_save_leaves_no_temporary_file_behind` | `FR-8` |
 | `V-CF-10` | §7 — `save()` never raises | A read-only disk logs and continues; it must not take the application down mid-dictation | `test_config.py::test_save_never_raises_on_an_unwritable_path` | `FR-8` |
+| `V-CF-11` | §7 / `gui_handoff` §6.3 — `audio_device`, where **`None` means the Windows default** | The value every pre-GUI config carries by omission loads silently; a string, a float, a `bool` (which is an `int` in Python) and a negative index each fall back with their own reason; **device `0` is a real device**, not a falsy None | `test_config.py::test_a_null_device_means_the_system_default`, `::test_device_zero_is_a_real_device_and_not_a_falsy_none`, `::test_a_non_integer_device_falls_back_and_logs` (5 shapes), `::test_a_boolean_device_falls_back_and_logs`, `::test_a_negative_device_falls_back_and_logs` | `FR-8`, `OBS-3` |
+| `V-CF-12` | §7 / `gui_handoff` §6.3 — the three behaviour flags validated **by type** | `"false"` is a truthy string; read naively it would switch `FR-3`'s minimum hold on when the file says off. Each flag round-trips and each non-boolean falls back with its own log line | `test_config.py::test_each_behaviour_flag_round_trips`, `::test_a_non_boolean_flag_falls_back_and_logs` (3 flags × 6 shapes) | `FR-8`, `OBS-3` |
+| `V-CF-13` | §7 / `gui_handoff` §6.4 — `vocabulary` validated per rule | One malformed rule is dropped with its own reason and the good ones beside it survive; an **unrecognised scope drops the rule rather than widening it to Always**, which is the one fallback here that deliberately does nothing instead of doing less; order survives a round trip, because two phrases of the same length are applied in list order | `test_config.py::test_a_bad_rule_is_dropped_and_logged` (7 shapes), `::test_a_bad_rule_does_not_take_the_good_ones_with_it`, `::test_an_unknown_scope_is_dropped_rather_than_widened_to_always`, `::test_rule_order_survives_a_round_trip`, `::test_the_vocabulary_is_a_tuple_not_a_list` | `FR-8`, `OBS-3` |
+| **`V-CF-14`** | §7 — **every setting added this session defaults to what the build before it did** | A `config.json` from any earlier build names none of the new keys and must behave identically after an upgrade; and a file written by this build keeps `future_setting` beside all ten known keys, with one of each | `test_config.py::test_the_defaults_are_the_behaviour_of_the_build_before_this_one`, `::test_a_file_from_the_pre_gui_build_loads_and_saves_unchanged_in_meaning`, `::test_an_unknown_key_survives_beside_every_setting_this_build_owns` | `FR-8` |
 | **`V-EN-01`** | §6 *What makes the live re-read safe* | **The running loop picks up a rebound chord with no restart.** The real `Engine.run()` is driven on a thread, `settings.hotkey` is rebound mid-run, and the next poll asks about the new chord | `test_engine.py::test_hotkey_rebind_takes_effect_without_restart`, `::test_the_loop_never_caches_the_chord` | `FR-4`, `FR-C2` |
 | `V-EN-02` | §4 — the engine reports state through a callback | Hold → `recording`, release → `transcribing` → text → paste → `idle` | `test_engine.py::test_holding_the_chord_records_and_releasing_transcribes` | `FR-1`, `FR-2`, `FR-7` |
 | `V-EN-03` | §4 — a frontend bug cannot kill the poll loop | A raising `on_state` is swallowed and logged; the loop keeps polling | `test_engine.py::test_a_raising_state_callback_does_not_kill_the_poll_loop` | `FR-1` |
@@ -137,6 +143,22 @@ element is often pinned by several tests, and the ID is what other documents cit
 | `V-TR-04` | `gui_handoff` §6.2 — the benchmark clip is fixed | The bundled clip is mono 16-bit 16 kHz; loading returns float32 in range; a wrong-format clip **raises** rather than being measured silently | `test_transcribe.py::test_the_bundled_clip_is_the_format_the_benchmark_expects`, `::test_load_benchmark_clip_returns_float32_in_range`, `::test_load_benchmark_clip_refuses_the_wrong_format` (3 shapes) | — |
 | `V-TR-05` | `gui_handoff` §6.2 — measurements are self-invalidating | The clip digest is stable, changes when the clip changes, and is empty when the clip is missing | `test_transcribe.py` — 3 `benchmark_clip_id` tests | — |
 | `V-TR-06` | `gui_handoff` §6.2 — a model on disk is reported as on disk | A bundled directory is reported with its real byte count | `test_transcribe.py::test_installed_sizes_reports_a_bundled_model_directory` | — |
+| `V-TR-07` | `gui_handoff` §6.4 — **the substitution point** | The vocabulary is applied inside `transcribe_audio`, immediately after `clean_text` — the only point that is genuinely both "after `clean_text`" and "before `paste_text`", because `clean_text` is called from in there. Order is asserted, not assumed: the rule used can only match once the run of full stops has been stripped. No rules is the identity, so the benchmark path measures the dictation path | `test_transcribe.py::test_the_vocabulary_is_applied_inside_transcribe_audio`, `::test_substitution_happens_after_the_cleanup_not_before`, `::test_no_vocabulary_leaves_the_cleaned_text_alone` | `FR-8` |
+| `V-TR-08` | `gui_handoff` §6.5 — the inference flags are values, not literals | `BEAM_SIZE`, `VAD_FILTER` and `LANGUAGE` are what is passed to the model, which is what lets the Advanced panel call them the values in force | `test_transcribe.py::test_transcribe_audio_passes_the_flags_the_advanced_panel_reports` | — |
+| `V-AU-01` | `gui_handoff` §6.3 — the enumeration | Only capture devices are listed; each row is labelled by name alone, with the host API added only for a device the picker did not offer; a nameless device still gets a label; a failed query reports nothing rather than raising | `test_audio.py::test_only_capture_devices_are_offered`, `::test_a_device_is_labelled_with_its_name_alone`, `::test_a_device_from_another_api_can_be_labelled_with_it`, `::test_a_nameless_device_still_has_a_label`, `::test_enumeration_reports_nothing_rather_than_raising` | `NFR-4` |
+| **`V-AU-06`** | `gui_handoff` §6.3 — **the picker offers one host API's copies** | PortAudio reports every device once per Windows audio API — fourteen rows for one array microphone on the test machine, including two `PC Speaker` outputs, a `Stereo Mix` loopback and two "the default device" placeholders. The picker shows one API's copies, drops the placeholders, and **never offers WASAPI** (which cannot open at Whisper's 16 kHz: `Invalid sample rate`) **or WDM-KS**. An unfamiliar machine is offered every real device rather than an empty list | `test_audio.py::test_the_picker_shows_one_host_apis_copies`, `::test_wasapi_is_never_offered`, `::test_kernel_streaming_is_never_offered`, `::test_the_picker_falls_back_through_the_host_apis`, `::test_placeholders_are_not_devices`, `::test_an_unfamiliar_machine_is_offered_everything_real` | — |
+| `V-AU-07` | `gui_handoff` §6.3 — nothing is hidden silently, and no name is cut off | The full enumeration is logged once per run with every index and a `[hidden]` marker, so `audio_device` can be set by hand to anything the picker omits. MME truncates names at 31 characters — which is where the popover's `Microphone Array (Intel® Smart ` came from — so a name at exactly that length is expanded from another API's copy, and one that is merely short never is | `test_audio.py::test_the_enumeration_is_logged_once_with_every_index`, `::test_a_truncated_name_is_expanded_from_another_apis_copy`, `::test_a_short_name_is_never_lengthened`, `::test_a_truncated_name_with_no_longer_copy_is_left_alone` | `OBS-3` |
+| **`V-AU-02`** | `gui_handoff` §6.3 — **enumerating does not disturb a running stream** | PortAudio reference-counts `Pa_Initialize`, so the picker's query nests inside whatever the open stream holds and leaves the count as it found it. Terminating one time too many would close the stream out from under a recording; one too few leaves PortAudio initialised, which is what stops the machine sleeping (issue #6) | `test_audio.py::test_enumeration_leaves_portaudio_as_it_found_it` | `NFR-4` |
+| `V-AU-03` | `gui_handoff` §6.3 — a saved index is checked before it is used | PortAudio renumbers when a device is plugged in or removed, so an index that no longer exists, or that now names an output, falls back to the Windows default **with a reason in the log**. Device `0` is opened rather than read as "no device" | `test_audio.py::test_an_index_that_no_longer_exists_falls_back_and_logs`, `::test_an_index_that_is_now_an_output_device_falls_back_and_logs`, `::test_device_zero_is_opened_and_not_read_as_no_device`, `::test_a_chosen_device_is_the_one_opened` | `OBS-3` |
+| **`V-AU-04`** | `gui_handoff` §6.3 — **a device that refuses to open falls back** | PortAudio *lists devices it cannot open* — several WDM-KS entries on the test machine advertise input channels and then fail with `Invalid device`. Without the fallback, choosing one leaves no stream at all: the hotkey does nothing and only the log says why. If nothing opens, PortAudio is released rather than left initialised. The saved choice is never rewritten — an unplugged headset comes back | `test_audio.py::test_a_device_that_refuses_to_open_falls_back_to_the_default`, `::test_nothing_opening_at_all_releases_portaudio`, `::test_a_refused_device_is_not_forgotten` | `FR-8`, `OBS-3` |
+| `V-AU-05` | `gui_handoff` §6.3 — the level the meter reads | The callback publishes the block's peak magnitude on a plain attribute; a closed stream reads as silent rather than freezing at the last block; metering did not cost the pre-roll, and a cold start correctly has none to seed from | `test_audio.py::test_the_callback_publishes_the_block_peak`, `::test_the_peak_is_magnitude_not_sign`, `::test_a_closed_stream_reads_as_silent`, `::test_the_callback_still_fills_the_preroll`, `::test_a_cold_start_has_no_preroll_to_seed_from` | `NFR-3` |
+| `V-VC-01` | `gui_handoff` §6.4 — a rule is validated field by field | Non-object, missing or non-string `heard`, empty `heard`, non-string `typed`, non-string scope — each rejected with its own reason, and `parse_rule` never raises. An empty replacement is allowed, because deleting a filler word is a real rule. `heard` is normalised on the way in, since Whisper emits single spaces | `test_vocabulary.py` — 8 `parse_rule` tests | `FR-8` |
+| `V-VC-02` | `gui_handoff` §6.4 — whole-word, case-insensitive, literal | Case is ignored and the replacement keeps its own; `w s l` does not fire inside `w s lot`; a phrase matches across any whitespace; every occurrence is replaced; metacharacters in the phrase and backreferences in the replacement are literal text | `test_vocabulary.py` — 9 matching tests | `FR-8` |
+| **`V-VC-03`** | `gui_handoff` §6.4 — **the three semantics the specification left open** | One pass, so a replacement is never itself replaced and two rules that map into each other terminate; the longest phrase wins wherever two could match, so adding `w s l two` beside `w s l` does not silently never fire; ties go in list order. The ordering is asserted directly as well as through its effect | `test_vocabulary.py::test_a_replacement_is_never_itself_replaced`, `::test_the_longest_phrase_wins_wherever_two_rules_could_match`, `::test_two_phrases_of_the_same_length_go_in_list_order`, `::test_compile_rules_orders_longest_first` | `FR-8` |
+| `V-VC-04` | `gui_handoff` §6.4 — substitution never costs the transcript | The user has already said the words; a rule that somehow arrives malformed loses the substitution, not the sentence | `test_vocabulary.py::test_a_broken_rule_returns_the_transcript_rather_than_losing_it` | `OBS-1` |
+| **`V-EN-08`** | `gui_handoff` §6.3 — **the input device is re-read live** | The running loop picks up a new device and reopens the stream, and does **not** reload the model — the Audio panel applies with `reload_model=False` and relies entirely on this. A change made *while the hotkey is held* is deliberately not taken up until the recording ends: PortAudio binds the device when the stream is created, so acting on it sooner would leave the two indexes matching and the old stream open indefinitely | `test_engine.py::test_the_loop_picks_up_a_new_input_device_without_restart`, `::test_changing_the_device_reopens_the_stream`, `::test_a_device_chosen_mid_recording_applies_to_the_next_one` | `FR-8` |
+| **`V-EN-09`** | `gui_handoff` §6.3 — **the two behaviour flags gate the constants, they do not zero them** | With the warm stream off the device is released between recordings and `rec.start()` opens it for the recording itself, then it is released again — a threshold of zero would instead close and reopen it every poll iteration, which is issue #6 at 50 Hz. With the minimum hold off a short tap is transcribed, but an **empty** buffer never is | `test_engine.py::test_the_warm_stream_holds_the_device_open_between_recordings`, `::test_turning_the_warm_stream_off_releases_the_device_when_idle`, `::test_a_recording_still_works_with_the_warm_stream_off`, `::test_turning_the_minimum_hold_off_transcribes_a_short_tap`, `::test_an_empty_recording_is_never_transcribed`, `::test_the_start_click_plays_only_when_it_is_switched_on` | `FR-3`, `NFR-2`, `NFR-4` |
+| `V-EN-10` | `gui_handoff` §6.6 — the diagnostics figures are **kept, not parsed back out of the log** | The engine remembers the transcription time and the paste target it already computed; the history is capped, so the median describes now rather than the whole session; and every accessor tolerates being called before `run()` has built a recorder, which is when the settings window is constructed | `test_engine.py::test_the_engine_remembers_what_the_last_dictation_cost`, `::test_the_latency_history_is_capped`, `::test_the_level_and_device_readouts_tolerate_no_recorder` | `OBS-4` |
 
 ### 3.2 GUI — `gui_handoff/gui_handoff.md`
 
@@ -154,22 +176,27 @@ element is often pinned by several tests, and the ID is what other documents cit
 | `V-UI-08` | §6.1 — the picker's rules | The three-key cap; "match either side" expands to the right-hand key, which is the safer side and the same reason the default is Right Ctrl | `test_panels.py::test_the_chord_cap_matches_the_engines_limit`, `::test_the_preferred_side_is_the_right_hand_one` | `FR-4` |
 | `V-UI-09` | §6.2 — a measurement is keyed by model **and** device | A CPU figure and a CUDA figure are different numbers about different hardware | `test_panels.py::test_benchmark_key_names_the_model_and_the_device` | — |
 | `V-UI-10` | §6.2 — a measured size is never confusable with an estimate | MB below a gigabyte, GB above, and no `~` prefix on a real figure | `test_panels.py::test_format_bytes_uses_megabytes_below_a_gigabyte`, `::test_format_bytes_switches_to_gigabytes_at_the_boundary`, `::test_a_measured_size_is_not_marked_as_an_estimate` | — |
+| `V-UI-11` | §6.3 — the meter is a **dB** scale, not a linear one | Silence reads as the floor rather than `-inf`, full scale is 0 dBFS, anything audible lights at least one bar, and ordinary speech (0.05 – 0.2 peak) lands in the middle rather than as a twitch at the left-hand end — which on a linear bar reads as a broken microphone | `test_panels.py::test_silence_reads_as_the_floor_rather_than_minus_infinity`, `::test_full_scale_is_zero_dbfs`, `::test_a_quiet_signal_is_floored_rather_than_reported_precisely`, `::test_the_meter_is_dark_only_in_silence`, `::test_the_meter_is_full_at_full_scale`, `::test_ordinary_speech_lands_in_the_middle_of_the_meter`, `::test_the_meter_never_overflows_its_bars` | — |
+| **`V-UI-12`** | §6.5 — **the Advanced table reads the live constants** | Every row reports the value the engine is actually using, so the page a user consults when they doubt what is in force cannot drift away from it; a constant the Audio tab has switched off says so, so the two panels cannot disagree; the Startup shortcut is reached through `paths`, not by assembling `%APPDATA%` in the panel | `test_panels.py::test_every_advanced_row_reports_the_live_constant`, `::test_the_voice_activity_filter_row_reports_the_flag_inference_uses`, `::test_a_constant_the_audio_tab_has_switched_off_says_so`, `::test_every_advanced_row_says_what_it_is_for`, `::test_the_startup_row_reads_the_shortcut_through_paths` | — |
+| `V-UI-13` | §6.6 — the log tail is read from the **end** of the file | The last lines in file order; a short log whole; a long one read through a window rather than in full, since this runs every 1.5 s while the tab is open; the partial first line a byte-offset seek produces is dropped; a missing log is empty rather than an exception; an undecodable byte does not lose the line, because this panel is where you look after a crash | `test_panels.py::test_the_tail_returns_the_last_lines_in_file_order`, `::test_a_short_log_is_returned_whole`, `::test_the_tail_reads_from_the_end_rather_than_the_whole_file`, `::test_a_partial_first_line_is_dropped`, `::test_a_missing_log_is_empty_rather_than_an_exception`, `::test_an_undecodable_byte_does_not_lose_the_line` | `OBS-4` |
 
 ---
 
 ## 4. Automated tests
 
-**176 tests, 134 test functions, ~2 s.** Last run **2026-08-24** against commit
-`0722294`: **176 passed, 0 failed.**
+**325 tests, 249 test functions, ~4 s.** Last run **2026-08-24** on the session-4
+working tree: **325 passed, 0 failed.**
 
 | Module | Tests | Covers |
 |---|---:|---|
+| `tests/test_config.py` | 91 | `V-CF-01` … `V-CF-14` |
 | `tests/test_hotkey.py` | 56 | `V-HK-01` … `V-HK-14` |
-| `tests/test_config.py` | 42 | `V-CF-01` … `V-CF-10` |
-| `tests/test_transcribe.py` | 25 | `V-TR-01` … `V-TR-06` |
+| `tests/test_panels.py` | 35 | `V-UI-04` … `V-UI-13` |
+| `tests/test_vocabulary.py` | 31 | `V-VC-01` … `V-VC-04` |
+| `tests/test_transcribe.py` | 30 | `V-TR-01` … `V-TR-08` |
 | `tests/test_statusview.py` | 25 | `V-UI-01` … `V-UI-03` |
-| `tests/test_panels.py` | 16 | `V-UI-04` … `V-UI-10` |
-| `tests/test_engine.py` | 12 | `V-EN-01` … `V-EN-07` |
+| `tests/test_engine.py` | 25 | `V-EN-01` … `V-EN-10` |
+| `tests/test_audio.py` | 32 | `V-AU-01` … `V-AU-07` |
 
 A result recorded here is a snapshot and can go stale. The command in section 1 is the
 authority; this row exists so a reader knows what the suite looked like when it was last
@@ -185,6 +212,11 @@ these deliberately reintroduces a defect the design forbids, and the matching it
 | Revert `win` to a single virtual key (`0x5B`) | `V-HK-07` | 2 tests failed ✅ |
 | Broaden the layout-switch rule to "any multi-key chord with a shift" | `V-HK-12` | 3 tests failed ✅ |
 | Restore the truncating `open(path, "w")` in `Settings.save` | `V-CF-09` | 1 test failed ✅ |
+| Apply vocabulary rules in list order rather than longest-phrase-first | `V-VC-03` | 2 tests failed ✅ |
+| Remove the fall back to the default device when the chosen one refuses to open | `V-AU-04` | 1 test failed ✅ |
+| Validate the behaviour flags by truthiness instead of by type | `V-CF-12` | 18 tests failed ✅ |
+| Offer the whole enumeration in the picker instead of one host API's copies | `V-AU-06` | 3 tests failed ✅ |
+| Stop expanding MME's truncated device names | `V-AU-07` | 1 test failed ✅ |
 
 The third initially did **not** fail, and that is the most useful thing in this section.
 The first version of `V-CF-09` failed the save on a *missing directory*, which raises at
@@ -233,6 +265,7 @@ Build: commit `3443a03`, run via `run_tray.bat`. Hardware: laptop, no numeric ke
 
 **22 passed, 2 not run, 0 failed.**
 
+
 `V-M-06` and `V-M-07` were first reported as failures. They were not: the instruction did
 not say to release the key while the window was out of focus, so the tester returned still
 holding it — at which point re-shading is correct. The behaviour was then confirmed
@@ -241,6 +274,59 @@ window hidden × key held / released), all correct, and the two items re-run and
 The lesson is recorded because it cost a round trip: **a manual test step must state every
 precondition that changes the expected result, or a correct implementation reads as a
 defect.**
+
+### 5.2 Session 4 — Audio, Vocabulary, Advanced and Diagnostics · 2026-08-24
+
+Two kinds of item here, and the difference matters when reading the results.
+
+`V-M-26` … `V-M-35` were run **instrumented**: a script builds the real widgets under a
+real `QApplication` with a stub engine, drives the controls through the same handlers a
+click reaches, and reads back `config.json`; the audio ones drive the real `Recorder`
+against this machine's real PortAudio. They are not hand tests and they are not automated
+either — nothing re-runs them — but they exercise Qt and PortAudio, which the suite in
+section 4 deliberately does not.
+
+`V-M-36` onward were run **by hand** against the running tray application, on the same
+laptop as session 3 — one physical microphone, no numeric keypad. Six of them are
+still outstanding and say so.
+
+| ID | Test | Result |
+|---|---|---|
+| `V-M-26` | Render all six tabs at the default 880 × 800 and again at the stated minimum 820 × 620; no tab scrolls horizontally | ✅ pass — **after a fix.** The device combo sized itself to its longest entry (a 70-character WDM-KS name), giving the Audio panel a 1003 px minimum and a horizontal scrollbar under every tab |
+| `V-M-27` | Toggle each Audio checkbox; `config.json` gains the key with the new value | ✅ pass — `keep_stream_warm: false`, `start_click: true`, `future_setting` still present |
+| `V-M-28` | Choose a specific device in the picker; `audio_device` is written and no model reload is requested | ✅ pass — `audio_device: 24`, engine untouched |
+| `V-M-29` | With **Keep the stream warm** cleared, the Advanced tab's *Release microphone when idle* row | ✅ pass — reads `240 s · bypassed from the Audio tab` |
+| `V-M-30` | Add, edit, delete and undo a vocabulary rule; each writes `config.json` | ✅ pass — including the deleted rule returning to its own index |
+| `V-M-31` | Edit a Heard cell to whitespace only | ✅ pass — the edit is refused and the cell keeps its text |
+| `V-M-32` | Load a `config.json` naming device 9999 and open the Audio tab | ✅ pass — combo reads `Device 9999 — not connected` rather than silently showing the fallback as the choice |
+| `V-M-33` | Open a real stream on the default device, on a listed WDM-KS device, and on an absent index | ✅ pass — **after a fix.** Device 24 is listed with two input channels and then fails with `Invalid device [PaErrorCode -9996]`; before the fallback the app had no stream at all. See `V-AU-04` |
+| `V-M-34` | Enumerate devices while a stream is open | ✅ pass — 14 devices returned, the stream stayed open and kept capturing |
+| `V-M-35` | Round-trip `config.json` through the **pre-GUI** `config.py` (`2a0a018`): this build writes all ten keys, the old build loads it, changes the hotkey and saves, this build reads it back | ✅ pass — the old build loaded it with no warnings, kept all five new keys plus `future_setting` as unknowns, and every setting survived the return trip |
+| `V-M-36` | In Notepad, hold Right Ctrl, speak, release | ✅ pass — text pastes at the caret. The regression check on this session's changes to the poll loop's stream lifecycle and its transcription call |
+| `V-M-37` | Add a rule, dictate a sentence containing the phrase | ✅ pass — the replacement is what lands, not what was said |
+| `V-M-38` | Open **Audio** and speak at normal volume | ✅ pass — the bars track speech and fall away in the gaps; the dBFS readout is legible. The dB scale reads correctly at ordinary speaking level |
+| `V-M-39` | Pick a specific microphone, dictate, and confirm from the log that the transcript came from that device | 🟡 **partial.** Six entries were each selected and dictated through against the *unfiltered* fourteen-row list, and all six recorded and pasted. That is weaker evidence than it looks: at least one entry on that list (`24`, WDM-KS `Input ()`) cannot be opened, and `V-AU-04`'s fallback means a device that refuses to open still dictates — successfully, from the default. **Only the log distinguishes the two.** What is confirmed is that selecting a non-default index never breaks dictation; what is not is that a chosen device was the one recorded from |
+| `V-M-49` | Reduce the picker to one row per microphone and confirm what it offers | ✅ pass — fourteen entries became one, with the full 72-character name rather than MME's 31-character truncation; a hand-set hidden index still displays, labelled with its host API |
+| `V-M-40` | Open **Diagnostics** after two or three dictations | ✅ pass — median latency and paste target both show figures, and the tail follows new lines |
+| `V-M-41` | Hover the tray icon | ✅ pass — the popover's `Microphone` row names the device and `Last` shows the duration and word count. Both had shown an em dash since session 2; the word count is right and the timing looks right |
+| `V-M-42` | Maximise the window and visit each tab | ✅ pass — no horizontal scrollbar on any tab. **Not the same test as `V-M-26`**: the minimum-size case for the four new tabs is still covered only by that programmatic check, and by `V-M-22` for the two older ones |
+| `V-M-43` | Tick **Play a click when recording starts**, hold the hotkey, speak, release | ✅ pass — the sound plays and the transcript carries no spurious words from it. The open-microphone concern that kept it off by default did not materialise here |
+| `V-M-44` | Clear **Keep the stream warm**, wait, then dictate | ⬜ **not run** |
+| `V-M-45` | Clear **Ignore holds shorter than 0.30 s**, tap the hotkey, then tap it with no speech at all | ⬜ **not run** |
+| `V-M-46` | Press **Open log folder**, then **Reload model** | ⬜ **not run** |
+| `V-M-47` | Unplug the chosen microphone while the app runs, then dictate | ⬜ **not run** |
+| `V-M-48` | Exit and relaunch: device, checkboxes and rules are as left; `future_setting` still in `config.json` | ⬜ **not run** |
+
+**18 passed, 1 partial, 5 not run, 0 failed.** Both defects found this session were found by the
+instrumented run and are fixed; neither would have been caught by the suite in section 4,
+because one is a layout consequence of real device names and the other needs a device
+that exists, advertises input channels, and refuses to open.
+
+The five that carry the most weight all passed: dictation still works after the poll
+loop changed (`V-M-36`), a rule reaches the clipboard through the real model and the real
+paste (`V-M-37`), and the two judgement calls the instrumented run could not settle — the
+meter's dB scale and whether an open microphone hears the start click — both came out the
+way the design assumed (`V-M-38`, `V-M-43`).
 
 ---
 
@@ -258,7 +344,7 @@ status is tracked here.
 | 5 | Clicking `Right Shift` then holding it records, with no restart | ✅ `V-M-08`, `V-M-24`, and `V-EN-01` |
 | 6 | GPU→CPU reloads; `config.json` written before the reload; status bar confirms | ✅ `V-M-17` |
 | 7 | On a machine without CUDA the GPU toggle is disabled with a visible reason | ⬜ **not verifiable here** — this machine has CUDA. `V-EN-06` covers the engine half |
-| 8 | `config.json` round-trips with the current build; unknown keys survive | ✅ `V-CF-02`, and verified against the pre-GUI `config.py` in both directions |
+| 8 | `config.json` round-trips with the current build; unknown keys survive | ✅ `V-CF-02`, `V-CF-14`, and verified against the pre-GUI `config.py` in both directions |
 | 9 | No UI object is touched from the engine thread | 🟡 asserted at runtime in `qt_tray.on_state_changed`; no automated test |
 | 10 | `build_portable.py` produces a zip that runs on a clean Windows 11 machine | ⬜ **not run** — session 5 |
 
@@ -277,7 +363,13 @@ Stated rather than omitted. Anything here is a known hole, not an oversight.
 | `FR-C1`, `FR-C4`, `FR-C5`, `FR-2` — insertion behaviour | Behaviours of *another process's* window: menu activation, caret loss, clipboard restoration, UIPI. Not unit-testable; the probe harness is the instrument | session 5 |
 | `NFR-1`, `NFR-2`, `NFR-3` — latency and pre-roll | Need real audio hardware and a stopwatch. The Model panel's Measure button is the closest thing and is `V-EN-07` | — |
 | `FR-9` — no zombie process on exit | Observable only against a real process tree | manual |
-| The `+` registration marks (`gui_handoff` §9) | Not implemented on any panel | session 4 or later |
+| The `+` registration marks (`gui_handoff` §9) | Not implemented on any panel | session 5 or later |
+| **That a chosen device is the one recorded from** (`V-M-39`) | One physical microphone on the test machine, so every entry sounds identical — and `V-AU-04`'s open-time fallback means an unopenable device still dictates, from the default. Six entries were dictated through successfully; only `debug_log.txt` says which device each actually used, and it was not read at the time. Needs a second physical microphone to settle | next desktop session |
+| The warm stream switched off (`V-M-44`), the minimum hold switched off (`V-M-45`), the two Diagnostics buttons (`V-M-46`), unplugging the chosen device (`V-M-47`), and persistence across a restart (`V-M-48`) | Not run in session 4. Each is covered by the suite in section 4 at the engine level — `V-EN-09`, `V-AU-04`, `V-CF-14` — so what is missing is the behaviour of the real application, not the logic | next desktop session |
+| The four new tabs at the window's **minimum** size | `V-M-42` was run maximised. The minimum-size case is covered programmatically by `V-M-26` and, for the two older tabs only, by hand in `V-M-22` | next desktop session |
+| Per-application vocabulary scopes | `gui_handoff` §11 puts them out of scope for the first pass. The field is stored and validated and one value is accepted; a rule with any other scope is dropped and logged, so nothing silently applies more widely than it was written | — |
+| Making an Advanced value editable | Every one of them fixed a documented failure, so none is exposed. §6.5's rule stands: exposing one makes it a validated `Settings` field with a logged fallback, and `Shift+Insert` additionally has to warn on change | — |
+| "Start with Windows" as a control rather than a readout | Setting it means creating a `.lnk` through COM and re-applying `install.ps1`'s run-as-admin byte patch — the installer's logic, duplicated in the app | — |
 
 ---
 
@@ -285,6 +377,7 @@ Stated rather than omitted. Anything here is a known hole, not an oversight.
 
 | Date | Commit | Change |
 |---|---|---|
+| 2026-08-24 | — | Audio, Vocabulary, Advanced and Diagnostics panels. `V-CF-11` … `V-CF-14`, `V-TR-07`, `V-TR-08`, `V-AU-01` … `V-AU-05`, `V-VC-01` … `V-VC-04`, `V-EN-08` … `V-EN-10`, `V-UI-11` … `V-UI-13` added; suite 176 → 325; three more mutations checked; `V-M-26` … `V-M-49` executed, 18 of 24 passing; the device picker reduced from fourteen rows to one after review |
 | 2026-08-23 | `3443a03` | Hotkey and Model panels; `V-M-01` … `V-M-25` executed |
 | 2026-08-23 | `0722294` | Unit suite added — 176 tests, `V-HK`, `V-CF`, `V-EN`, `V-TR`, `V-UI`; mutation-checked |
 | 2026-08-24 | — | This document created; test material moved out of `design.md` §8 and `development_history.md` |

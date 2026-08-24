@@ -9,8 +9,10 @@ That light/dark split is the whole colour scheme in one rule -- dark surfaces
 are read-only, light surfaces are interactive -- and section 5 says not to
 invert it.
 
-The Hotkey and Model panels are real; the remaining four arrive in the next
-session and say so rather than looking broken.
+All six panels are real. Every one of them is an `InstantApplyPanel`, including
+the two that write nothing: Advanced and Diagnostics need the engine hand-off
+and the status-bar message channel, and nothing else in this window supplies
+either.
 
 **There is no OK / Apply / Cancel.** Every control applies instantly and
 confirms in the status bar; `flash_saved` is that confirmation, and every panel
@@ -28,17 +30,13 @@ from PySide6.QtWidgets import (
 )
 
 from ptt.ui.panels import InstantApplyPanel
+from ptt.ui.panels.advanced import AdvancedPanel
+from ptt.ui.panels.audio import AudioPanel
+from ptt.ui.panels.diagnostics import DiagnosticsPanel
 from ptt.ui.panels.hotkey import HotkeyPanel
 from ptt.ui.panels.model import ModelPanel
+from ptt.ui.panels.vocabulary import VocabularyPanel
 from ptt.ui.qt_statusview import StatusView
-
-#: The tabs still waiting on a session, and what each one will hold.
-PLACEHOLDERS = (
-    ("Audio",       "input device, level meter and recording behaviour"),
-    ("Vocabulary",  "replacement rules applied before the text is pasted"),
-    ("Advanced",    "the engine constants, and why each one is what it is"),
-    ("Diagnostics", "CUDA state, latency, and the tail of debug_log.txt"),
-)
 
 #: Default size. gui_handoff section 6 fixes the width at ~880 and gives a
 #: minimum, not a height; this is the height the content actually needs. The
@@ -58,33 +56,6 @@ SAVED_FLASH_MS = 4000
 
 #: How long a panel's transient note stays there.
 MESSAGE_MS = 8000
-
-
-class PlaceholderPanel(QWidget):
-    """A tab with nothing in it yet, saying so rather than looking broken."""
-
-    def __init__(self, title, blurb, parent=None):
-        super().__init__(parent)
-        self.setObjectName("panel")
-
-        box = QVBoxLayout(self)
-        box.setContentsMargins(28, 24, 28, 24)
-        box.setSpacing(6)
-
-        heading = QLabel(title)
-        heading.setObjectName("panelTitle")
-        blurb_label = QLabel(blurb)
-        blurb_label.setObjectName("panelBlurb")
-        blurb_label.setWordWrap(True)
-
-        note = QLabel("Not built yet.")
-        note.setObjectName("panelPlaceholder")
-
-        box.addWidget(heading)
-        box.addWidget(blurb_label)
-        box.addSpacing(18)
-        box.addWidget(note)
-        box.addStretch(1)
 
 
 class SettingsWindow(QMainWindow):
@@ -118,8 +89,10 @@ class SettingsWindow(QMainWindow):
         self._add_panel("Hotkey", HotkeyPanel(settings))
         self._model_panel = ModelPanel(settings, cuda_supported)
         self._add_panel("Model", self._model_panel)
-        for title, blurb in PLACEHOLDERS:
-            self._add_tab(title, PlaceholderPanel(title, blurb))
+        self._add_panel("Audio", AudioPanel(settings))
+        self._add_panel("Vocabulary", VocabularyPanel(settings))
+        self._add_panel("Advanced", AdvancedPanel(settings))
+        self._add_panel("Diagnostics", DiagnosticsPanel(settings, cuda_supported))
 
         layout.addWidget(self.tabs, 1)
         self.setCentralWidget(central)
