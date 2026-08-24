@@ -58,6 +58,22 @@ QWidget#statusDot[state="transcribing"] { qproperty-dotColour: #f59e0b; }
 QWidget#statusDot[state="error"]        { qproperty-dotColour: #8c3a2e; }  /* dark red */
 
 
+/* -- the + registration marks (section 9's `.blueprint`) --------------
+   Painted by RegistrationMarks.paint_registration_marks, coloured from
+   here for the same reason the status dot is: no colour in Python.
+
+   Two values rather than one, because the reference's single value does
+   not survive the light/dark split this UI is built on. `industry.css`
+   uses the body text at 55%, which is right on the light ground and
+   invisible on the dark one -- so the dark surface uses its own text
+   colour instead, at a lower alpha because a light mark on a dark
+   ground reads stronger than the reverse at equal opacity.
+   -------------------------------------------------------------------- */
+
+QFrame#statusView { qproperty-markColour: rgba(231, 234, 238, 0.34); }
+QWidget#panel     { qproperty-markColour: rgba(29, 31, 32, 0.55); }
+
+
 /* -- the read-only ground: popover body and window banner ------------ */
 
 QFrame#statusView {

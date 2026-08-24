@@ -179,6 +179,7 @@ The three layers described in section 1 are `app/ptt/ui/`, one module per piece:
 | `ui/qt_window.py` | Layer 3: the `QMainWindow`, the tab bar and the status bar. |
 | `ui/qt_statusview.py` | The read-only state display — built once and embedded twice, as the popover's body and as the window's banner, so the two cannot drift apart. |
 | `ui/qt_theme.py` | Registers the bundled fonts and applies `style.qss`. |
+| `ui/qt_marks.py` | The small `+` registration marks at the corners of the status panel and every tab — the crosshair a printer uses to align colour plates, and the motif that makes the window read as a technical drawing. |
 | `ui/panels/` | One module per tab: `hotkey`, `model`, `audio`, `vocabulary`, `advanced`, `diagnostics`. `panels/__init__.py` holds `InstantApplyPanel`, the one write-then-save-then-tell-the-engine sequence every control routes through. |
 
 **The engine never imports the UI.** It reports state through a callback the frontend

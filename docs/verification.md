@@ -179,20 +179,21 @@ element is often pinned by several tests, and the ID is what other documents cit
 | `V-UI-11` | §6.3 — the meter is a **dB** scale, not a linear one | Silence reads as the floor rather than `-inf`, full scale is 0 dBFS, anything audible lights at least one bar, and ordinary speech (0.05 – 0.2 peak) lands in the middle rather than as a twitch at the left-hand end — which on a linear bar reads as a broken microphone | `test_panels.py::test_silence_reads_as_the_floor_rather_than_minus_infinity`, `::test_full_scale_is_zero_dbfs`, `::test_a_quiet_signal_is_floored_rather_than_reported_precisely`, `::test_the_meter_is_dark_only_in_silence`, `::test_the_meter_is_full_at_full_scale`, `::test_ordinary_speech_lands_in_the_middle_of_the_meter`, `::test_the_meter_never_overflows_its_bars` | — |
 | **`V-UI-12`** | §6.5 — **the Advanced table reads the live constants** | Every row reports the value the engine is actually using, so the page a user consults when they doubt what is in force cannot drift away from it; a constant the Audio tab has switched off says so, so the two panels cannot disagree; the Startup shortcut is reached through `paths`, not by assembling `%APPDATA%` in the panel | `test_panels.py::test_every_advanced_row_reports_the_live_constant`, `::test_the_voice_activity_filter_row_reports_the_flag_inference_uses`, `::test_a_constant_the_audio_tab_has_switched_off_says_so`, `::test_every_advanced_row_says_what_it_is_for`, `::test_the_startup_row_reads_the_shortcut_through_paths` | — |
 | `V-UI-13` | §6.6 — the log tail is read from the **end** of the file | The last lines in file order; a short log whole; a long one read through a window rather than in full, since this runs every 1.5 s while the tab is open; the partial first line a byte-offset seek produces is dropped; a missing log is empty rather than an exception; an undecodable byte does not lose the line, because this panel is where you look after a crash | `test_panels.py::test_the_tail_returns_the_last_lines_in_file_order`, `::test_a_short_log_is_returned_whole`, `::test_the_tail_reads_from_the_end_rather_than_the_whole_file`, `::test_a_partial_first_line_is_dropped`, `::test_a_missing_log_is_empty_rather_than_an_exception`, `::test_an_undecodable_byte_does_not_lose_the_line` | `OBS-4` |
+| **`V-UI-14`** | §9 — **the `+` registration marks** | Four crossings, one per corner, every arm inside the widget (Qt clips a paintEvent to its widget, so an arm that overflows is silently cropped rather than reported); symmetric; **nothing at all** rather than overlapping marks when the widget is too small, which a panel in a `QScrollArea` can be; an odd mark size so the crossing lands on a whole pixel; no colour defined in Python; and the mixin actually reaching both ground surfaces and all six panels | `test_panels.py` — 8 `mark_centres` and mixin tests | — |
 
 ---
 
 ## 4. Automated tests
 
-**325 tests, 249 test functions, ~4 s.** Last run **2026-08-24** at the start of the
-session-5 acceptance pass, on the working tree at commit `840a626`:
-**325 passed, 0 failed, in 4.15 s.**
+**333 tests, 257 test functions, ~4 s.** Last run **2026-08-24** after the registration
+marks were added: **333 passed, 0 failed, in 4.25 s.** The acceptance pass earlier the
+same day ran 325 at commit `840a626`, also all passing.
 
 | Module | Tests | Covers |
 |---|---:|---|
 | `tests/test_config.py` | 91 | `V-CF-01` … `V-CF-14` |
 | `tests/test_hotkey.py` | 56 | `V-HK-01` … `V-HK-14` |
-| `tests/test_panels.py` | 35 | `V-UI-04` … `V-UI-13` |
+| `tests/test_panels.py` | 43 | `V-UI-04` … `V-UI-14` |
 | `tests/test_vocabulary.py` | 31 | `V-VC-01` … `V-VC-04` |
 | `tests/test_transcribe.py` | 30 | `V-TR-01` … `V-TR-08` |
 | `tests/test_statusview.py` | 25 | `V-UI-01` … `V-UI-03` |
@@ -218,6 +219,10 @@ these deliberately reintroduces a defect the design forbids, and the matching it
 | Validate the behaviour flags by truthiness instead of by type | `V-CF-12` | 18 tests failed ✅ |
 | Offer the whole enumeration in the picker instead of one host API's copies | `V-AU-06` | 3 tests failed ✅ |
 | Stop expanding MME's truncated device names | `V-AU-07` | 1 test failed ✅ |
+| Drop `mark_centres`' too-small guard | `V-UI-14` | 1 test failed ✅ |
+| Make the mark an even number of pixels wide | `V-UI-14` | 1 test failed ✅ |
+| Hard-code the mark colour in Python instead of `style.qss` | `V-UI-14` | 1 test failed ✅ |
+| Put the marks at the centre rather than the corners | `V-UI-14` | 2 tests failed ✅ |
 
 The third initially did **not** fail, and that is the most useful thing in this section.
 The first version of `V-CF-09` failed the save on a *missing directory*, which raises at
@@ -349,7 +354,7 @@ microphone, no numeric keypad.
 |---|---|---|
 | `V-M-50` | Render all four state icons and compare them byte-for-byte with `tray.py::create_icon_image` from the last commit that had it (`0f70a76^`) | ✅ pass — all four identical, and distinct from each other. The five `QIcon` frames match the frame sizes PIL's ICO writer actually emits for a 64 px source (16, 24, 32, 48, 64), which is what `ICON_SIZES` claims |
 | `V-M-51` | Drive `on_state_changed` through six state/status pairs and read the tooltip back | ✅ pass — `PTT Dictation (<status>)` in every case, and an empty status falls back to the capitalised state exactly as the pystray tray did |
-| `V-M-52` | Enumerate the built `QMenu` and compare it item by item with the pystray menu | 🟡 **partial** — every pystray item is present, in order, with the same enabled and checkable flags. The Qt menu adds `Settings…`, which `gui_handoff` §4 requires. It does **not** have `Pause`, which §4 also lists; see section 7 |
+| `V-M-52` | Enumerate the built `QMenu` and compare it item by item with the pystray menu | ✅ pass — every pystray item is present, in order, with the same enabled and checkable flags. The Qt menu adds `Settings…`, which `gui_handoff` §4 requires. It was first recorded 🟡 because §4 also listed `Pause`, which no build has ever had; §4 struck `Pause` later the same day, so the menu now matches the specification exactly |
 | `V-M-53` | Inspect and run `QtTray._on_exit` | ✅ pass — `engine.stop()` is called, the icon is hidden, `QApplication.quit()` follows, and there is no `join` on the engine thread anywhere in the method |
 | `V-M-54` | Put a text box in the foreground, raise the popover over it, then inject `X`, `Y`, `Z` — with a control run first, injecting with no popover up | ✅ pass — control typed `xyz`; with the popover visible the foreground window was unchanged, `isActiveWindow()` on the popover was False, the text box kept Qt focus, and it received `xyz` again |
 | `V-M-55` | Launch a second **process** whose window is `WindowStaysOnTopHint`, overlap the popover with it, and read the Z-order | ✅ pass — `GWL_EXSTYLE` on the popover carries `WS_EX_TOPMOST`, and `EnumWindows` (which walks front to back) returns the popover ahead of the rival window |
@@ -363,8 +368,10 @@ microphone, no numeric keypad.
 | `V-M-63` | Copy the live `app/config.json`, `load()` it, `save()` it, and diff | ✅ pass — 11 keys in, 11 keys out, no value changed, `future_setting` preserved, a second `load()` identical to the first, and **zero fallback warnings logged** |
 | `V-M-64` | Run `python build_portable.py` and enumerate the archive | ✅ pass — 8531 entries, 1461.78 MB. `app/assets/` ships whole: the four registered faces, all 36 TTFs, **both `OFL.txt` files**, `style.qss` and `benchmark_sample.wav` (960 044 bytes). No `tests/`, no `requirements-dev.txt`, no `requirements.txt`, no `pyproject.toml`, no `docs/`, no `app/config.json`, no `debug_log*`, no `pyvenv.cfg`, no `__pycache__`. `app/ptt/ui/tray.py` is gone. **But `.venv` still carries `pystray` and `six`** — see section 7 |
 | `V-M-65` | Extract the archive to a fresh directory and launch `.venv\Scripts\ptt_dictate.exe app\ptt_tray.py` from it | ✅ pass — 8531 files out, no extraction errors. The shipped copy registered all four bundled Barlow faces, loaded `style.qss` (19 287 chars) from its own `app/assets/`, resolved the CUDA DLL directories from its own `.venv`, loaded `large-v3-turbo` on CUDA in 5 s, opened the input stream, showed the tray icon on the first attempt, and wrote both correct `THREAD-CHECK` lines. It created `config.json` from defaults, confirming the runtime-artifact exclusion |
+| `V-M-66` | Render the popover and all six tabs to PNG with the marks in place, and look at them | ✅ pass — four crossings on the popover, four on the window banner, and two visible at the top of each tab (a panel taller than its scroll viewport carries the other two at the bottom of its content, which is where they belong). Legible on both grounds and colliding with nothing: the marks sit inside `StatusView`'s 18 px and the panels' 28 px content margins |
+| `V-M-67` | Render the same shots from a pristine `HEAD` worktree and diff | ✅ pass — the only difference is the marks. Which is also how the defect below was separated from this session's change |
 
-**13 passed, 3 partial, 0 failed.**
+**15 passed, 3 partial, 0 failed.**
 
 Two things the build surfaced that are worth keeping.
 
@@ -391,7 +398,7 @@ unless another item is named.
 
 | # | Criterion | Status |
 |---|---|---|
-| 1 | Tray icon behaves exactly as today | 🟡 **partial.** Glyphs, colours, sizes, tooltip and the non-joining Exit are verified identical to the pystray build (`V-M-50`, `V-M-51`, `V-M-53`), and `qt_tray.py` has not changed since `V-M-01`/`V-M-02` ran against it by hand. The **menu is a superset**: it adds `Settings…`, which `gui_handoff` §4 requires, and omits `Pause`, which §4 also lists and which has never existed (`V-M-52`) |
+| 1 | Tray icon behaves exactly as today | ✅ Glyphs, colours, sizes, tooltip and the non-joining Exit are verified identical to the pystray build (`V-M-50`, `V-M-51`, `V-M-53`), and `qt_tray.py` has not changed since `V-M-01`/`V-M-02` ran against it by hand. The menu carries every pystray item with the same flags, plus `Settings…` (`V-M-52`). It was 🟡 for part of session 5 because `gui_handoff` §4 also listed `Pause`; §4 struck it the same day, so the menu now matches the specification exactly |
 | 2 | Popover raises on hover without stealing focus, **and is in front** | ✅ Both halves measured together, as §10 asks. Focus: the foreground window is unchanged, the popover is never activated, and injected keystrokes all land in the other window (`V-M-54`). Z-order: `WS_EX_TOPMOST` is set and the popover enumerates ahead of a **different process's** always-on-top window (`V-M-55`). Confirmed by hand in session 3 as `V-M-20`, `V-M-21` |
 | 3 | Clicking the popover opens the window; banner matches | ✅ `V-M-56` — all nine displayed fields identical, because both hosts embed one `StatusView` fed from one `UiState`. Also session 2 by hand |
 | 4 | Any key shades within ~50 ms and unshades on release; alt-tab clears | ✅ `V-M-58`, `V-M-59` — real injected keys, 2–33 ms to shade, against a 30 ms poll; tab switch, alt-tab and close each clear everything. Also `V-M-03`, `V-M-06`, `V-M-07` by hand. **The physical keypad with Num Lock off is still not covered** — injection cannot answer it (`V-M-04`, `V-M-05`) |
@@ -410,18 +417,17 @@ Stated rather than omitted. Anything here is a known hole, not an oversight.
 
 | Gap | Why | Owner |
 |---|---|---|
+| **The popover's STATE row overlaps itself at long values** — *a defect, not a gap* | Found in session 5 by `V-M-66` and confirmed against a pristine `HEAD` worktree by `V-M-67`, so it predates this session. The popover is `setFixedWidth(340)`; at that width the derived detail line wraps to two lines and the second is drawn over the headline. Cause is pinned: `_detail` is a word-wrapping `QLabel` in a `QGridLayout` cell, and a wrapping label reports a one-line height there, so the grid allocates one line and the wrap overflows. Setting `setWordWrap(False)` in the probe worktree removed the overlap, which is the confirmation. A second, separate symptom at the same width: long row values are cropped at the right edge with no ellipsis — the real device name on this machine is 72 characters. **Neither affects the window banner**, which is 880 px wide. Not fixed: outside the session's scope, and it wants a decision about whether the popover elides, widens or drops the detail line | next session |
 | **Pinned-window probe harness** (`tests/tools/probe_paste.py`) | `design.md` §10 step 2. Injects real keystrokes into another process's window to reproduce the issue #11 evidence; cannot run unattended. Its non-negotiable rule: pin a target window handle and refuse to inject unless that window has focus. Session 5's probes inject keystrokes but only ever into a window this process owns, and each one checks it holds the foreground first — that is the same discipline at a smaller scale, not the harness | next session |
 | `install.bat` on the built archive (criterion 10, second clause) | Not run. It stops every `ptt_dictate` process, deletes and rewrites `%LOCALAPPDATA%\Programs\ptt_dictate`, replaces the Desktop and Startup shortcuts and relaunches — so running it during a verification pass would overwrite the working installation. `install.ps1` is byte-identical to `main` and predates the GUI work | manual — see below |
 | Criterion 10 on a **clean** Windows 11 machine | The archive was extracted and run on the machine that built it, which already has CUDA, a Python 3.14 install and the Hugging Face model cache. What is untested is a box with none of those | needs a second machine |
 | Criterion 7 | Requires a machine without a CUDA device. `V-M-62` covers the software half by construction | — |
 | Keypad shading with Num Lock off (`V-M-04`, `V-M-05`) | No numeric keypad on the test machine. `V-M-58` injects `Keypad 7` and `Keypad +` and both shade, but a synthetic key cannot answer what the OS reports for a **physical** keypad `7` with Num Lock off — which is the whole question | next desktop session |
-| `Pause` in the tray menu (`gui_handoff` §4) | Listed in §4, absent from every build, and never in `pystray`'s menu either. `stage0_review.md` §3.2 flagged it before session 1 as decision 2 of 5 and it was never answered. It needs no engine change — `Engine.__init__` already takes a `chord_held` seam, so a frontend passing `lambda chord: (not self._paused) and hotkey_mod.chord_held(chord)` gets it for free. **Either build it or strike it from §4** | decision |
 | `pystray` and `six` still ship inside `.venv` | `requirements.txt` dropped `pystray` and `app/ptt/ui/tray.py` is deleted, but `pip install -r` never uninstalls what a requirement removed, so 22 files and ~143 KB of a library nothing imports are in the archive. Harmless but wrong: the distribution should contain what `requirements.txt` says. Fixing it means rebuilding `.venv` from scratch, which is also the only way to prove the pinned set is complete | next release build |
 | The end of criterion 5: dictation through the rebound chord | `V-M-60` proves the click, the write and the detector. What no probe can supply is a voice. `V-M-24` and `V-M-36` cover it by hand for `Right Ctrl` | manual |
 | `FR-C1`, `FR-C4`, `FR-C5`, `FR-2` — insertion behaviour | Behaviours of *another process's* window: menu activation, caret loss, clipboard restoration, UIPI. Not unit-testable; the probe harness is the instrument | next session |
 | `NFR-1`, `NFR-2`, `NFR-3` — latency and pre-roll | Need real audio hardware and a stopwatch. The Model panel's Measure button is the closest thing and is `V-EN-07` | — |
 | `FR-9` — no zombie process on exit | Observable only against a real process tree. Session 5 terminated the extracted instance and confirmed no `ptt_dictate` survived, but that was `TerminateProcess`, not the app's own Exit path | manual |
-| The `+` registration marks (`gui_handoff` §9) | Not implemented on any panel | later |
 | **That a chosen device is the one recorded from** (`V-M-39`) | One physical microphone on the test machine, so every entry sounds identical — and `V-AU-04`'s open-time fallback means an unopenable device still dictates, from the default. Only `debug_log.txt` says which device each actually used. Needs a second physical microphone to settle | next desktop session |
 | The warm stream switched off (`V-M-44`), the minimum hold switched off (`V-M-45`), the two Diagnostics buttons (`V-M-46`), unplugging the chosen device (`V-M-47`), and persistence across a restart (`V-M-48`) | Not run in session 4 and not run in session 5. Each is covered by the suite in section 4 at the engine level — `V-EN-09`, `V-AU-04`, `V-CF-14` — so what is missing is the behaviour of the real application, not the logic | next desktop session |
 | The four new tabs at the window's **minimum** size | `V-M-42` was run maximised. The minimum-size case is covered programmatically by `V-M-26` and, for the two older tabs only, by hand in `V-M-22` | next desktop session |
@@ -455,7 +461,8 @@ keypad and the no-CUDA holes and need hardware this machine does not have.
 
 | Date | Commit | Change |
 |---|---|---|
-| 2026-08-24 | — | The acceptance pass. All ten criteria worked through; `V-M-50` … `V-M-65` executed instrumented, 13 passing and 3 partial; suite re-run at 325 passed; the distribution rebuilt, extracted and launched. Criterion 9 upgraded from asserted to measured. Three new holes recorded in section 7: `Pause` was never built, `pystray` still ships inside `.venv`, and `install.bat` has not been run against the archive |
+| 2026-08-24 | — | `Pause` struck from `gui_handoff` §4 and from this document — declined, not deferred; criterion 1 and `V-M-52` go green. The `+` registration marks built (`qt_marks.py`, `V-UI-14`, `V-M-66`, `V-M-67`), closing the last item §9 tracked as outstanding; suite 325 → 333, four more mutations checked. A pre-existing popover layout defect found while rendering them and recorded in section 7 |
+| 2026-08-24 | `d80aceb` | The acceptance pass. All ten criteria worked through; `V-M-50` … `V-M-65` executed instrumented, 13 passing and 3 partial; suite re-run at 325 passed; the distribution rebuilt, extracted and launched. Criterion 9 upgraded from asserted to measured. Three new holes recorded in section 7: `Pause` was never built, `pystray` still ships inside `.venv`, and `install.bat` has not been run against the archive |
 | 2026-08-24 | `840a626` | Audio, Vocabulary, Advanced and Diagnostics panels. `V-CF-11` … `V-CF-14`, `V-TR-07`, `V-TR-08`, `V-AU-01` … `V-AU-05`, `V-VC-01` … `V-VC-04`, `V-EN-08` … `V-EN-10`, `V-UI-11` … `V-UI-13` added; suite 176 → 325; three more mutations checked; `V-M-26` … `V-M-49` executed, 18 of 24 passing; the device picker reduced from fourteen rows to one after review |
 | 2026-08-23 | `3443a03` | Hotkey and Model panels; `V-M-01` … `V-M-25` executed |
 | 2026-08-23 | `0722294` | Unit suite added — 176 tests, `V-HK`, `V-CF`, `V-EN`, `V-TR`, `V-UI`; mutation-checked |

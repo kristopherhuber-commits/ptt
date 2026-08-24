@@ -21,9 +21,10 @@ from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QWidget
 
 from ptt.logging_setup import log_debug
+from ptt.ui.qt_marks import RegistrationMarks
 
 
-class InstantApplyPanel(QWidget):
+class InstantApplyPanel(RegistrationMarks, QWidget):
     """
     Base for a tab that writes settings.
 
@@ -89,3 +90,8 @@ class InstantApplyPanel(QWidget):
                     f"attached; it will apply at the next model load."
                 )
         self.saved.emit(field)
+
+    def paintEvent(self, event):
+        """The light ground, then section 9's corner marks over it."""
+        super().paintEvent(event)
+        self.paint_registration_marks()

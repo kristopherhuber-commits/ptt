@@ -10,7 +10,10 @@ produces a cap that never shades and a chord that cannot be bound, and neither
 raises anything.
 """
 
+import inspect
+
 from ptt import config, engine as engine_mod, hotkey, inject, paths, transcribe
+from ptt.ui import qt_marks as marks
 from ptt.ui.panels import advanced as advanced_panel
 from ptt.ui.panels import audio as audio_panel
 from ptt.ui.panels import diagnostics as diagnostics_panel
@@ -314,3 +317,99 @@ def test_an_undecodable_byte_does_not_lose_the_line(tmp_path):
     path = tmp_path / "debug_log.txt"
     path.write_bytes(b"good line\n\xff\xfe broken\n")
     assert len(diagnostics_panel.tail_lines(str(path))) == 2
+
+
+# -- the + registration marks ------------------------------------------------
+#
+# Only the geometry. Whether the arms are the right colour is style.qss's
+# business and whether they are visible is a screenshot's; where the four
+# crossings land is arithmetic, and arithmetic is what a unit test can hold.
+
+def test_four_marks_one_per_corner():
+    centres = marks.mark_centres(400, 300)
+    assert len(centres) == 4
+    assert len(set(centres)) == 4
+
+
+def test_the_marks_are_inset_from_every_edge():
+    """
+    The reference hangs each mark half outside the box; Qt clips a paintEvent to
+    the widget, so these are inset instead. Every arm must therefore land inside
+    the widget, or it is silently cropped -- which looks like a half-drawn mark
+    rather than an error.
+    """
+    w, h = 400, 300
+    half = marks.MARK_PX // 2
+    for x, y in marks.mark_centres(w, h):
+        assert 0 <= x - half and x + half < w
+        assert 0 <= y - half and y + half < h
+
+
+def test_the_marks_sit_at_the_corners_not_the_middle():
+    w, h = 400, 300
+    xs = {x for x, _ in marks.mark_centres(w, h)}
+    ys = {y for _, y in marks.mark_centres(w, h)}
+    assert len(xs) == 2 and len(ys) == 2
+    assert min(xs) < w // 4 and max(xs) > 3 * w // 4
+    assert min(ys) < h // 4 and max(ys) > 3 * h // 4
+
+
+def test_the_layout_is_symmetric():
+    """The gap at the left equals the gap at the right, and likewise vertically."""
+    w, h = 400, 300
+    (left, top), (right, _), _, (_, bottom) = marks.mark_centres(w, h)
+    assert left == (w - 1) - right
+    assert top == (h - 1) - bottom
+
+
+def test_a_widget_too_small_gets_no_marks_rather_than_a_smear():
+    """
+    Every panel lives in a QScrollArea and the popover is resized as its content
+    changes, so a widget smaller than four marks is reachable. It must draw
+    nothing: overlapping crossings read as a rendering fault, and this is
+    decoration -- there is no case where drawing it matters more than the window
+    looking broken.
+    """
+    span = 2 * (marks.MARGIN_PX + marks.MARK_PX)
+    assert marks.mark_centres(span - 1, 300) == ()
+    assert marks.mark_centres(400, span - 1) == ()
+    assert marks.mark_centres(0, 0) == ()
+    assert marks.mark_centres(span, span) != ()
+
+
+def test_the_crossing_lands_on_a_whole_pixel():
+    """
+    An odd mark size is deliberate: an even one puts the crossing between two
+    pixels, and a 1 px hairline drawn there is rendered as two grey ones.
+    """
+    assert marks.MARK_PX % 2 == 1
+    for x, y in marks.mark_centres(400, 300):
+        assert x == int(x) and y == int(y)
+
+
+def test_no_colour_is_defined_in_the_module():
+    """
+    The same rule the status dot follows: every colour lives in style.qss. The
+    default is transparent so a stylesheet that failed to load draws no marks
+    rather than black ones.
+    """
+    source = inspect.getsource(marks)
+    assert "#" not in source.replace("#:", "").replace("# ", "")
+    assert marks.RegistrationMarks._mark_colour.alpha() == 0
+
+
+def test_both_hosts_use_the_mixin():
+    """
+    The marks exist on exactly the two surfaces section 9 asks for: the dark
+    read-only display, which is both the popover body and the window banner, and
+    the light tab panel every settings tab derives from.
+    """
+    from ptt.ui import qt_statusview
+    from ptt.ui import panels
+
+    assert issubclass(qt_statusview.StatusView, marks.RegistrationMarks)
+    assert issubclass(panels.InstantApplyPanel, marks.RegistrationMarks)
+    for panel in (hotkey_panel.HotkeyPanel, model_panel.ModelPanel,
+                  audio_panel.AudioPanel, advanced_panel.AdvancedPanel,
+                  diagnostics_panel.DiagnosticsPanel):
+        assert issubclass(panel, marks.RegistrationMarks)

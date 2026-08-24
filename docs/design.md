@@ -128,6 +128,7 @@ portable environment, not a wheel, so the packaging benefit of `src/` does not a
 | `app/ptt/ui/qt_window.py` | `QMainWindow`, tab bar, status bar (layer 3). |
 | `app/ptt/ui/qt_statusview.py` | The read-only state display, embedded in both the popover and the window's banner. |
 | `app/ptt/ui/qt_theme.py` | Font registration and `style.qss`, applied to the `QApplication`. |
+| `app/ptt/ui/qt_marks.py` | The `+` registration marks (`gui_handoff` §9). A mixin the two ground surfaces inherit, plus the pure geometry function behind it. |
 | `app/ptt/ui/panels/__init__.py` | `InstantApplyPanel`: the one write-field-then-save-then-tell-the-engine sequence every control uses. |
 | `app/ptt/ui/panels/hotkey.py` | Qt keyboard-diagram picker; live `GetAsyncKeyState` shading. |
 | `app/ptt/ui/panels/model.py` | Whisper size tiers, GPU/CPU choice, measured latency. |
@@ -154,6 +155,7 @@ those layers. `gui_handoff.md` §§4–6 is the specification; this is how it la
 | 3 | `qt_window.py` | `QMainWindow`: banner, tab bar, six panels, status bar. |
 | 2 + 3 | `qt_statusview.py` | The read-only display, built once and embedded in both. |
 | — | `qt_theme.py` | Font registration and `style.qss`, applied to the `QApplication`. |
+| 2 + 3 | `qt_marks.py` | The `+` corner marks, mixed into `StatusView` and `InstantApplyPanel`. |
 
 Four rules hold it together, each of which fails silently rather than loudly if broken:
 
@@ -196,10 +198,15 @@ gratuitous complexity and are not:
   Reproducing those five frames is what preserves the appearance; handing Qt a single
   64 px pixmap and letting it scale at paint time would have been the change.
 
-One item of §4 is **not** built: the menu has no `Pause`. It never existed in the pystray
-menu either, and `stage0_review.md` §3.2 raised it as an open decision before session 1
-that was never answered. It needs no engine change if it is wanted — `Engine.__init__`
-already takes a `chord_held` seam. Recorded in `verification.md` §7.
+The menu has no `Pause`, and that is now a decision rather than a gap. Earlier drafts of
+`gui_handoff` §4 listed one; `stage0_review.md` §3.2 pointed out that nothing in the
+engine could implement it, and it was struck in session 5. Exiting and relaunching is the
+pause. The mechanism was never the hard part — `Engine.__init__` takes a `chord_held`
+seam, so a frontend can suppress the hotkey in one line without touching the engine —
+but a real Pause also needs a fifth tray icon (§4 ships four and §11 declines a fifth), a
+status string the engine cannot supply because the pause would live in the frontend, and
+a ruling on whether it persists to `config.json`. Three decisions for a case a right-click
+already covers.
 
 Three structural constraints hold this layout together. Each is checkable, and each
 exists because breaking it fails silently rather than loudly:
@@ -502,9 +509,8 @@ put `NFR-6`/`NFR-7` back in play for no gain.
    [gui_handoff.md](gui_handoff/gui_handoff.md). See section 4.1.
 5. **Verify and package.** Worked through, and the results are
    [verification.md](verification.md) §5.3 and §6. All ten acceptance criteria were
-   exercised. Criteria 2, 3, 6, 8 and 9 are closed. Criteria 4 and 5 pass with one named
-   residual each — a physical numeric keypad, and a human voice. Criterion 7 needs a
-   machine with no CUDA device, criterion 10 needs a clean Windows 11 machine and a run
-   of `install.bat`, and criterion 1 is held open by an unanswered spec question rather
-   than by hardware: `gui_handoff` §4 lists a `Pause` menu item that has never existed.
-   §7 of that document is the list, and it ends with the four steps a person has to take.
+   exercised. Criteria 1, 2, 3, 6, 8 and 9 are closed. Criteria 4 and 5 pass with one
+   named residual each — a physical numeric keypad, and a human voice. Criterion 7 needs
+   a machine with no CUDA device and criterion 10 a clean Windows 11 machine and a run of
+   `install.bat`. §7 of that document is the list, and it ends with the steps a person
+   has to take.

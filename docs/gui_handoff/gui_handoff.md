@@ -153,9 +153,21 @@ icons and raise it separately.
 
 Right-click menu keeps the current items, since the popover has no controls:
 Status (disabled), Hotkey (disabled), Use GPU / Use CPU (checkable), Settings…,
-Pause, Exit. `Settings…` opens layer 3. Exit must keep the current
+Exit. `Settings…` opens layer 3. Exit must keep the current
 non-joining behaviour — `engine.stop()` then quit; do **not** join the engine
 thread, or Exit hangs for an in-flight CPU transcription.
+
+**`Pause` was declined.** Earlier drafts of this section listed it between
+`Settings…` and `Exit`, and `stage0_review.md` §3.2 pointed out that nothing in
+the engine could implement it. It was struck in session 5 as a deliberate
+decision, not an omission: exiting and relaunching is the pause, and a menu item
+that only suspends the hotkey would need a fifth tray icon, a status string the
+engine cannot supply because the pause lives in the frontend, and a ruling on
+whether it survives a restart — three decisions for a case a right-click already
+covers. Should it ever be wanted, **it needs no engine change**:
+`Engine.__init__` takes a `chord_held` seam, so a frontend passing
+`lambda chord: (not self._paused) and hotkey_mod.chord_held(chord)` gets it, and
+those three decisions are what to design rather than the mechanism.
 
 ## 5. Layer 2 — hover popover
 
@@ -861,7 +873,22 @@ properties written from `style.qss` with `qproperty-` — the same indirection
 `StatusDot` uses, and for the same reason: no colour lives in Python, not even one
 a paint method draws.
 
-**Still outstanding:** the `+` registration marks are not drawn on any panel.
+**As built:** the `+` registration marks are `ptt/ui/qt_marks.py`, a mixin the two
+ground surfaces inherit — `StatusView`, so they appear on the popover *and* the
+window banner, and `InstantApplyPanel`, so they appear on all six tabs. The
+reference's 11 px box and 1 px arms are reproduced exactly. Their colour is a
+`markColour` Qt property written from `style.qss`, so this file defines none —
+and it takes **two** values where `industry.css` has one, because the reference's
+"body text at 55%" is right on the light ground and invisible on the dark one.
+
+**One deliberate deviation.** `.blueprint` offsets each mark by −6 px so it hangs
+half outside the box; CSS allows that with `overflow: visible` on the parent. Qt
+does not: a `QPainter` on a widget is clipped to that widget's rectangle, so a
+mark drawn at a negative coordinate is never rasterised at all. The alternative
+is painting each frame from its parent, which would make every panel depend on
+what contains it. **The marks are inset instead**, by `MARGIN_PX`. They read the
+same, and `mark_centres` returns nothing at all rather than four overlapping
+crossings when a widget is too small to hold them.
 
 **Controls are native Qt widgets — no custom-drawn switches.** Every on/off
 setting is a `QCheckBox`; an either/or choice with a fixed, known set of options

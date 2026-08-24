@@ -25,6 +25,8 @@ from PySide6.QtWidgets import (
     QFrame, QGridLayout, QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget,
 )
 
+from ptt.ui.qt_marks import RegistrationMarks
+
 #: Placeholder for a value this build cannot obtain. Every row can be filled in
 #: now -- Microphone and Last were the two that could not be until the Audio and
 #: Diagnostics panels gave the engine somewhere to report them from -- but a
@@ -146,7 +148,7 @@ class StatusDot(QWidget):
         p.drawEllipse(self.rect())
 
 
-class StatusView(QFrame):
+class StatusView(RegistrationMarks, QFrame):
     """
     The dark state panel. Used as the popover's body and as the window's banner.
 
@@ -264,3 +266,8 @@ class StatusView(QFrame):
         self._device_tag.setVisible(bool(ui.device))
         self._microphone.setText(ui.microphone)
         self._last.setText(ui.last)
+
+    def paintEvent(self, event):
+        """The dark ground, then section 9's corner marks over it."""
+        super().paintEvent(event)
+        self.paint_registration_marks()
