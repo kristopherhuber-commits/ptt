@@ -39,6 +39,12 @@ NEUTRALISE_VKS = (0xA2, 0xA3, 0xA4, 0xA5, 0x5B, 0x5C)
 #: it is safe to inject purely to break up an Alt press (see suppress_alt_menu).
 VK_NONAME = 0xFC
 
+#: The chord `paste_text` injects, named here so the Advanced panel reports the
+#: method actually in force instead of a string transcribed beside it. It is
+#: Shift+Insert rather than Ctrl+V because WSL and bash terminals accept the
+#: former and swallow the latter (rule 5 above, FR-C1).
+PASTE_CHORD_LABEL = "Shift+Insert"
+
 GUI_CARETBLINKING = 0x00000001
 
 

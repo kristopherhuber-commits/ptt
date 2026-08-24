@@ -48,3 +48,42 @@ def previous_debug_log_path():
 def local_model_dir(model_size):
     """Directory a bundled model would occupy, if one has been shipped."""
     return os.path.join(APP_DIR, "models", model_size)
+
+
+def startup_shortcut_path():
+    """
+    The Startup-folder shortcut `install.ps1` creates, whose presence the
+    Advanced panel reports.
+
+    Built from `%APPDATA%` rather than through a shell-folder COM lookup: this
+    module owns paths and depends on nothing, and `install.ps1` writes the file
+    with `[Environment]::GetFolderPath('Startup')`, which resolves to the same
+    directory. The panel only reports whether it is there -- creating or
+    removing it is the installer's job, and duplicating its `.lnk` construction
+    and its run-as-admin byte patch inside the app is not in this pass.
+    """
+    return os.path.join(
+        os.environ.get("APPDATA", ""),
+        "Microsoft", "Windows", "Start Menu", "Programs", "Startup",
+        "PTT Dictation.lnk",
+    )
+
+
+def assets_dir():
+    """Directory holding the bundled fonts, stylesheet and benchmark clip."""
+    return os.path.join(APP_DIR, "assets")
+
+
+def asset_path(*parts):
+    """
+    Absolute path of one bundled asset.
+
+        asset_path("style.qss")
+        asset_path("fonts", "Barlow", "Barlow-Regular.ttf")
+
+    The UI must resolve assets through here rather than from the working
+    directory: the application is launched from a Desktop shortcut and from the
+    Startup folder, so the cwd is not predictable. `build_portable.py` walks
+    `app/` wholesale, so anything under this directory ships automatically.
+    """
+    return os.path.join(assets_dir(), *parts)

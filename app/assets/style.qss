@@ -1,0 +1,664 @@
+/* =====================================================================
+   PTT Dictation - the whole visual layer.
+   Applied once to the QApplication; see ptt/ui/qt_theme.py.
+
+   Every colour in the UI lives in this file. Values are taken from
+   docs/gui_handoff/industry.css, the design system's token sheet.
+
+   Two notes for anyone editing this:
+
+   1. industry.css expresses several tokens with color-mix(), which Qt
+      style sheets do not support. Those are resolved to literal rgba()
+      here. The mapping is:
+          --color-divider  = color-mix(#1d1f20 16%, transparent)
+                           -> rgba(29, 31, 32, 0.16)
+          .text-muted      = color-mix(#1d1f20 55%, transparent)
+                           -> rgba(29, 31, 32, 0.55)
+
+   2. Dark steel surfaces are READ-ONLY, light surfaces are INTERACTIVE.
+      The popover and the window's banner are dark; everything below the
+      tab bar is light. Do not invert this - it is the rule that tells
+      the user what they can touch.
+
+   Everything is square: border-radius stays 0.
+   ===================================================================== */
+
+
+/* -- the interactive ground ------------------------------------------ */
+
+QMainWindow, QDialog {
+    background: #f2f2f3;
+}
+
+QWidget {
+    color: #1d1f20;
+    font-family: "Barlow", "Segoe UI", sans-serif;
+    font-size: 14px;
+}
+
+
+/* -- the status dot ---------------------------------------------------
+   Painted by StatusDot.paintEvent, but coloured from here: the widget
+   exposes a `dotColour` Qt property and these rules write it, selected on
+   the engine state. So no colour lives in Python, not even one a
+   paintEvent draws.
+
+   Red and amber deliberately match the tray icon the user is already
+   looking at rather than the blue ramp -- section 7 keeps the tray
+   colours out of the design system on purpose, because they are
+   functional signalling. Consistency between the two surfaces matters
+   more here than palette purity.
+   -------------------------------------------------------------------- */
+
+QWidget#statusDot                       { qproperty-dotColour: #94bce3; }  /* steel */
+QWidget#statusDot[state="idle"]         { qproperty-dotColour: #94bce3; }
+QWidget#statusDot[state="loading"]      { qproperty-dotColour: #f59e0b; }  /* amber */
+QWidget#statusDot[state="recording"]    { qproperty-dotColour: #ef4444; }  /* red   */
+QWidget#statusDot[state="transcribing"] { qproperty-dotColour: #f59e0b; }
+QWidget#statusDot[state="error"]        { qproperty-dotColour: #8c3a2e; }  /* dark red */
+
+
+/* -- the + registration marks (section 9's `.blueprint`) --------------
+   Painted by RegistrationMarks.paint_registration_marks, coloured from
+   here for the same reason the status dot is: no colour in Python.
+
+   Two values rather than one, because the reference's single value does
+   not survive the light/dark split this UI is built on. `industry.css`
+   uses the body text at 55%, which is right on the light ground and
+   invisible on the dark one -- so the dark surface uses its own text
+   colour instead, at a lower alpha because a light mark on a dark
+   ground reads stronger than the reverse at equal opacity.
+   -------------------------------------------------------------------- */
+
+QFrame#statusView { qproperty-markColour: rgba(231, 234, 238, 0.34); }
+QWidget#panel     { qproperty-markColour: rgba(29, 31, 32, 0.55); }
+
+
+/* -- the read-only ground: popover body and window banner ------------ */
+
+QFrame#statusView {
+    background: #1d2d3d;
+    border: none;
+}
+
+QFrame#statusView QLabel {
+    color: #e7eaee;
+    background: transparent;
+}
+
+/* small-caps row labels down the left of the status grid */
+QLabel#rowLabel {
+    color: #94bce3;
+    font-family: "Barlow Condensed", "Segoe UI", sans-serif;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 1px;
+}
+
+/* the product name in the header */
+QLabel#brand {
+    color: #e7eaee;
+    font-family: "Barlow Condensed", "Segoe UI", sans-serif;
+    font-size: 19px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+}
+
+/* The two chips below must out-specify the "QFrame#statusView QLabel"
+   rule above, which sets background: transparent on every label in the
+   panel. Qt style sheets follow CSS specificity, so a bare QLabel#id
+   (one id, one type) LOSES to that descendant selector (one id, two
+   types) and the chip renders as plain text. Scoping them under the
+   panel is what makes the fill appear. */
+
+/* the engine's own state code, e.g. "idle", top right of the header */
+QFrame#statusView QLabel#stateTag {
+    color: #94bce3;
+    background: #2c455d;
+    font-family: Consolas, "Courier New", monospace;
+    font-size: 11px;
+    padding: 2px 7px;
+}
+
+/* the headline: the engine's status_text, verbatim */
+QLabel#stateHeadline {
+    color: #e7eaee;
+    font-size: 17px;
+    font-weight: 700;
+}
+
+/* the derived one-line detail under the headline */
+QLabel#stateDetail {
+    color: #94bce3;
+    font-family: Consolas, "Courier New", monospace;
+    font-size: 12px;
+}
+
+/* values in the Hotkey / Model / Microphone / Last rows */
+QLabel#rowValue {
+    color: #e7eaee;
+    font-family: Consolas, "Courier New", monospace;
+    font-size: 13px;
+}
+
+/* the CUDA / CPU chip beside the model name */
+QFrame#statusView QLabel#deviceTag {
+    color: #1d2d3d;
+    background: #94bce3;
+    font-family: Consolas, "Courier New", monospace;
+    font-size: 11px;
+    font-weight: 700;
+    padding: 2px 7px;
+}
+
+/* hairline between status rows */
+QFrame#rowRule {
+    background: rgba(231, 234, 238, 0.14);
+    border: none;
+    max-height: 1px;
+    min-height: 1px;
+}
+
+QLabel#popoverFooter {
+    color: #94bce3;
+    font-family: "Barlow Condensed", "Segoe UI", sans-serif;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 1px;
+}
+
+/* the popover is a floating panel: it needs an edge against the desktop */
+QFrame#popoverFrame {
+    background: #1d2d3d;
+    border: 1px solid #2c455d;
+}
+
+
+/* -- tabs ------------------------------------------------------------- */
+
+QTabWidget::pane {
+    background: #f2f2f3;
+    border: none;
+    border-top: 1px solid rgba(29, 31, 32, 0.16);
+}
+
+QTabBar {
+    background: #e9e9ea;
+    qproperty-drawBase: 0;
+}
+
+QTabBar::tab {
+    background: #e9e9ea;
+    color: rgba(29, 31, 32, 0.55);
+    font-family: "Barlow Condensed", "Segoe UI", sans-serif;
+    font-size: 14px;
+    font-weight: 600;
+    letter-spacing: 1px;
+    padding: 10px 18px;
+    border: none;
+    border-bottom: 2px solid transparent;
+}
+
+QTabBar::tab:hover {
+    color: #1d1f20;
+}
+
+QTabBar::tab:selected {
+    background: #f2f2f3;
+    color: #1d1f20;
+    border-bottom: 2px solid #5980a6;
+}
+
+
+/* -- panels ----------------------------------------------------------- */
+
+QWidget#panel {
+    background: #f2f2f3;
+}
+
+QLabel#panelTitle {
+    color: #1d1f20;
+    font-family: "Barlow Condensed", "Segoe UI", sans-serif;
+    font-size: 25px;
+    font-weight: 600;
+}
+
+QLabel#panelBlurb {
+    color: rgba(29, 31, 32, 0.55);
+    font-size: 14px;
+}
+
+
+/* -- status bar ------------------------------------------------------- */
+
+QStatusBar {
+    background: #e9e9ea;
+    border-top: 1px solid rgba(29, 31, 32, 0.16);
+}
+
+QStatusBar::item {
+    border: none;
+}
+
+QStatusBar QLabel {
+    color: rgba(29, 31, 32, 0.55);
+    font-family: Consolas, "Courier New", monospace;
+    font-size: 12px;
+    padding: 2px 8px;
+}
+
+QLabel#savedFlash {
+    color: #5980a6;
+    font-weight: 700;
+}
+
+
+/* -- panel furniture --------------------------------------------------
+   Captions, notes and the compatibility box. Shared by every panel so a
+   new tab inherits the typography rather than restating it.
+   -------------------------------------------------------------------- */
+
+/* small-caps label above a group of controls */
+QLabel#caption {
+    color: rgba(29, 31, 32, 0.55);
+    font-family: "Barlow Condensed", "Segoe UI", sans-serif;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 1.4px;
+}
+
+QLabel#panelNote {
+    color: rgba(29, 31, 32, 0.55);
+    font-size: 12px;
+}
+
+/* a hairline-bordered group: the level meter, the behaviour checkboxes, the
+   Advanced list and each Diagnostics readout */
+QFrame#panelBox {
+    background: transparent;
+    border: 1px solid rgba(29, 31, 32, 0.16);
+}
+
+/* a value read from the engine rather than chosen by the user: the dBFS
+   readout, the Advanced constants, the Diagnostics figures */
+QLabel#panelValue {
+    color: #2c455d;
+    font-family: Consolas, "Courier New", monospace;
+    font-size: 12px;
+}
+
+/* one row of the Advanced list. Qt style sheets have no :last-child, so the
+   last row carries a dynamic property instead -- without it its hairline
+   doubles up with the frame's own border. */
+QFrame#settingRow {
+    background: transparent;
+    border: none;
+    border-bottom: 1px solid rgba(29, 31, 32, 0.16);
+}
+
+QFrame#settingRow[last="true"] {
+    border-bottom: none;
+}
+
+
+/* -- the keyboard diagram ---------------------------------------------
+   Four states are visible at once and the rules below MUST stay in this
+   order. Qt style sheets follow CSS2.1 specificity: `#keycap:checked`
+   and `#keycap[held="true"]` both score one id plus one simple
+   selector, so they are equally specific and the LATER rule wins. The
+   combined states are therefore last, and moving them up silently
+   collapses bound-and-held back to plain bound.
+
+   `held` is a dynamic property written by the 30 ms poll in
+   panels/hotkey.py. Qt resolves a property selector when the widget is
+   polished, which is why that code re-polishes on every change.
+
+   Every rule is scoped under `QWidget#keyboard` and must stay that way.
+   The generic `QWidget#panel QPushButton` rule further down scores two
+   element names to a bare `QPushButton#keycap`'s one, so it WINS on
+   specificity and hands every keycap the 14 px side padding meant for
+   the Measure button -- which on a 28 px cap leaves no room for the
+   label at all, and the board renders as rows of blank boxes. Same trap
+   as the two status chips above, same fix.
+   -------------------------------------------------------------------- */
+
+QWidget#keyboard {
+    background: transparent;
+}
+
+/* bindable: pale accent tint, hairline accent border */
+QWidget#keyboard QPushButton#keycap {
+    background: #eef6ff;
+    color: #2c455d;
+    border: 1px solid #94bce3;
+    font-size: 10px;
+    font-weight: 500;
+    padding: 0px;
+}
+
+QWidget#keyboard QPushButton#keycap:hover {
+    background: #d6ebff;
+}
+
+/* drawn for orientation only: dimmed and inert */
+QWidget#keyboard QPushButton#keycap:disabled {
+    background: #e9e9ea;
+    color: rgba(29, 31, 32, 0.30);
+    border: 1px solid rgba(29, 31, 32, 0.16);
+}
+
+/* the OS reports this key down */
+QWidget#keyboard QPushButton#keycap[held="true"] {
+    background: #d6ebff;
+    color: #1d2d3d;
+    border: 2px solid #5980a6;
+}
+
+/* part of the current chord */
+QWidget#keyboard QPushButton#keycap:checked {
+    background: #5980a6;
+    color: #f2f2f3;
+    border: 1px solid #416180;
+    font-weight: 700;
+}
+
+/* a non-bindable key held: still legible, still clearly not bindable */
+QWidget#keyboard QPushButton#keycap:disabled[held="true"] {
+    background: #d4d4d7;
+    color: rgba(29, 31, 32, 0.75);
+    border: 2px solid rgba(29, 31, 32, 0.45);
+}
+
+/* bound and held at once: the accent fill keeps its meaning, the inset
+   border is what says the finger is on the key */
+QWidget#keyboard QPushButton#keycap:checked[held="true"] {
+    background: #416180;
+    color: #eef6ff;
+    border: 2px solid #d6ebff;
+}
+
+
+/* -- the hotkey readout ------------------------------------------------ */
+
+QLabel#chordChip {
+    background: #5980a6;
+    color: #f2f2f3;
+    font-family: "Barlow Condensed", "Segoe UI", sans-serif;
+    font-size: 14px;
+    font-weight: 600;
+    letter-spacing: 0.6px;
+    padding: 6px 14px;
+}
+
+QLabel#chordJson {
+    color: rgba(29, 31, 32, 0.55);
+    font-family: Consolas, "Courier New", monospace;
+    font-size: 12px;
+}
+
+QFrame#warningBox {
+    background: transparent;
+    border: 1px solid rgba(29, 31, 32, 0.16);
+}
+
+QLabel#warningText {
+    color: rgba(29, 31, 32, 0.55);
+    font-size: 12px;
+}
+
+/* The classifier had something to say.
+   Amber, not the accent ramp, and deliberately: section 7 keeps the tray's
+   colours outside the design system because they are functional signalling
+   rather than decoration, and a hotkey that will eat the user's keystrokes is
+   the same kind of signal. #d97706 is the tray's own transcribing outline;
+   the text is one step darker so 13 px stays legible on the light ground,
+   which #d97706 alone does not at ~3.4:1.
+
+   The whole box outlines itself as well as the text changing colour, so an
+   unsafe chord is visible from across the panel and not only once the
+   paragraph is being read. */
+QLabel#warningText[risky="true"] {
+    color: #b45309;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+QFrame#warningBox[risky="true"] {
+    border: 1px solid #d97706;
+}
+
+
+/* -- checkboxes and radio buttons -------------------------------------
+   Native Qt indicators, coloured from the token sheet. gui_handoff
+   section 9 is explicit that there is no custom switch widget here.
+   -------------------------------------------------------------------- */
+
+QCheckBox, QRadioButton {
+    color: #1d1f20;
+    font-size: 13px;
+    spacing: 8px;
+}
+
+QCheckBox:disabled, QRadioButton:disabled {
+    color: rgba(29, 31, 32, 0.30);
+}
+
+QCheckBox::indicator, QRadioButton::indicator {
+    width: 14px;
+    height: 14px;
+    background: #f2f2f3;
+    border: 1px solid rgba(29, 31, 32, 0.45);
+}
+
+QRadioButton::indicator {
+    border-radius: 7px;
+}
+
+QCheckBox::indicator:checked, QRadioButton::indicator:checked {
+    background: #5980a6;
+    border: 1px solid #416180;
+}
+
+QCheckBox::indicator:disabled, QRadioButton::indicator:disabled {
+    background: #e9e9ea;
+    border: 1px solid rgba(29, 31, 32, 0.16);
+}
+
+
+/* -- buttons ----------------------------------------------------------
+   Square, hairline-bordered, transparent: the secondary button is the
+   only button shape in this window. The one solid accent fill in the UI
+   is reserved for a primary action, and there is not one here -- every
+   control applies instantly, so nothing needs confirming.
+   -------------------------------------------------------------------- */
+
+QWidget#panel QPushButton {
+    background: transparent;
+    color: #1d1f20;
+    border: 1px solid rgba(29, 31, 32, 0.16);
+    font-size: 12px;
+    padding: 7px 14px;
+}
+
+QWidget#panel QPushButton:hover {
+    background: #e9e9ea;
+}
+
+QWidget#panel QPushButton:pressed {
+    background: #d4d4d7;
+}
+
+QWidget#panel QPushButton:disabled {
+    color: rgba(29, 31, 32, 0.30);
+}
+
+
+/* -- the model table --------------------------------------------------
+   The bars and the state chips are painted by delegates in
+   panels/model.py, and a delegate is not a widget, so no selector can
+   reach one. The view carries their colours as Qt properties and the
+   delegates read them back -- the same indirection the status dot uses,
+   and for the same reason: no colour lives in Python.
+   -------------------------------------------------------------------- */
+
+QTableView#modelTable {
+    background: #f2f2f3;
+    alternate-background-color: #f2f2f3;
+    border: 1px solid rgba(29, 31, 32, 0.16);
+    gridline-color: transparent;
+    outline: none;
+    font-family: Consolas, "Courier New", monospace;
+    font-size: 12px;
+
+    qproperty-barColour: #5980a6;
+    qproperty-trackColour: #d4d4d7;
+    qproperty-mutedColour: rgba(29, 31, 32, 0.55);
+    qproperty-tagFillColour: #d6ebff;
+    qproperty-tagInkColour: #2c455d;
+}
+
+QTableView#modelTable::item {
+    border-bottom: 1px solid rgba(29, 31, 32, 0.16);
+    padding: 0px 4px;
+}
+
+QTableView#modelTable::item:selected {
+    background: #eef6ff;
+    color: #1d1f20;
+}
+
+QHeaderView::section {
+    background: #e9e9ea;
+    color: rgba(29, 31, 32, 0.55);
+    border: none;
+    border-bottom: 1px solid rgba(29, 31, 32, 0.16);
+    font-family: "Barlow Condensed", "Segoe UI", sans-serif;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 1.2px;
+    padding: 7px 8px;
+    text-transform: uppercase;
+}
+
+/* Each tab lives in a scroll area so the window can be shrunk to its
+   stated minimum without the keyboard diagram collapsing. It must not
+   introduce a second ground colour or a frame of its own. */
+QScrollArea#panelScroll, QScrollArea#panelScroll > QWidget > QWidget {
+    background: #f2f2f3;
+    border: none;
+}
+
+
+/* -- the audio level meter --------------------------------------------
+   Painted by LevelMeter.paintEvent, coloured from here through Qt
+   properties -- the same indirection the status dot and the model
+   table's delegates use, so no colour lives in Python.
+
+   The top two bars are amber rather than accent, and deliberately: they
+   are the clipping end of the scale, and that is the tray's functional
+   signalling ramp rather than the design system's decorative one, for
+   the reason section 7 gives.
+   -------------------------------------------------------------------- */
+
+QWidget#levelMeter {
+    background: transparent;
+    qproperty-barColour: #5980a6;
+    qproperty-hotColour: #d97706;
+    qproperty-trackColour: #d4d4d7;
+}
+
+
+/* -- the microphone picker and the vocabulary preview -----------------
+   Square, hairline-bordered, on the light ground: an input is a
+   different shape from a button but the same material.
+   -------------------------------------------------------------------- */
+
+QWidget#panel QComboBox, QWidget#panel QLineEdit {
+    background: #f2f2f3;
+    color: #1d1f20;
+    border: 1px solid rgba(29, 31, 32, 0.16);
+    font-size: 13px;
+    padding: 6px 10px;
+    selection-background-color: #5980a6;
+    selection-color: #f2f2f3;
+}
+
+QWidget#panel QComboBox:hover, QWidget#panel QLineEdit:hover {
+    border: 1px solid rgba(29, 31, 32, 0.45);
+}
+
+QWidget#panel QComboBox:focus, QWidget#panel QLineEdit:focus {
+    border: 1px solid #5980a6;
+}
+
+QWidget#panel QComboBox::drop-down {
+    border: none;
+    width: 20px;
+}
+
+/* The popup list is a view, not the box, so it needs its own rule --
+   without one it falls back to the platform palette and arrives white
+   with a native frame in the middle of a square, flat window. */
+QWidget#panel QComboBox QAbstractItemView {
+    background: #f2f2f3;
+    color: #1d1f20;
+    border: 1px solid rgba(29, 31, 32, 0.16);
+    outline: none;
+    selection-background-color: #eef6ff;
+    selection-color: #1d1f20;
+}
+
+
+/* -- the vocabulary table ---------------------------------------------
+   Shares the model table's typography: they are the same kind of object
+   and a settings window with two table styles looks like two windows.
+   The editor is styled too, or a double-clicked cell opens a native
+   white line edit inside a flat grey row.
+   -------------------------------------------------------------------- */
+
+QTableView#vocabTable {
+    background: #f2f2f3;
+    alternate-background-color: #f2f2f3;
+    border: 1px solid rgba(29, 31, 32, 0.16);
+    gridline-color: transparent;
+    outline: none;
+    font-family: Consolas, "Courier New", monospace;
+    font-size: 12px;
+}
+
+QTableView#vocabTable::item {
+    border-bottom: 1px solid rgba(29, 31, 32, 0.16);
+    padding: 0px 6px;
+}
+
+QTableView#vocabTable::item:selected {
+    background: #eef6ff;
+    color: #1d1f20;
+}
+
+QTableView#vocabTable QLineEdit {
+    background: #eef6ff;
+    color: #1d1f20;
+    border: 1px solid #5980a6;
+    font-family: Consolas, "Courier New", monospace;
+    font-size: 12px;
+    padding: 0px 4px;
+}
+
+
+/* -- the diagnostics log ----------------------------------------------
+   The one place in the window showing raw machine output, so it gets the
+   dark read-only ground the popover and the banner use: it is not
+   interactive, and the colour rule is what says so.
+   -------------------------------------------------------------------- */
+
+QPlainTextEdit#logView {
+    background: #1d2d3d;
+    color: #e7eaee;
+    border: 1px solid #2c455d;
+    font-family: Consolas, "Courier New", monospace;
+    font-size: 11px;
+    padding: 8px;
+    selection-background-color: #5980a6;
+    selection-color: #f2f2f3;
+}

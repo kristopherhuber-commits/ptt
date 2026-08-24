@@ -11,6 +11,7 @@ solved problems stay solved. It is deliberately narrow.
 
 * What the utility must do, and the constraints these issues produced -> [requirements.md](requirements.md)
 * How it is built — configuration matrix, module layout, injection contract -> [design.md](design.md)
+* The tests, what each verifies, and their results -> [verification.md](verification.md)
 
 Those sections used to live here and drifted out of date (this file once documented a
 `build_dist.py` that no longer existed). They are now maintained next to the code they
@@ -97,6 +98,13 @@ When packaging using PyInstaller (`--onedir` mode):
   5. **Paste is now logged**: `target_accepts_keys()` checks for a caret before pasting and logs a warning when it is missing, along with the target window class. Previously a swallowed paste left no trace - the log recorded a successful transcription either way, which is why this went undiagnosed.
 * **Scope:** not Notepad-specific. Any window with a menu bar or access keys - Explorer, VS Code, Office, Firefox - behaves identically.
 
+### 12. Unsided `win` Chord Detected Only the Left Windows Key
+* **Symptom:** A hotkey of `["win"]` in `config.json` responds to the **left** Windows key only. The right one does nothing, silently — the tray shows `Hotkey: Win`, the log shows no error, and the key simply never triggers a recording.
+* **Cause:** `VK_MAP["win"]` was `0x5B`, and `0x5B` is `VK_LWIN`. `ctrl`, `shift` and `alt` have real unsided virtual keys (`0x11`, `0x10`, `0x12`) that `GetAsyncKeyState` reports for either side; **Windows has no unsided Win virtual key.** Each name mapped to exactly one code, so `chord_held(("win",))` could only ever poll the left key while `README.md` and `design.md` both documented unsided names as matching either side. The defect was unreachable in practice — nobody had written `["win"]` by hand — until the settings window's "Match either side" checkbox made it one click away.
+* **Fix:** `hotkey.py` gained a declarative `KEYS` table in which every entry carries **all** the virtual keys that satisfy its name, and `chord_held` now tests `any` of them. `win` carries `(0x5B, 0x5C)`; `lwin` and `rwin` carry one each. `VK_MAP`, `KEY_LABELS`, `BINDABLE_KEYS` and `BINDABLE_BY_VK` are derived from that table, so the picker's bindable set comes from the same source as the detector's virtual keys.
+* **Verified by:** [verification.md](verification.md) `V-HK-07`.
+* **Note:** the docs were already correct and became true rather than needing changes. `hotkey.classify` also now warns that any `win` chord opens the Start menu on release — `inject.suppress_alt_menu` neutralises the `Alt` case (issue #11) and has no Win equivalent.
+
 ## 🛠️ Maintenance & Execution Protocols
 
 ### Native Terminal Execution
@@ -113,3 +121,6 @@ When packaging using PyInstaller (`--onedir` mode):
 ```powershell
 python build_portable.py
 ```
+
+### Unit Tests
+See [verification.md](verification.md) section 1.

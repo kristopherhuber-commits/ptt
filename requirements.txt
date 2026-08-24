@@ -4,7 +4,7 @@ sounddevice==0.5.5
 numpy==2.4.6
 keyboard==0.13.5
 pyperclip==1.11.0
-pystray==0.19.5
+PySide6-Essentials==6.11.2
 pillow==12.2.0
 nvidia-cublas-cu12==12.9.2.10
 nvidia-cuda-nvrtc-cu12==12.9.86
