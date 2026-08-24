@@ -97,6 +97,74 @@ class UiState:
         return ""
 
 
+class ElidedLabel(QLabel):
+    """
+    A one-line label that ends in an ellipsis rather than wrapping or clipping.
+
+    This exists because of a specific defect, and the defect is worth recording
+    because the obvious fix is the one that caused it.
+
+    The State row's detail line used to be a word-wrapping `QLabel` sitting in a
+    `QVBoxLayout` inside a `QGridLayout` cell. In the settings window's banner,
+    880 px wide, it fits on one line and looks right. In the popover, which is
+    `setFixedWidth(340)`, it wraps -- and a wrapping label reports a **one-line**
+    height through a nested layout, so the grid allocated one line and the second
+    line was drawn on top of the headline above it. Overlapping text, in the
+    surface the user looks at most. Confirmed against a pristine `HEAD` worktree,
+    so it predated the session that found it; setting `setWordWrap(False)` in a
+    probe made it go away, which is what pinned the cause.
+
+    The row values had a second, quieter version of the same problem: at 340 px
+    a real device name (72 characters on the machine this was found on) simply
+    ran off the right-hand edge with nothing to say it had.
+
+    Eliding fixes both with one mechanism, and it is the honest one: an ellipsis
+    says text was cut, where clipping says nothing at all. Nothing is lost that
+    the user cannot get -- the same widget in the settings window is wide enough
+    to show the whole string, which is the popover-is-a-glance,
+    window-is-the-detail split section 5 already describes.
+
+    `text()` returns what is **painted**, which is Qt's contract for it and may
+    be elided. `full_text()` returns what was set. Any caller comparing the two
+    hosts' contents must use `full_text()`, or it is comparing two widths.
+    """
+
+    def __init__(self, text="", parent=None):
+        super().__init__(text, parent)
+        self._full = text
+        # Ignored horizontally: the label must never be the reason a row demands
+        # width. Without this the grid sizes column 1 to the longest value and
+        # the popover grows a horizontal scrollbar instead of eliding -- which
+        # is the same failure as before wearing different clothes.
+        self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+
+    def setText(self, text):
+        self._full = text or ""
+        self._apply_elision()
+
+    def full_text(self):
+        """What was set, before elision. See the class docstring."""
+        return self._full
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._apply_elision()
+
+    def _apply_elision(self):
+        width = self.width()
+        if width <= 0:
+            # Before the first layout pass there is nothing to measure against.
+            # Set the full string so the label has something to paint if it is
+            # never resized, and let resizeEvent do the real work.
+            super().setText(self._full)
+            return
+        painted = self.fontMetrics().elidedText(
+            self._full, Qt.TextElideMode.ElideRight, width
+        )
+        if painted != super().text():
+            super().setText(painted)
+
+
 class StatusDot(QWidget):
     """
     A small filled circle. Painted, because a round dot is the one thing the
@@ -211,9 +279,8 @@ class StatusView(RegistrationMarks, QFrame):
         state_box.setSpacing(1)
         self._headline = QLabel("")
         self._headline.setObjectName("stateHeadline")
-        self._detail = QLabel("")
+        self._detail = ElidedLabel("")
         self._detail.setObjectName("stateDetail")
-        self._detail.setWordWrap(True)
         state_box.addWidget(self._headline)
         state_box.addWidget(self._detail)
         grid.addLayout(state_box, row, 1, 1, 2)
@@ -223,7 +290,7 @@ class StatusView(RegistrationMarks, QFrame):
         def value_row(caption, with_tag=False):
             nonlocal row
             grid.addWidget(label(caption), row, 0)
-            val = QLabel(UNKNOWN)
+            val = ElidedLabel(UNKNOWN)
             val.setObjectName("rowValue")
             val.setContentsMargins(0, 9, 0, 9)
             tag = None

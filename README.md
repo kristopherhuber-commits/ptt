@@ -40,7 +40,7 @@ Both produce the same application. The published archive is built from the tagge
 
 No Python, no developer tools, no command line.
 
-1. Download **`ptt_dictate_dist.zip`** (~1.35 GB) from the [**Releases page**](https://github.com/kristopherhuber-commits/ptt/releases/latest).
+1. Download **`ptt_dictate_dist.zip`** (~1.45 GB) from the [**Releases page**](https://github.com/kristopherhuber-commits/ptt/releases/latest).
 2. Extract the ZIP file completely.
 3. Double-click **`install.bat`** inside the extracted folder.
 4. Click **Yes** on the User Account Control (UAC) prompt. The batch script will automatically self-elevate to Administrator to complete the setup.

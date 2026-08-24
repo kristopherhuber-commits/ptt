@@ -208,6 +208,18 @@ derived, but the headline must be what the engine reported.
 embed the same class in both places. The user specifically asked for the
 transition from popover to window to feel like the same object growing.
 
+**As built: the rows elide.** Every value and the derived detail line are
+`ElidedLabel`, not `QLabel`. Two reasons, both found the hard way. The detail
+line used to word-wrap, and a wrapping label inside a nested layout in a
+`QGridLayout` reports a one-line height — so at the popover's fixed 340 px the
+grid allocated one line and the wrapped second line was **drawn over the
+headline**. And a real device name is 72 characters, which simply ran off the
+right-hand edge with nothing to say it had. Eliding fixes both, and it is the
+honest failure: an ellipsis says text was cut where clipping says nothing.
+Nothing is lost — this same widget in the window is wide enough to show the
+whole string, which is exactly the glance-versus-detail split this section
+already draws between the two layers.
+
 ## 6. Layer 3 — settings window
 
 `QMainWindow`, not frameless — Windows draws the title bar. Width ~880 px,
