@@ -688,6 +688,10 @@ there. Do not write a custom switch widget.
 
 ## 10. Acceptance criteria
 
+These are the criteria. **Their status is tracked in
+[verification.md](../verification.md) section 6**, not here — a spec that records its own
+results goes stale the moment either changes independently.
+
 1. Tray icon behaves exactly as today: four colours, four glyphs, same tooltip
    format, same right-click items, same non-hanging Exit.
 2. Hovering the tray icon raises the popover without stealing keyboard focus from

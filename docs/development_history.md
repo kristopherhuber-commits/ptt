@@ -11,6 +11,7 @@ solved problems stay solved. It is deliberately narrow.
 
 * What the utility must do, and the constraints these issues produced -> [requirements.md](requirements.md)
 * How it is built — configuration matrix, module layout, injection contract -> [design.md](design.md)
+* The tests, what each verifies, and their results -> [verification.md](verification.md)
 
 Those sections used to live here and drifted out of date (this file once documented a
 `build_dist.py` that no longer existed). They are now maintained next to the code they
@@ -101,7 +102,7 @@ When packaging using PyInstaller (`--onedir` mode):
 * **Symptom:** A hotkey of `["win"]` in `config.json` responds to the **left** Windows key only. The right one does nothing, silently — the tray shows `Hotkey: Win`, the log shows no error, and the key simply never triggers a recording.
 * **Cause:** `VK_MAP["win"]` was `0x5B`, and `0x5B` is `VK_LWIN`. `ctrl`, `shift` and `alt` have real unsided virtual keys (`0x11`, `0x10`, `0x12`) that `GetAsyncKeyState` reports for either side; **Windows has no unsided Win virtual key.** Each name mapped to exactly one code, so `chord_held(("win",))` could only ever poll the left key while `README.md` and `design.md` both documented unsided names as matching either side. The defect was unreachable in practice — nobody had written `["win"]` by hand — until the settings window's "Match either side" checkbox made it one click away.
 * **Fix:** `hotkey.py` gained a declarative `KEYS` table in which every entry carries **all** the virtual keys that satisfy its name, and `chord_held` now tests `any` of them. `win` carries `(0x5B, 0x5C)`; `lwin` and `rwin` carry one each. `VK_MAP`, `KEY_LABELS`, `BINDABLE_KEYS` and `BINDABLE_BY_VK` are derived from that table, so the picker's bindable set comes from the same source as the detector's virtual keys.
-* **Regression test:** `tests/test_hotkey.py::test_win_matches_either_side`, parametrised over both sides, with `hotkey._key_state` stubbed so no Win32 call is made. Reverting the fix fails it.
+* **Verified by:** [verification.md](verification.md) `V-HK-07`.
 * **Note:** the docs were already correct and became true rather than needing changes. `hotkey.classify` also now warns that any `win` chord opens the Start menu on release — `inject.suppress_alt_menu` neutralises the `Alt` case (issue #11) and has no Win equivalent.
 
 ## 🛠️ Maintenance & Execution Protocols
@@ -122,10 +123,4 @@ python build_portable.py
 ```
 
 ### Unit Tests
-```powershell
-uvx --with-requirements requirements-dev.txt pytest
-```
-
-Pure and fast — no GPU, no microphone, no model, about two seconds. Nothing is installed
-into `.venv`, because `build_portable.py` zips it wholesale and pytest would then ship to
-every target PC (`CON-3`). See `design.md` section 8.
+See [verification.md](verification.md) section 1.

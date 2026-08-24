@@ -56,7 +56,9 @@ active_hotkey:
 | `run_tray.bat` | Self-elevating launcher; runs `.venv\Scripts\ptt_dictate.exe app\ptt_tray.py`. |
 | `install.bat` / `install.ps1` | Self-elevating installer; copies `.venv` + `app` to `%LOCALAPPDATA%\Programs\ptt_dictate`, creates Desktop and Startup shortcuts marked run-as-administrator (`FR-C5`). |
 | `app/assets/` | `style.qss`, the bundled Barlow faces, and `benchmark_sample.wav`. Shipped by `build_portable.py`'s `os.walk` over `app/`. |
-| `docs/` | This document, `requirements.md`, `development_history.md`, `gui_handoff/`. |
+| `tests/` | The unit suite. See [verification.md](verification.md). |
+| `requirements-dev.txt` | pytest and the packages the tests import. Never shipped — see section 8. |
+| `docs/` | This document, `requirements.md`, `verification.md`, `development_history.md`, `gui_handoff/`. |
 
 `build_portable.py`, `run_tray.bat` and `install.ps1` are unchanged by the split, which
 is the whole reason section 4 chose `app/ptt/` over `src/ptt/`.
@@ -344,76 +346,50 @@ that they choose with the information.
 
 ---
 
-## 8. Test strategy
+## 8. Testability
 
-**Unit tests** (`tests/`), pure and fast, no Windows API, no audio device, no model
-and no `QApplication`. 176 tests, about two seconds:
+The tests themselves, what each one verifies, and their results are in
+**[verification.md](verification.md)**. This section is only what is a *design* decision
+rather than a test: the seams that make the behaviour reachable without hardware, and why
+the test framework is not in the distribution.
 
-- `test_hotkey.py` — chord parsing and validation, the `KEYS` table's invariants,
-  left/right resolution including the unsided-`win` regression (issue #12), canonical
-  ordering, labels, and every row of the safety-classifier table above.
-- `test_config.py` — round-trip, defaults when the file is absent, every field's
-  type-fallback *and the OBS-3 log line that explains it*, preservation of unknown keys,
-  and the atomic save.
-- `test_engine.py` — the live chord re-read with no restart, model reloads, benchmarks,
-  the minimum-hold rule, and that a raising frontend callback cannot kill the poll loop.
-- `test_transcribe.py` — `clean_text` (issue #4), the model catalogue, and the benchmark
-  clip's format guard.
-- `test_statusview.py` — the error discrimination the engine's lack of an error state
-  forces, and every branch of the derived detail line.
-- `test_panels.py` — the keyboard board's data: 104 caps, no accidental duplicate virtual
-  key, every bindable key drawn exactly once.
+**Seams.** Every point at which a module would touch Win32, an audio device, a model or an
+event loop is reached through one indirection, so it can be replaced. None of these exists
+for the tests' benefit — each was already required by something else, and testability is
+the dividend:
 
-Where a module needs hardware it is reached through a seam that already existed for this
-purpose: `hotkey._key_state`, `Engine(chord_held=…)`, `paths.asset_path`. None was added
-for the tests.
+| Seam | Exists because | Also makes testable |
+|---|---|---|
+| `hotkey._key_state()` | one `GetAsyncKeyState` call site, so the picker and the detector share a failure mode (`FR-C2`) | chord detection, with no keyboard |
+| `Engine(chord_held=…)` | the loop must be drivable without a keyboard | the whole state machine |
+| `on_state` / `on_text` / `on_benchmark` | the engine must not import the UI (§4) | every state assertion |
+| `paths.asset_path()` | `paths.py` is the only module that computes a directory | the benchmark clip |
 
-An **autouse fixture redirects `paths.debug_log_path`** into the test's own directory.
-That is not only hygiene — `log_debug` appends unconditionally and swallows every error,
-so an unguarded run would quietly append to the log `logging_setup.init`'s docstring says
-is diffed against a captured baseline. Returning those lines to the test is what makes
-`OBS-3` checkable at all: `load()` returning a default and `load()` returning a default
-*for a logged reason* are indistinguishable from the return value.
+That last column is the reason to keep them. A seam that only the tests use is a seam that
+gets refactored away; these four are each load-bearing in production.
 
-**Where pytest lives: settled.** It stays out of `.venv`, which `build_portable.py` zips
-wholesale, and out of `requirements.txt`, which `CON-3` forbids. `requirements-dev.txt`
-lists pytest plus the five runtime packages the pure modules actually import — pinned to
-the same versions `requirements.txt` pins, so the test environment matches the shipped
-one. Run it without installing anything:
+**Where the test framework lives.** Not in `.venv`. `build_portable.py` zips `.venv`
+wholesale, so `pip install pytest` there ships the framework to every target PC, and
+`CON-3` forbids adding it to `requirements.txt`. `requirements-dev.txt` holds it instead,
+and `items_to_zip` is an explicit allowlist, so neither it nor `tests/` reaches a
+distribution. `pyproject.toml` supplies `pythonpath = ["app"]` so `import ptt` resolves
+without installing anything.
 
-```powershell
-uvx --with-requirements requirements-dev.txt pytest
-```
-
-Neither the file nor `tests/` reaches a distribution: `items_to_zip` is an explicit
-allowlist.
-
-**Manual Win32 probes** (`tests/tools/probe_paste.py`). Menu activation, caret loss, and
-paste delivery cannot be unit-tested — they are behaviours of another process's window.
-The probe harness from the issue #11 investigation is kept as a runnable script that
-reproduces the evidence table in section 5.
+**Manual Win32 probes** (`tests/tools/probe_paste.py`, **not yet written**). Menu
+activation, caret loss and paste delivery are behaviours of *another process's* window and
+cannot be unit-tested. The probe harness from the issue #11 investigation is kept as a
+runnable script that reproduces the evidence table in section 5.
 
 Its one non-negotiable design rule: **the harness pins a target window handle and refuses
 to inject anything unless that window currently has focus**, re-asserting focus if it
 drifted and aborting if it cannot. During the issue #11 work, an earlier version aimed at
-whatever `GetForegroundWindow()` returned, and a Notepad window that failed to come to
-the front meant a sequence of pastes and select-alls went into an unrelated application.
-An input-injecting test harness that trusts ambient focus is a hazard, not a test.
+whatever `GetForegroundWindow()` returned, and a Notepad window that failed to come to the
+front meant a sequence of pastes and select-alls went into an unrelated application. An
+input-injecting test harness that trusts ambient focus is a hazard, not a test.
 
-**Regression coverage of the retrospective log.** Each solved issue should map to either
-a unit test or a documented probe step. Issue #4 is covered by
-`test_transcribe.py::test_clean_text_strips_runs_of_full_stops` and issue #12 by
-`test_hotkey.py::test_win_matches_either_side`. Issues #9 and #11 are covered indirectly —
-the classifier warns about exactly the chords that caused them — and directly only by the
-probe harness. #1–#3 and #10 are packaging defects that the build either produces or does
-not.
-
-**The suite is checked against mutation, not just against itself.** Reverting the `win`
-fix, broadening the layout-switch rule back to gui_handoff's version, and restoring the
-truncating `open()` in `Settings.save` each make the matching tests fail. The third one
-initially did **not**: the first version of that test failed on a missing directory, which
-raises at `open` before any truncation and passes against either implementation. A test
-that cannot fail is worse than no test, because it reads like coverage.
+**Every solved issue maps to a verification item.** That rule lives in
+[verification.md](verification.md), which records which issues currently satisfy it and
+which do not.
 
 ---
 
@@ -436,10 +412,9 @@ put `NFR-6`/`NFR-7` back in play for no gain.
    it.
 2. ~~Add the unit tests~~ **Done**, out of order — after step 3 rather than before it,
    which is why session 3 built a classifier and two validated `Settings` fields on top of
-   an untested config layer. 176 tests in `tests/`, run with
-   `uvx --with-requirements requirements-dev.txt pytest`; see section 8.
-   **The pinned-window probe harness is still outstanding** (`tests/tools/probe_paste.py`).
-   It injects real keystrokes into another process's window, so it cannot run unattended
+   an untested config layer. See [verification.md](verification.md).
+   **The pinned-window probe harness is still outstanding** (`tests/tools/probe_paste.py`);
+   it injects real keystrokes into another process's window, so it cannot run unattended
    and belongs with the acceptance pass rather than with the unit suite.
 3. ~~Build the picker dialog and the safety classifier on top of the settled config layer.~~
    **Done.** The picker is the settings window's Hotkey panel — a keyboard diagram with

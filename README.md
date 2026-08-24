@@ -142,6 +142,7 @@ privileges" instead of using the Startup folder, which is a change to
 
 * [docs/requirements.md](docs/requirements.md) — what the utility must do, and the compatibility constraints that earlier bugs produced.
 * [docs/design.md](docs/design.md) — how it is built: configuration matrix, module layout, the keystroke-injection contract, and the hotkey design.
+* [docs/verification.md](docs/verification.md) — the tests: what each one verifies, which part of the design it traces to, and the results.
 * [docs/development_history.md](docs/development_history.md) — the retrospective log of solved issues.
 * [docs/gui_handoff/gui_handoff.md](docs/gui_handoff/gui_handoff.md) — the PySide6 GUI specification: the three UI layers (tray icon, hover popover, settings window), panel-by-panel behaviour, and the acceptance criteria. `docs/gui_handoff/ptt_dictation_ui_mockups.html` is the visual reference and `claude_code_prompt.md` is the staged build plan.
 
