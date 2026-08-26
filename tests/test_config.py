@@ -728,7 +728,12 @@ def test_a_pre_v3_config_arrives_opted_out_of_nothing(config_file):
     assert settings.concierge.opt_in == "unset"
     assert settings.concierge.enabled is True
     assert settings.concierge.idle_unload_minutes == 5
-    assert settings.concierge.tool_mode == "grammar"
+    # The qualified default, set by gate 2.5 (2026-08-26) and not by hand.
+    # It tracks `FIELDS` rather than repeating the literal, so a future
+    # qualification run that changes the default does not silently make this
+    # assertion a second copy of the rule (issue #12, `V-HK-01`).
+    assert settings.concierge.tool_mode == config.FIELDS["concierge.tool_mode"].default
+    assert settings.concierge.tool_mode == "native"
 
 
 def test_the_concierge_block_round_trips(config_file):

@@ -128,11 +128,11 @@ These are the complete settings this application has. There are no others. A nam
 ### `concierge.tool_mode`
 
 - **Type:** one of `grammar`, `native`
-- **Default:** `grammar`
+- **Default:** `native`
 - **The Concierge may change it:** yes
-- **What it does:** How the Concierge asks the model for a decision: 'grammar' constrains the sampler with a generated JSON schema, 'native' sends an OpenAI-style tools array.
-- **When to change it:** Set by the model's qualification record. Grammar is the conformance reference and the model-agnostic floor.
-- **What can go wrong:** Native depends on the model's own chat template being good. Grammar makes malformed calls structurally impossible but leaves one truncation mode, which the harness routes through its repair loop.
+- **What it does:** How the Concierge asks the model for a decision: 'native' sends an OpenAI-style tools array and lets the model's own chat template handle the call; 'grammar' constrains the sampler with a generated JSON schema instead.
+- **When to change it:** Set by the model's qualification record, not by hand. The qualified default is native (gate 2.5, 2026-08-26).
+- **What can go wrong:** Grammar makes a malformed call structurally impossible, which is why it is the conformance reference -- but gate 2.5 measured that it guarantees shape and not judgement: across three models it chose worse, ran slower, and was the only mode in which any candidate made an unsafe write. Native depends on the model's own chat template being good, which is a per-model question the qualification suite answers.
 
 ### `concierge.idle_unload_minutes`
 

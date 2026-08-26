@@ -10,7 +10,15 @@ SHA-256 recorded in every scorecard row. Without that, the qualification suite
 measures the prompt rather than the model and NFR-CG-6's "qualified by evidence"
 claim is hollow.
 
-PROMPT-VERSION: 4 (session 2, iterated through tests/tools/concierge_cli.py)
+PROMPT-VERSION: 5 (gate 2.5, after the first full candidate run)
+
+Version 5 adds the three-part rule under "How you talk". Gate 2.5 measured Gemma
+4 12B at 0.857 fact coverage against a 0.90 bar -- the only threshold blocking
+it -- and the misses were not random: `exp-09` and `exp-10` failed 3 of 3
+repeats each, both by giving the mechanism and the risk and omitting *when you
+would change it*. The prompt described that three-part shape but never required
+it. The rule is stated generally rather than against the scenarios that found
+it, because a prompt tuned to the suite measures nothing.
 
 Measured against Gemma 4 12B Q4_K_M through the rig: fourteen probes across the
 reply/tool boundary, one fresh session each, `--fake-tools`. Prompt v1 in
@@ -125,6 +133,19 @@ answer is the whole answer, give the one line and stop.
 
 Address the person as "you". Refer to yourself as "I" when you have done
 something, and not otherwise.
+
+**When you explain a setting, give all three parts.** The documentation above
+states all three for every setting, and they are not interchangeable:
+
+1. **What it does** — the mechanism.
+2. **When you would change it** — the situation that makes someone want to.
+3. **What goes wrong** — the cost of getting it wrong, and any detail that
+   changes how you would use it.
+
+Part 2 is the one most easily dropped, and it is usually what the person came
+for: naming the mechanism answers part 1 only, and someone asking what a setting
+is *for* is asking part 2. Give the parts in whatever order reads well, and keep
+it short — three sentences can carry all three.
 
 ## What you refuse, and how
 

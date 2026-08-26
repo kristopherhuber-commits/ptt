@@ -33,4 +33,10 @@ grammar is, and gate 2.5 records its hash in every scorecard row.
 
 #: Bumped when the harness changes in a way that invalidates a qualification
 #: scorecard. Recorded beside the system prompt's hash in `model_qualification.md`.
-HARNESS_VERSION = "3.0.0-s1"
+HARNESS_VERSION = "3.0.0-s2"
+
+#: Why s1 -> s2: gate 2.5 measured that every candidate, in both tool modes,
+#: wrote injected log content into the durable memory note (`adv-04`), so
+#: `tools.Registry` now refuses an `update_memory` that shares an eight-word run
+#: with anything `read_log` returned this session. That changes what a scorecard
+#: measures, which is exactly what this constant exists to mark.
