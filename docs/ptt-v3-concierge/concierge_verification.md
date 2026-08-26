@@ -116,16 +116,21 @@ never a concern" are different facts.
   **Session 5 owns `install.ps1` and criterion v3-11, so it is the place to decide** —
   the fix is three more `Move-Item` pairs, and the alternative is stating in the release
   note that reinstalling forgets the Concierge's memory.
-- **`QFont::setPointSize: Point size <= 0 (-1)` appears on the console, source unknown
-  (session 3).** Reported during the hand test, a dozen times, running the tray with a
-  console attached. **Not reproduced** across: startup with the tray shown, engine state
-  changes, the settings window, all six tabs, the popover, and the Concierge panel — on
-  `HEAD` **and** on the pre-session commit, so there is no evidence it is new. It is
-  benign (Qt keeps the pixel size; nothing renders wrong) and it is newly *visible*
-  rather than newly *emitted*: every prior run used `pythonw.exe`, which has no console
-  for Qt's warnings to reach. **What would settle it** is the action that triggers it —
-  the untested surfaces are a delegate painting under a hover or selection state, and
-  the tray menu being opened by a real mouse.
+- **`QFont::setPointSize: Point size <= 0 (-1)` on every menu hover — diagnosed, not
+  fixed (session 3).** Reported during the hand test and traced to its cause: `style.qss`
+  opens with `QWidget { font-size: 14px }`, so **every widget in this application carries
+  a pixel-sized font, whose `pointSize()` is therefore -1**, and Qt derives a font per
+  menu item as the pointer crosses it. Measured directly: before it is first shown a
+  `QMenu` reports `pixelSize=-1 pointSize=10`; **after** it has been shown once, every
+  `QMenu` in the app — the tray's, the Concierge's, and a bare `QMenu()` with no parent —
+  reports `pixelSize=14 pointSize=-1`. So it is **app-wide and pre-existing**, not the
+  Concierge's; the Concierge's overflow menu is simply the menu that was hovered while a
+  console happened to be attached, and `run_tray.bat` runs `pythonw.exe`, which has none.
+  It is benign — the point size is rejected, the pixel size stands, nothing renders wrong.
+  **The fix is not free**, which is why it is recorded rather than taken: expressing the
+  global rule in points instead of pixels changes rendered text size across every surface
+  of a UI that has already been accepted. Worth doing deliberately, with a look at each
+  tab, not as a side effect of quietening a console.
 - **The panel's glyphs are unverified on a real screen (session 3).** `↺` (U+21BA) in
   the header and `▸` / `◂` (U+25B8 / U+25C2) on the tab-strip button are what handoff §7
   names, and **Barlow carries none of them** — they render through Qt's per-glyph

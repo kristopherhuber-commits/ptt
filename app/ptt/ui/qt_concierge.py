@@ -907,6 +907,10 @@ class ConciergePanel(RegistrationMarks, QWidget):
         download lives in this panel too, so one surface owns the model's whole
         lifecycle, and Advanced keeps the never-writes invariant `V-UI-12`
         checks.
+
+        Held on `self` as well as parented, for the reason `qt_tray._build_menu`
+        gives: `QPushButton::setMenu` does not take ownership, and a menu with
+        no reference is collected out from under the button that shows it.
         """
         menu = QMenu(self)
         menu.addAction("New session", self.new_session_requested.emit)
@@ -1045,6 +1049,21 @@ class ConciergePanel(RegistrationMarks, QWidget):
         self.memory_open_requested.emit()
         self._show_page(1)
 
+    def _confirm(self, title, text):
+        """
+        One helper for both, because the only thing that differs between them
+        is the words. Parented, so the box is modal to this window and centred
+        on it; `Cancel` is the default button, so a stray Return key cannot
+        delete 6.87 GB.
+        """
+        box = QMessageBox(self)
+        box.setWindowTitle(title)
+        box.setText(text)
+        box.setStandardButtons(QMessageBox.StandardButton.Yes
+                               | QMessageBox.StandardButton.Cancel)
+        box.setDefaultButton(QMessageBox.StandardButton.Cancel)
+        return box.exec() == QMessageBox.StandardButton.Yes
+
     def _on_restore(self):
         """
         `↺ session`, behind the first of this window's two confirmations.
@@ -1058,26 +1077,20 @@ class ConciergePanel(RegistrationMarks, QWidget):
             self.append_notice("The Concierge has not changed anything this "
                                "session.")
             return
-        answer = QMessageBox.question(
-            self, "Restore this session's settings",
-            f"Put back the {len(pending)} setting(s) the Concierge changed in "
-            f"this session?\n\nOnly the settings it wrote are touched. Anything "
-            f"you changed yourself in the tabs is left alone.",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
-            QMessageBox.StandardButton.Cancel)
-        if answer == QMessageBox.StandardButton.Yes:
+        if self._confirm(
+                "Restore this session's settings",
+                f"Put back the {len(pending)} setting(s) the Concierge changed in "
+                f"this session?\n\nOnly the settings it wrote are touched. Anything "
+                f"you changed yourself in the tabs is left alone."):
             self.restore_requested.emit()
 
     def _on_delete_model(self):
         """`Delete model`, behind the second of the two confirmations (Q25)."""
-        answer = QMessageBox.question(
-            self, "Delete the Concierge model",
-            f"Delete the downloaded {self.view.model_label or 'Concierge'} "
-            f"weights from this machine?\n\nThe Concierge stops working until "
-            f"the file is downloaded again. Dictation is unaffected.",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
-            QMessageBox.StandardButton.Cancel)
-        if answer == QMessageBox.StandardButton.Yes:
+        if self._confirm(
+                "Delete the Concierge model",
+                f"Delete the downloaded {self.view.model_label or 'Concierge'} "
+                f"weights from this machine?\n\nThe Concierge stops working until "
+                f"the file is downloaded again. Dictation is unaffected."):
             self.delete_model_requested.emit()
 
     # -- rendering ----------------------------------------------------------
