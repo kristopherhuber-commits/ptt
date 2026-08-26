@@ -854,15 +854,19 @@ class ConciergeController(QObject):
         saved, reason = self.store.save(name, self._panel.view.save_payload(),
                                         session_id=self._session_id)
         if saved is None:
-            self._panel.append_notice(f"Not saved: {reason}")
+            self._panel.notify(f"Not saved: {reason}")
             return
         self._session_id = saved.id
         self._panel.set_session_name(saved.name)
         self._panel.set_sessions(self.store.list())
-        self._panel.append_notice(f"Saved as {saved.name!r}.")
+        self._panel.notify(f"Saved as {saved.name!r}.")
 
     def open_session(self, session_id):
-        self._panel.show_saved_session(self.store.load(session_id))
+        saved = self.store.load(session_id)
+        if saved is None:
+            self._panel.notify("That saved session could not be read.")
+            return
+        self._panel.show_saved_session(saved)
 
     # -- lifecycle ----------------------------------------------------------
 

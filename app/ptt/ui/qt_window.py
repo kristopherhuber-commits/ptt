@@ -68,6 +68,22 @@ SAVED_FLASH_MS = 4000
 MESSAGE_MS = 8000
 
 
+def restored_width(before, current, panel_width=CONCIERGE_WIDTH,
+                   minimum=MINIMUM_SIZE[0]):
+    """
+    How wide the window should be once the Concierge panel is collapsed.
+
+    Pure, and separated for the reason `qt_marks.mark_centres` is: this is the
+    half of the behaviour that can be checked without a screen, and the rule it
+    encodes is not obvious. `before` is the width when the panel was expanded,
+    `current` is the width now. The difference between `current` and where the
+    expansion left the window is the user's own resizing, and that is kept --
+    ours is the only width given back.
+    """
+    manual = current - (before + panel_width)
+    return max(before + manual, minimum)
+
+
 class SettingsWindow(QMainWindow):
     """The only interactive surface. Hidden rather than destroyed when closed."""
 
@@ -116,6 +132,15 @@ class SettingsWindow(QMainWindow):
         self.concierge.hide()
         self.concierge.close_requested.connect(
             lambda: self.set_concierge_visible(False))
+        # The same status-bar channel every tab uses for something that is not a
+        # save. A Save that found nothing to save leaves no mark on the panel
+        # except one muted line in a transcript that is empty by definition,
+        # which is not a report.
+        self.concierge.message.connect(self._on_panel_message)
+
+        #: The window's width the last time the panel was expanded, so closing
+        #: it gives the pixels back. See `set_concierge_visible`.
+        self._width_before_concierge = None
 
         self._split = QSplitter(Qt.Orientation.Horizontal)
         self._split.setObjectName("conciergeSplitter")
@@ -208,6 +233,11 @@ class SettingsWindow(QMainWindow):
         below their own minimum and start the overlapping that scroll area
         exists to prevent. A maximised window is left alone -- there is nowhere
         for it to grow -- and so is one the user has already made wide enough.
+
+        **Closing gives the pixels back.** The width before the expansion is
+        remembered and restored, carrying forward any resizing the user did
+        while the panel was open, so opening and closing repeatedly leaves the
+        window where it started rather than one panel wider each time.
         """
         visible = bool(visible)
         if visible == self.concierge.isVisible():
@@ -221,14 +251,35 @@ class SettingsWindow(QMainWindow):
             self._split.setSizes([max(self.width() - CONCIERGE_WIDTH,
                                       MINIMUM_SIZE[0] - CONCIERGE_WIDTH),
                                   CONCIERGE_WIDTH])
+        else:
+            self._shrink_after_concierge()
         self._sync_concierge_button(visible)
         self.concierge_visible.emit(visible)
 
     def _grow_for_concierge(self):
+        self._width_before_concierge = None
         maximised = bool(self.windowState() & Qt.WindowState.WindowMaximized)
         if maximised or self.width() >= WINDOW_SIZE[0] + CONCIERGE_WIDTH:
             return
+        self._width_before_concierge = self.width()
         self.resize(self.width() + CONCIERGE_WIDTH, self.height())
+
+    def _shrink_after_concierge(self):
+        """
+        Give back exactly what expanding took, and nothing the user added.
+
+        The delta is measured against where the expansion left the window, so a
+        window the user widened by 200 px while the panel was open closes 200 px
+        wider than it started -- their change survives, ours does not. Never
+        below the stated minimum, and never on a maximised window, which was
+        not grown in the first place.
+        """
+        before, self._width_before_concierge = self._width_before_concierge, None
+        if before is None:
+            return
+        if bool(self.windowState() & Qt.WindowState.WindowMaximized):
+            return
+        self.resize(restored_width(before, self.width()), self.height())
 
     def _sync_concierge_button(self, visible):
         """Keep the corner button's arrow and check state honest."""

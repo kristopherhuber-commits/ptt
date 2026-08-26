@@ -815,6 +815,13 @@ class ConciergePanel(RegistrationMarks, QWidget):
     delete_model_requested = Signal()
     close_requested = Signal()
 
+    #: A transient one-line note for the window's status bar, exactly as
+    #: `InstantApplyPanel.message` is. Paired with a notice row rather than
+    #: replacing it: the transcript is the record, the status bar is what makes
+    #: an outcome with no other visible effect -- a Save that found nothing to
+    #: save -- something the user actually notices.
+    message = Signal(str)
+
     def __init__(self, model_label="", parent=None):
         super().__init__(parent)
         self.setObjectName("conciergePanel")
@@ -857,8 +864,6 @@ class ConciergePanel(RegistrationMarks, QWidget):
         top.addStretch(1)
 
         self._restore = self._header_button("↺ session", self._on_restore)
-        self._restore.setToolTip(
-            "Put back every setting the Concierge changed in this session")
         self._more = self._header_button("…", None)
         self._more.setToolTip("Sessions, the memory note, and the model file")
         self._more.setMenu(self._build_menu())
@@ -1085,7 +1090,18 @@ class ConciergePanel(RegistrationMarks, QWidget):
         self._input.setPlaceholderText(self.view.placeholder())
         self._input.setEnabled(self.view.can_send())
         self._send.setEnabled(self.view.can_send())
-        self._restore.setEnabled(bool(self.view.pending_changes()))
+        # Disabled when there is nothing to put back, with a tooltip that says
+        # so: a greyed control that does not explain its greying is the failure
+        # `gui_handoff.md` section 6 names for a disabled button, and Qt does
+        # not deliver hover events to a disabled widget's *children*, only to
+        # the widget, so the tooltip is the one channel that still works.
+        pending = self.view.pending_changes()
+        self._restore.setEnabled(bool(pending))
+        self._restore.setToolTip(
+            f"Put back the {len(pending)} setting(s) the Concierge changed in "
+            f"this session" if pending
+            else "Nothing to put back: the Concierge has not changed anything "
+                 "this session")
 
     def _render(self):
         self._transcript.sync(self.view.rows)
@@ -1127,6 +1143,11 @@ class ConciergePanel(RegistrationMarks, QWidget):
         self.view.add_notice(text)
         self._render()
 
+    def notify(self, text):
+        """A notice that also flashes in the status bar. See `message`."""
+        self.append_notice(text)
+        self.message.emit(text)
+
     def append_user(self, text):
         self.view.add_user(text)
         self._render()
@@ -1163,6 +1184,14 @@ class ConciergePanel(RegistrationMarks, QWidget):
             f"{len(text)} characters"
             + ("  ·  a previous version is kept" if has_previous
                else "  ·  no previous version yet"))
+        # Restoring **swaps**: every write rotates the current note into the
+        # `.prev` file, so restoring twice returns to where it started. That is
+        # deliberate -- the alternative destroys the current note irrecoverably
+        # -- but it looks like a loop unless the control says so.
+        self._memory_restore.setToolTip(
+            "Swap this note with the kept previous version. Doing it twice "
+            "returns to where you started." if has_previous
+            else "There is no previous version of this note yet")
 
     def set_sessions(self, saved):
         """Rebuild the saved-sessions submenu from the store's listing."""

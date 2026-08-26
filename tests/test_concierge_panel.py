@@ -34,6 +34,7 @@ from ptt.concierge import sessions as sessions_mod
 from ptt.concierge import state as state_mod
 from ptt.concierge import tools as tools_mod
 from ptt.ui import qt_concierge as panel_mod
+from ptt.ui import qt_window as window_mod
 from ptt.ui.qt_concierge import ConciergeView, Row
 
 
@@ -324,6 +325,25 @@ def test_a_new_session_clears_the_transcript_but_not_the_note(view):
     assert view.memory_text == "prefers the medium model"
     view.add_token("fresh")
     assert kinds(view) == [panel_mod.AGENT]
+
+
+# -- V-CG-109b: the window gives back what expanding took ---------------------
+
+def test_collapsing_returns_the_window_to_where_it_started():
+    """
+    Reported in session 3's hand test: closing the panel left the window one
+    panel wider than it started, every time.
+    """
+    assert window_mod.restored_width(880, 1240) == 880
+
+
+def test_a_resize_made_while_the_panel_was_open_survives_the_close():
+    assert window_mod.restored_width(880, 1440) == 1080
+    assert window_mod.restored_width(880, 1200) == 840
+
+
+def test_the_window_is_never_restored_below_its_stated_minimum():
+    assert window_mod.restored_width(880, 900) == window_mod.MINIMUM_SIZE[0]
 
 
 # -- the saved-transcript store (V-CG-110 … V-CG-114) -------------------------
