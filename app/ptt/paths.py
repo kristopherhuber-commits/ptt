@@ -52,7 +52,7 @@ def local_model_dir(model_size):
 
 # -- the Concierge (v3.0) ----------------------------------------------------
 #
-# Five per-machine artifacts and one shipped one. The four that live beside
+# Six per-machine artifacts and one shipped one. The five that live beside
 # config.json are runtime state, not configuration, and `build_portable.py`
 # excludes every one of them by name; `app/models/` is excluded as a whole
 # directory, because a 6.87 GB GGUF inside a distribution zip is CON-CG-4
@@ -93,6 +93,18 @@ def previous_memory_note_path():
     learned and repairing it by hand needs knowing what it used to say.
     """
     return os.path.join(APP_DIR, "concierge_memory.prev.txt")
+
+
+def concierge_sessions_path():
+    """
+    The saved Concierge transcripts (FR-CG-13, `concierge/sessions.py`).
+
+    One JSON file rather than a directory, and beside `config.json` rather than
+    under it: `build_portable.py` excludes per-machine artifacts by file name at
+    the top level of `app/`, so a file costs one entry in that frozenset where a
+    directory would have cost a second exclusion rule (Q27).
+    """
+    return os.path.join(APP_DIR, "concierge_sessions.json")
 
 
 def concierge_prompt_path():
@@ -158,3 +170,4 @@ def asset_path(*parts):
     `app/` wholesale, so anything under this directory ships automatically.
     """
     return os.path.join(assets_dir(), *parts)
+

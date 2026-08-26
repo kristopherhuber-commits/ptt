@@ -20,7 +20,8 @@ import sys
 import pytest
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-HARNESS = ("state", "tools", "llm", "agent", "server", "fetch")
+HARNESS = ("state", "tools", "llm", "agent", "server", "fetch",
+           "sessions")
 
 
 @pytest.fixture

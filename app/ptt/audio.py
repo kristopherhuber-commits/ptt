@@ -28,6 +28,7 @@ tell after the fact which microphone a recording actually came from.
 """
 
 import ctypes
+import threading
 from typing import NamedTuple
 
 import numpy as np
@@ -97,6 +98,11 @@ MME_NAME_LIMIT = 31
 #: wants a device the picker hides can find its index and set `audio_device` by
 #: hand. Hiding something without saying what was hidden is not a simplification.
 _enumeration_logged = False
+
+#: Guards the initialise/enumerate/terminate sequence in `input_devices`, which
+#: is a process-global refcount with two callers on two threads from v3.0. See
+#: that function's docstring for what the interleaving costs.
+_enumeration_lock = threading.Lock()
 
 
 class InputDevice(NamedTuple):
@@ -194,19 +200,33 @@ def input_devices():
     Returns an empty tuple rather than raising if the query fails: the picker
     then offers only "follow the Windows default device", which is the
     behaviour of every build before this one.
+
+    Serialised, from v3.0 (`concierge_handoff.md` section 4). The
+    initialise/terminate pair above is a **process-global refcount**, and until
+    the Concierge there was exactly one caller: the Audio tab, on the GUI
+    thread, when the tab is shown. `list_audio_devices` is now a tool, called
+    from the Concierge's worker thread, so two threads can be inside this pair
+    at once -- and the interleaving that matters is one thread's `_terminate`
+    dropping the count to zero while the other is between `query_hostapis` and
+    `query_devices`. That is a native-level failure inside PortAudio, not a
+    Python exception this function could report. The lock is the whole fix and
+    it belongs here rather than in either caller, for the reason
+    `Settings.set` owns validation: an invariant that holds only while every
+    caller remembers it is not an invariant.
     """
     global _enumeration_logged
     devices = []
     try:
-        sd._initialize()
-        try:
-            hostapis = sd.query_hostapis()
-            infos = list(sd.query_devices())
-            for index, info in enumerate(infos):
-                if info.get("max_input_channels", 0) > 0:
-                    devices.append(_describe(index, info, hostapis, infos))
-        finally:
-            sd._terminate()
+        with _enumeration_lock:
+            sd._initialize()
+            try:
+                hostapis = sd.query_hostapis()
+                infos = list(sd.query_devices())
+                for index, info in enumerate(infos):
+                    if info.get("max_input_channels", 0) > 0:
+                        devices.append(_describe(index, info, hostapis, infos))
+            finally:
+                sd._terminate()
     except Exception as e:
         log_debug(f"Could not enumerate input devices: {str(e)}")
 

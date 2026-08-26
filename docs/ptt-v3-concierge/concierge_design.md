@@ -26,7 +26,7 @@ Qt** (§7), and the model choice is an *experiment run through the finished harn
 ```
 app (Qt)                          harness (no Qt imports — CON-CG-6)
 ─────────                         ────────────────────────────────────
-ConciergePanel  ◄─QueuedConn──►   ptt.concierge.worker (thread adapter)
+ConciergePanel  ◄─QueuedConn──►   ptt.ui.qt_concierge_worker  (thread adapter)
 qt_window/tray                          │
                                   ptt.concierge.agent      loop, context, undo journal
                                   ptt.concierge.llm        SSE client, grammar, repair
@@ -42,6 +42,23 @@ qt_window/tray                          │
 The dependency arrow points one way: the app imports the harness; the harness imports
 nothing from `ptt.ui`. Tools receive their seams (Settings, UiState, log path) by
 injection at construction — the same seam discipline `verification.md` §1 documents.
+
+**The thread adapter is on the app's side of the seam (rev. session 3).** The diagram
+above put `ptt.concierge.worker` in the right-hand column, and it cannot go there: a
+QThread adapter is Qt by definition, and CON-CG-6's import test walks every module in
+`app/ptt/concierge/` asserting PySide6 is absent from all of them. It is
+`app/ptt/ui/qt_concierge_worker.py`, holding two objects — `ConciergeWorker`, which owns
+the harness and lives on the worker thread, and `ConciergeController`, which lives on the
+GUI thread and is the only place in the application where a cross-thread connection is
+made. Nothing else moved: the arrow, the injection discipline and the plain-Python
+callbacks are exactly as described.
+
+**Three consequences of that placement, each pinned by L1 (session 3).** The adapter
+imports from `PySide6.QtCore` and from nothing else in PySide6, so no widget class is in
+reach of a worker-thread line; it never calls `InstantApplyPanel.apply_now`; and
+cancellation is a `threading.Event` rather than a queued slot, because a queued slot
+cannot reach a thread that is blocked inside `agent.send()`, which is precisely when a
+cancel is wanted.
 
 **`subprocess`, not `QProcess` (Q8).** `concierge_handoff.md` §1–§2 said `QProcess`; that
 predates this section and handoff's own scope note already yields to it. Three stated
@@ -799,6 +816,7 @@ maps them the other way.
 | Q25 | **`Delete model` lives on the Concierge panel, not Advanced** (review §1.9). Advanced keeps its never-writes invariant and V-UI-12 is unchanged. Supersedes Q4's placement |
 | Q28 **(session 2, after a candidate review)** | **Three changes to §6, and one non-change.** (a) The MoE slot is **gpt-oss-20b (MXFP4)**, not "one 20B-class MoE": it is the only candidate that can test CON-CG-5's floor, because its card says it "should only be used with the harmony format as it will not work correctly otherwise" and should therefore score native ≪ grammar. (b) "Upper bound for 16 GB" is corrected to a **measured** bound — 13857 MiB available to llama-server after the driver and a resident Whisper (spike C5), so ~11.5 GiB of model buffer, and gpt-oss-20b at 11.3 GiB sits *at* it rather than inside it. (c) A **gate-zero step**: every candidate must load on the pinned `b10621` *with the app running* before it is scored, because the pin carries the alias check, the measured `-rea off` behaviour and C6's persistence verdict. **The non-change: the Gemma 4 pin was checked and is current** — see the provenance note in `concierge_handoff.md` §1 |
 | Q26 | **`opt_in` is a tri-state key** (`unset`/`accepted`/`declined`) separate from `enabled` (review §2.8); **`get_state()` returns a key list the harness declares and the Qt adapter fills** (review §2.7); **THREAD-CHECK logs once per signal type per session** (review §7.5); **`FR-CG-7`'s pin is the authority with the API `oid` as a pre-download cross-check** (review §2.5); **NFR-CG-3 names both the resident and the generating state** (review §1.7) |
+| Q26 rider **(session 3)** | **THREAD-CHECK's key is the signal *and the emitting thread***, not the signal alone. Criterion v3-10 asks for distinct thread identities on **every** hop and names four, two of which are the same signal from different threads: the worker emits `state_changed` when it starts the runtime and the harness idle timer emits it when residency expires. Keyed on the signal alone, the second line is suppressed by the first and the hop v3-10 names can never be shown. The bound Q26 exists for is unaffected — the token signal has exactly one emitter, so it still logs exactly one line |
 
 ### Q1–Q7, as originally recorded
 

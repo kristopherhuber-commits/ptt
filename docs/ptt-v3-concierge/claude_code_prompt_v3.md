@@ -1,6 +1,6 @@
 # Develop — Claude Code prompts, PTT Dictation v3.0 Concierge
 
-**READY — sessions 0–2 and gate 2.5 are complete; session 3 is next.** In the project's
+**READY — sessions 0–3 and gate 2.5 are complete; session 4 is next.** In the project's
 document architecture this is the Develop document: the complete instruction set for
 construction, consequent to `concierge_requirements.md` and `concierge_design.md`. Design
 §10's decision log is fully resolved — **Q1–Q7 from the design discussion and the spike,
@@ -235,7 +235,21 @@ harness defect were already shaken out of it. **No further session until this is
 
 ---
 
-## Session 3 — panel UI and threading (Opus · Extra)
+## Session 3 — panel UI and threading (Opus · Extra) — **RUN 2026-08-26, DONE**
+
+Built: `app/ptt/ui/qt_concierge.py` (view model + `ConciergePanel`),
+`app/ptt/ui/qt_concierge_worker.py` (`ConciergeWorker` + `ConciergeController`),
+`app/ptt/ui/qt_threadcheck.py` (`log_thread` moved out of `qt_tray`, plus `SignalAudit`),
+`app/ptt/concierge/sessions.py` (saved transcripts), the splitter and tab-strip button in
+`qt_window.py`, the tray's `Concierge…`, the FR-CG-2 hop in `qt_app.py`, and the
+stylesheet block. 84 new L1 items (`V-CG-101`…`V-CG-124`); 747 tests green.
+
+Three things later sessions inherit: the thread adapter lives in `ptt.ui`, not
+`ptt.concierge` (design §2, rev. session 3 — a QThread adapter cannot pass CON-CG-6's
+import test); `THREAD-CHECK` is keyed by signal **and** emitting thread (§10 Q26 rider,
+without which v3-10's idle-timer hop can never be shown); and `install.ps1` preserves
+neither the memory note nor the saved transcripts across a reinstall
+(`concierge_verification.md` §4, still open — session 5 owns that file).
 
 Paste exactly this:
 

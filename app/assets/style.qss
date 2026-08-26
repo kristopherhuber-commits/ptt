@@ -662,3 +662,345 @@ QPlainTextEdit#logView {
     selection-background-color: #5980a6;
     selection-color: #f2f2f3;
 }
+
+
+/* =====================================================================
+   The Concierge chat panel (v3.0, concierge_handoff.md section 7).
+
+   Every value below is already a token of this design system. Two of
+   them appear in this file for the first time and both are named by
+   section 7 rather than chosen here:
+
+       --color-accent-300  #b5d9fd   the user bubble's hairline
+       --color-neutral-300 #d4d4d7   the splitter handle, as the button
+                                     :pressed rule above already uses
+
+   The panel is a **light, interactive** surface, so it follows the rule
+   the whole scheme rests on: dark surfaces are read-only, light surfaces
+   are interactive. The one dark thing in it is the memory-note editor,
+   which is the Diagnostics log's argument exactly -- raw stored text the
+   user is reading rather than a control.
+
+   Everything is square. Bubbles included: a rounded bubble is the one
+   piece of chat convention this UI does not adopt, because border-radius
+   is 0 everywhere else and one exception would read as a mistake.
+   -------------------------------------------------------------------- */
+
+QWidget#conciergePanel {
+    background: #f2f2f3;
+    border-left: 1px solid rgba(29, 31, 32, 0.16);
+    qproperty-markColour: rgba(29, 31, 32, 0.55);
+}
+
+QSplitter#conciergeSplitter::handle:horizontal {
+    background: #d4d4d7;
+    width: 1px;
+}
+
+/* the button at the right-hand end of the tab strip */
+QPushButton#conciergeToggle {
+    background: transparent;
+    color: #5980a6;
+    border: none;
+    font-family: "Barlow Condensed", "Segoe UI", sans-serif;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 1px;
+    padding: 6px 12px;
+}
+
+QPushButton#conciergeToggle:hover {
+    color: #1d2d3d;
+}
+
+QPushButton#conciergeToggle:checked {
+    color: #1d2d3d;
+    background: #eef6ff;
+}
+
+/* the status bar's one new segment */
+QLabel#conciergeSegment {
+    color: rgba(29, 31, 32, 0.55);
+    font-size: 12px;
+    padding-right: 12px;
+}
+
+
+/* -- header ------------------------------------------------------------ */
+
+QFrame#conciergeHeader {
+    background: #e9e9ea;
+    border-bottom: 1px solid rgba(29, 31, 32, 0.16);
+}
+
+QLabel#conciergeBrand {
+    color: #1d1f20;
+    font-family: "Barlow Condensed", "Segoe UI", sans-serif;
+    font-size: 15px;
+    font-weight: 600;
+    letter-spacing: 1px;
+}
+
+QLabel#conciergeTag {
+    color: #2c455d;
+    background: #d6ebff;
+    font-family: Consolas, "Courier New", monospace;
+    font-size: 11px;
+    padding: 2px 7px;
+}
+
+QLabel#conciergeStateTag {
+    color: #2c455d;
+    background: #eef6ff;
+    border: 1px solid #b5d9fd;
+    font-family: Consolas, "Courier New", monospace;
+    font-size: 11px;
+    padding: 1px 6px;
+}
+
+QLabel#conciergeCaption {
+    color: rgba(29, 31, 32, 0.55);
+    font-size: 12px;
+}
+
+QLineEdit#conciergeName {
+    background: transparent;
+    border: none;
+    border-bottom: 1px solid rgba(29, 31, 32, 0.16);
+    color: #1d1f20;
+    font-size: 13px;
+    padding: 2px 0px;
+}
+
+QLineEdit#conciergeName:focus {
+    border-bottom: 1px solid #5980a6;
+}
+
+QWidget#conciergePanel QPushButton#conciergeHeaderButton {
+    background: transparent;
+    border: none;
+    color: #5980a6;
+    font-size: 12px;
+    padding: 3px 6px;
+}
+
+QWidget#conciergePanel QPushButton#conciergeHeaderButton:hover {
+    color: #1d2d3d;
+    background: #eef6ff;
+}
+
+QWidget#conciergePanel QPushButton#conciergeHeaderButton:disabled {
+    color: rgba(29, 31, 32, 0.30);
+}
+
+QWidget#conciergePanel QPushButton#conciergeHeaderButton::menu-indicator {
+    image: none;
+    width: 0px;
+}
+
+
+/* -- transcript --------------------------------------------------------
+   Bubbles are square-cornered and hairline-bordered, and the two sides
+   differ by fill rather than by shape: the user's is the accent tint,
+   the Concierge's is the page. Section 7 fixes both.
+   -------------------------------------------------------------------- */
+
+QScrollArea#conciergeScroll, QWidget#conciergeTranscript {
+    background: #f2f2f3;
+    border: none;
+}
+
+QFrame#userBubble {
+    background: #eef6ff;
+    border: 1px solid #b5d9fd;
+}
+
+QLabel#userBubbleText {
+    color: #1d1f20;
+    font-size: 13px;
+}
+
+QFrame#agentBubble {
+    background: #f2f2f3;
+    border: 1px solid rgba(29, 31, 32, 0.16);
+}
+
+QLabel#agentBubbleText {
+    color: #1d1f20;
+    font-size: 13px;
+}
+
+/* tool activity: one muted mono line, no frame, no fill */
+QLabel#toolLine {
+    color: rgba(29, 31, 32, 0.55);
+    font-family: Consolas, "Courier New", monospace;
+    font-size: 11px;
+}
+
+/* a forced stop, a timeout, or anything else the harness had to say */
+QLabel#noticeLine {
+    color: rgba(29, 31, 32, 0.55);
+    border-left: 2px solid #f59e0b;
+    font-size: 12px;
+    padding: 2px 0px 2px 8px;
+}
+
+/* A refused write (FR-CG-11). Dark red, which is this UI's error ink --
+   the same value the status dot uses for the engine's failure states --
+   and never the amber of a notice: a refusal is not a warning, it is a
+   thing the user asked for that did not happen. */
+QFrame#refusalRow {
+    background: #f2f2f3;
+    border: 1px solid #8c3a2e;
+}
+
+QLabel#refusalHeadline {
+    color: #8c3a2e;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+QLabel#refusalDetail {
+    color: rgba(29, 31, 32, 0.55);
+    font-size: 12px;
+}
+
+/* an Undo chip, accent-outlined per section 7 */
+QFrame#changeChip {
+    background: #f2f2f3;
+    border: 1px solid #94bce3;
+}
+
+QLabel#changeChipText {
+    color: #1d1f20;
+    font-family: Consolas, "Courier New", monospace;
+    font-size: 11px;
+}
+
+QWidget#conciergePanel QPushButton#undoChip {
+    background: transparent;
+    border: 1px solid rgba(29, 31, 32, 0.16);
+    color: #5980a6;
+    font-size: 11px;
+    padding: 2px 8px;
+}
+
+QWidget#conciergePanel QPushButton#undoChip:hover {
+    background: #eef6ff;
+}
+
+QWidget#conciergePanel QPushButton#undoChip:disabled {
+    border: 1px solid rgba(29, 31, 32, 0.16);
+    color: rgba(29, 31, 32, 0.30);
+}
+
+
+/* -- composer ---------------------------------------------------------- */
+
+QFrame#conciergeComposer {
+    background: #f2f2f3;
+    border-top: 1px solid rgba(29, 31, 32, 0.16);
+}
+
+QPlainTextEdit#conciergeInput {
+    background: #f2f2f3;
+    border: 1px solid rgba(29, 31, 32, 0.16);
+    color: #1d1f20;
+    font-size: 13px;
+    padding: 6px 8px;
+    selection-background-color: #5980a6;
+    selection-color: #f2f2f3;
+}
+
+QPlainTextEdit#conciergeInput:focus {
+    border: 1px solid #5980a6;
+}
+
+QPlainTextEdit#conciergeInput:disabled {
+    background: #e9e9ea;
+    color: rgba(29, 31, 32, 0.30);
+}
+
+/* Send, and Save note on the memory page. The one solid accent fill the
+   button comment above reserves for a primary action -- and unlike every
+   other control in this window, these two are not instant-apply: nothing
+   happens until they are pressed. */
+QWidget#conciergePanel QPushButton#conciergeSend {
+    background: #5980a6;
+    border: 1px solid #416180;
+    color: #f2f2f3;
+    font-size: 12px;
+    padding: 7px 14px;
+}
+
+QWidget#conciergePanel QPushButton#conciergeSend:hover {
+    background: #416180;
+}
+
+QWidget#conciergePanel QPushButton#conciergeSend:disabled {
+    background: #e9e9ea;
+    border: 1px solid rgba(29, 31, 32, 0.16);
+    color: rgba(29, 31, 32, 0.30);
+}
+
+QLabel#conciergeLegend {
+    color: rgba(29, 31, 32, 0.55);
+    font-size: 11px;
+}
+
+
+/* -- the memory note and the saved-session viewer ----------------------
+   The generic panel button, scoped to this panel because the window's own
+   `QWidget#panel QPushButton` rule cannot reach a widget that is not a
+   tab. Note that every id-selected button above is written
+   `QWidget#conciergePanel QPushButton#id` rather than `QPushButton#id`:
+   Qt style sheets follow CSS specificity, so one id and two types beats
+   one id and one type, and the shorter form loses to this rule. The
+   status-chip comment near the top of this file is the same trap one
+   floor up.
+   -------------------------------------------------------------------- */
+
+QWidget#conciergePanel QPushButton {
+    background: transparent;
+    color: #1d1f20;
+    border: 1px solid rgba(29, 31, 32, 0.16);
+    font-size: 12px;
+    padding: 6px 12px;
+}
+
+QWidget#conciergePanel QPushButton:hover {
+    background: #e9e9ea;
+}
+
+QWidget#conciergePanel QPushButton:disabled {
+    color: rgba(29, 31, 32, 0.30);
+}
+
+QLabel#conciergeSectionTitle {
+    color: #1d1f20;
+    font-family: "Barlow Condensed", "Segoe UI", sans-serif;
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 1px;
+}
+
+QLabel#conciergeSectionNote {
+    color: rgba(29, 31, 32, 0.55);
+    font-size: 12px;
+}
+
+QPlainTextEdit#conciergeMemoryEdit {
+    background: #1d2d3d;
+    color: #e7eaee;
+    border: 1px solid #2c455d;
+    font-family: Consolas, "Courier New", monospace;
+    font-size: 11px;
+    padding: 8px;
+    selection-background-color: #5980a6;
+    selection-color: #f2f2f3;
+}
+
+QFrame#conciergeArchiveHead {
+    background: #e9e9ea;
+    border-bottom: 1px solid rgba(29, 31, 32, 0.16);
+}

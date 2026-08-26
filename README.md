@@ -180,6 +180,9 @@ The three layers described in section 1 are `app/ptt/ui/`, one module per piece:
 | `ui/qt_statusview.py` | The read-only state display — built once and embedded twice, as the popover's body and as the window's banner, so the two cannot drift apart. |
 | `ui/qt_theme.py` | Registers the bundled fonts and applies `style.qss`. |
 | `ui/qt_marks.py` | The small `+` registration marks at the corners of the status panel and every tab — the crosshair a printer uses to align colour plates, and the motif that makes the window read as a technical drawing. |
+| `ui/qt_threadcheck.py` | `THREAD-CHECK`: the one line each queued hop writes to `debug_log.txt` at its first emission, which is the evidence that the hop is real. Two threads must be named and they must differ. |
+| `ui/qt_concierge.py` | Layer 4 (v3.0): the Concierge chat panel, docked right of the tabs. Holds a `ConciergeView` — a plain object with no Qt in it that decides what the transcript contains — and renders it. |
+| `ui/qt_concierge_worker.py` | The thread adapter between that panel and the Qt-free harness in `ptt/concierge/`. `ConciergeWorker` owns the harness on a worker thread; `ConciergeController` lives on the GUI thread and is the only place a cross-thread connection is made. |
 | `ui/panels/` | One module per tab: `hotkey`, `model`, `audio`, `vocabulary`, `advanced`, `diagnostics`. `panels/__init__.py` holds `InstantApplyPanel`, the one write-then-save-then-tell-the-engine sequence every control routes through. |
 
 **The engine never imports the UI.** It reports state through a callback the frontend

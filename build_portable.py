@@ -12,15 +12,17 @@ import zipfile
 #: installation with -Force, so a shipped config.json would overwrite the user's
 #: saved hotkey and device preference on every reinstall.
 #:
-#: The four Concierge entries are v3.0's (concierge_handoff.md section 6, Q27).
+#: The five Concierge entries are v3.0's (concierge_handoff.md section 6, Q27).
 #: concierge_state.json names a pid and a port that mean nothing on another
 #: machine and would send the startup reap after a stranger's process;
-#: concierge_key is one launch's API key; and the memory note is the user's own
-#: text about their own machine, which has no business in a distribution at all.
+#: concierge_key is one launch's API key; and the memory note and the saved
+#: transcripts are the user's own words about their own machine, which have no
+#: business in a distribution at all.
 RUNTIME_ARTIFACTS = frozenset({
     "config.json", "debug_log.txt", "debug_log.prev.txt",
     "concierge_state.json", "concierge_key",
     "concierge_memory.txt", "concierge_memory.prev.txt",
+    "concierge_sessions.json",
 })
 
 #: Directories under a zipped item that never ship, as path tuples relative to

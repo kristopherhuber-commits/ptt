@@ -18,6 +18,15 @@ either.
 confirms in the status bar; `flash_saved` is that confirmation, and every panel
 reaches it through the one `InstantApplyPanel.saved` signal rather than by
 writing to the bar itself.
+
+v3.0 adds a seventh surface that is **not** a tab: the Concierge chat panel,
+docked to the right of the tabs inside a `QSplitter` and collapsed by default
+(`concierge_handoff.md` section 7). It sits beside the tabs rather than beside
+the whole window so the banner keeps spanning the width, and it is reached from
+the `Concierge` button at the right-hand end of the tab strip -- the strip's
+corner widget, which is the one place Qt offers there. This window knows nothing
+about the harness: it builds the panel, shows and hides it, and reports when
+that happened. `qt_concierge_worker.ConciergeController` owns everything else.
 """
 
 from datetime import datetime
@@ -25,8 +34,8 @@ from datetime import datetime
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
-    QLabel, QMainWindow, QScrollArea, QStatusBar, QTabWidget, QVBoxLayout,
-    QWidget,
+    QLabel, QMainWindow, QPushButton, QScrollArea, QSplitter, QStatusBar,
+    QTabWidget, QVBoxLayout, QWidget,
 )
 
 from ptt.ui.panels import InstantApplyPanel
@@ -36,6 +45,7 @@ from ptt.ui.panels.diagnostics import DiagnosticsPanel
 from ptt.ui.panels.hotkey import HotkeyPanel
 from ptt.ui.panels.model import ModelPanel
 from ptt.ui.panels.vocabulary import VocabularyPanel
+from ptt.ui.qt_concierge import ConciergePanel, DEFAULT_WIDTH as CONCIERGE_WIDTH
 from ptt.ui.qt_statusview import StatusView
 
 #: Default size. gui_handoff section 6 fixes the width at ~880 and gives a
@@ -66,6 +76,13 @@ class SettingsWindow(QMainWindow):
     #: instead of waiting for the engine's next state change.
     settings_changed = Signal()
 
+    #: The Concierge panel was expanded or collapsed. The controller starts the
+    #: runtime on the first and, when residency is 0, unloads it on the second
+    #: -- which is the one residency case `Server.start_idle_timer` deliberately
+    #: refuses to own, because "unload when the chat panel closes" is a fact
+    #: only this window knows.
+    concierge_visible = Signal(bool)
+
     def __init__(self, settings, cuda_supported, parent=None):
         super().__init__(parent)
         self.setWindowTitle("PTT Dictation — Settings")
@@ -94,15 +111,42 @@ class SettingsWindow(QMainWindow):
         self._add_panel("Advanced", AdvancedPanel(settings))
         self._add_panel("Diagnostics", DiagnosticsPanel(settings, cuda_supported))
 
-        layout.addWidget(self.tabs, 1)
+        # 2b. the Concierge, beside the tabs and collapsed until asked for
+        self.concierge = ConciergePanel()
+        self.concierge.hide()
+        self.concierge.close_requested.connect(
+            lambda: self.set_concierge_visible(False))
+
+        self._split = QSplitter(Qt.Orientation.Horizontal)
+        self._split.setObjectName("conciergeSplitter")
+        self._split.setChildrenCollapsible(False)
+        self._split.addWidget(self.tabs)
+        self._split.addWidget(self.concierge)
+        self._split.setStretchFactor(0, 1)
+        self._split.setStretchFactor(1, 0)
+        layout.addWidget(self._split, 1)
+
+        self._concierge_button = QPushButton("Concierge  ▸")
+        self._concierge_button.setObjectName("conciergeToggle")
+        self._concierge_button.setFlat(True)
+        self._concierge_button.setCheckable(True)
+        self._concierge_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._concierge_button.toggled.connect(self.set_concierge_visible)
+        self.tabs.setCornerWidget(self._concierge_button,
+                                  Qt.Corner.TopRightCorner)
+
         self.setCentralWidget(central)
 
         # 4. the status bar
         self._status = QStatusBar()
         self._summary = QLabel("")
+        self._concierge_segment = QLabel("")
+        self._concierge_segment.setObjectName("conciergeSegment")
+        self._concierge_segment.hide()
         self._saved = QLabel("")
         self._saved.setObjectName("savedFlash")
         self._status.addWidget(self._summary, 1)
+        self._status.addPermanentWidget(self._concierge_segment)
         self._status.addPermanentWidget(self._saved)
         self.setStatusBar(self._status)
 
@@ -151,6 +195,58 @@ class SettingsWindow(QMainWindow):
         """
         for panel in self._panels:
             panel.refresh()
+
+    # -- the Concierge ------------------------------------------------------
+
+    def set_concierge_visible(self, visible):
+        """
+        Expand or collapse the chat panel. Idempotent; emits on a real change.
+
+        The window **grows** by the panel's width rather than squeezing the tabs
+        into what is left: `MINIMUM_SIZE` is 820 px because the Hotkey tab draws
+        a 104-key keyboard, and taking 360 px away from that would put the tabs
+        below their own minimum and start the overlapping that scroll area
+        exists to prevent. A maximised window is left alone -- there is nowhere
+        for it to grow -- and so is one the user has already made wide enough.
+        """
+        visible = bool(visible)
+        if visible == self.concierge.isVisible():
+            self._sync_concierge_button(visible)
+            return
+
+        if visible:
+            self._grow_for_concierge()
+        self.concierge.setVisible(visible)
+        if visible:
+            self._split.setSizes([max(self.width() - CONCIERGE_WIDTH,
+                                      MINIMUM_SIZE[0] - CONCIERGE_WIDTH),
+                                  CONCIERGE_WIDTH])
+        self._sync_concierge_button(visible)
+        self.concierge_visible.emit(visible)
+
+    def _grow_for_concierge(self):
+        maximised = bool(self.windowState() & Qt.WindowState.WindowMaximized)
+        if maximised or self.width() >= WINDOW_SIZE[0] + CONCIERGE_WIDTH:
+            return
+        self.resize(self.width() + CONCIERGE_WIDTH, self.height())
+
+    def _sync_concierge_button(self, visible):
+        """Keep the corner button's arrow and check state honest."""
+        blocked = self._concierge_button.blockSignals(True)
+        self._concierge_button.setChecked(visible)
+        self._concierge_button.setText(
+            "Concierge  ◂" if visible else "Concierge  ▸")
+        self._concierge_button.blockSignals(blocked)
+
+    def set_concierge_segment(self, text):
+        """
+        The status bar's Concierge segment: `<model> resident · unloads after N`.
+
+        Hidden rather than blanked when there is nothing to say, so the bar does
+        not carry an empty gap between the summary and the saved flash.
+        """
+        self._concierge_segment.setText(text or "")
+        self._concierge_segment.setVisible(bool(text))
 
     def record_benchmark(self, model_name, device, seconds):
         """
