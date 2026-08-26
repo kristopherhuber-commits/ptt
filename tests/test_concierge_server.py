@@ -179,6 +179,51 @@ def test_the_four_non_optional_flags_are_all_there():
     assert ("-c", "32768") in pairs
 
 
+def test_reasoning_effort_is_absent_by_default_and_never_replaces_rea_off():
+    """
+    `V-CG-47`. Design §6's per-model reasoning column, as a launch parameter.
+
+    Gate zero found the case it exists for: `-rea off` does not reach gpt-oss-20b's
+    harmony analysis channel on build b10621 — 1024 completion tokens, 253 deltas
+    of `reasoning_content` and a single `content` delta that was `null`, six
+    iterations to the token cap and never a decision. `--reasoning-effort low`
+    answers the same question in 101 tokens.
+
+    Two properties, and the second is the one that matters: it is **absent** on
+    the shipped path, so the launch line stays exactly the four flags; and when
+    present it is **additive**, because `-rea off` is non-negotiable and a
+    parameter that silently replaced it would be a fifth way to lose NFR-CG-1 to
+    time-to-first-thought.
+    """
+    plain = server_mod.launch_args("llama-server.exe", "m.gguf", 8099, "key.txt")
+    assert "--reasoning-effort" not in plain
+
+    tuned = server_mod.launch_args("llama-server.exe", "m.gguf", 8099, "key.txt",
+                                   reasoning_effort="low")
+    pairs = list(zip(tuned, tuned[1:]))
+    assert ("--reasoning-effort", "low") in pairs
+    assert ("-rea", "off") in pairs                  # additive, not a swap
+    # Everything the default line had, unchanged.
+    assert all(flag in tuned for flag in plain)
+
+
+def test_the_server_passes_its_reasoning_effort_to_the_launch_line():
+    seen = {}
+
+    class _Spawn:
+        def __call__(self, args, **kwargs):
+            seen["args"] = args
+            raise OSError("not really launching")
+
+    machine = state_mod.Machine(state_mod.STOPPED)
+    server = server_mod.Server(__file__, __file__, machine, spawn=_Spawn(),
+                               reasoning_effort="low",
+                               state_path=os.devnull, key_path=os.devnull)
+    server.start()
+    assert ("--reasoning-effort", "low") in list(
+        zip(seen["args"], seen["args"][1:]))
+
+
 def test_the_persistence_flags_are_absent_unless_asked_for():
     """
     C6 measured that a restored slot is not reused by the chat endpoint, so

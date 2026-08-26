@@ -479,7 +479,8 @@ def reap_orphan(state_path=None, probe=None, win32=None):
 
 def launch_args(exe, model, port, key_path, host="127.0.0.1",
                 context_size=CONTEXT_SIZE, gpu_layers=GPU_LAYERS,
-                slot_save_path=None, cache_ram_mib=None):
+                slot_save_path=None, cache_ram_mib=None,
+                reasoning_effort=None):
     """
     Design 2's launch line, as a list. Four of these are not optional.
 
@@ -514,6 +515,22 @@ def launch_args(exe, model, port, key_path, host="127.0.0.1",
         args += ["--slot-save-path", slot_save_path]
     if cache_ram_mib is not None:
         args += ["-cram", str(cache_ram_mib)]
+    if reasoning_effort:
+        # **Additive, never a replacement for `-rea off`** (design 6). The four
+        # flags above stay exactly as they are; this appends a fifth for models
+        # whose deliberation `-rea off` does not reach.
+        #
+        # Session 2's gate zero found the case: gpt-oss-20b is trained on the
+        # harmony format, whose analysis channel `-rea off` does not suppress on
+        # build b10621. Measured -- 1024 completion tokens, **253 deltas of
+        # `reasoning_content` and one `content` delta that was null**, six
+        # iterations running to the token cap and never yielding a decision.
+        # With `--reasoning-effort low` the same question answers in 101 tokens
+        # in grammar mode and 32 in native. Section 6 already says a reasoning
+        # budget is a per-model qualification column and never a default; this
+        # is the parameter that makes that sentence true of the code, which
+        # hardcoded the flag and offered no way to set it per candidate.
+        args += ["--reasoning-effort", str(reasoning_effort)]
     return args
 
 
@@ -532,7 +549,7 @@ class Server:
                  spawn=None, clock=time.monotonic, sleep=time.sleep,
                  ready_timeout=SERVER_READY_TIMEOUT_SEC,
                  context_size=CONTEXT_SIZE, prewarm=None,
-                 on_stderr=None):
+                 on_stderr=None, reasoning_effort=None):
         self.exe = exe
         self.model = model
         self.host = host
@@ -540,6 +557,9 @@ class Server:
         self.state_path = state_path or paths.concierge_state_path()
         self.key_path = key_path or paths.concierge_key_path()
         self.context_size = context_size
+        #: Per-model, per design 6's qualification column. `None` is the shipped
+        #: default and means the launch line is exactly the four flags.
+        self.reasoning_effort = reasoning_effort
         self._probe = probe or Probe()
         self._win32 = win32 or Win32()
         self._spawn = spawn or subprocess.Popen
@@ -601,7 +621,8 @@ class Server:
                 os.makedirs(slot_dir, exist_ok=True)
             args = launch_args(self.exe, self.model, self.port, key_path,
                                self.host, self.context_size,
-                               slot_save_path=slot_dir, cache_ram_mib=cram)
+                               slot_save_path=slot_dir, cache_ram_mib=cram,
+                               reasoning_effort=self.reasoning_effort)
             log_debug("Concierge: " + " ".join(args))
 
             try:

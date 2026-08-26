@@ -102,6 +102,14 @@ def main(argv=None):
         help="Where the transcript goes.")
     args = parser.parse_args(argv)
 
+    # Before anything streams. A Windows console is cp1252 unless told otherwise,
+    # and the rig exists to run models nobody has characterised yet.
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
     bench = rig.Bench(args)
     stamp = time.strftime("%Y%m%d-%H%M%S")
     transcript = rig.Transcript(os.path.join(args.runs_dir, f"cli-{stamp}"),
@@ -353,7 +361,21 @@ class Console:
 
 
 def _echo(text):
-    sys.stdout.write(text)
+    """
+    Stream one content delta to the console, whatever the console can encode.
+
+    Windows consoles default to cp1252, and a model is under no obligation to
+    stay inside it: gpt-oss-20b emitted U+2011 (non-breaking hyphen) and took the
+    whole run down with a `UnicodeEncodeError` mid-generation. `main()` puts
+    stdout into UTF-8 with `errors="replace"` where the stream allows it; this is
+    the belt for the case where it does not, because an instrument that dies on a
+    punctuation mark is worse than one that prints a question mark.
+    """
+    try:
+        sys.stdout.write(text)
+    except UnicodeEncodeError:
+        encoding = getattr(sys.stdout, "encoding", None) or "ascii"
+        sys.stdout.write(text.encode(encoding, "replace").decode(encoding))
     sys.stdout.flush()
 
 

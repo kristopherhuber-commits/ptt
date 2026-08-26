@@ -566,6 +566,7 @@ class Bench:
             self.args.exe, self.args.model, self.machine,
             context_size=self.args.context_size,
             ready_timeout=self.args.ready_timeout,
+            reasoning_effort=self.args.reasoning_effort or None,
             prewarm=self._prewarm if self.args.prewarm else None)
         ok, reason = self.server.start()
         if not ok:
@@ -622,7 +623,10 @@ class Bench:
             "model": (os.path.basename(self.args.model) if self.args.model
                       else f"(attached) {self.base_url}"),
             "tool_mode": self.tool_mode,
-            "reasoning": self.args.reasoning,
+            #: What actually reached the launch line, not a label. "off" is
+            #: `-rea off` alone; "off+effort=low" is that plus the fifth flag.
+            "reasoning": ("off+effort=" + self.args.reasoning_effort
+                          if self.args.reasoning_effort else "off"),
             "context_size": self.args.context_size,
             "seams": "fakes" if self.fake_tools else "real",
             "system_prompt_sha256": self.prompt_sha,
@@ -742,10 +746,13 @@ def add_common_arguments(parser):
         help="Skip the knowledge-pack prewarm and pay it on the first message.")
     endpoint.set_defaults(prewarm=True)
     endpoint.add_argument(
-        "--reasoning", default="off",
-        help="Recorded in the scorecard as this model's reasoning budget. The "
-             "launch path passes -rea off; this flag is what a future "
-             "reasoning-qualified model changes (design section 6).")
+        "--reasoning-effort", default="",
+        help="Appends --reasoning-effort to the launch line, on top of the "
+             "non-negotiable -rea off. Section 6 makes the reasoning budget a "
+             "per-model qualification column; this is how a candidate sets it. "
+             "gpt-oss-20b needs 'low': its harmony analysis channel is not "
+             "suppressed by -rea off, and without this it runs to the token cap "
+             "on every iteration and never emits a decision.")
 
     harness = parser.add_argument_group("harness")
     harness.add_argument(

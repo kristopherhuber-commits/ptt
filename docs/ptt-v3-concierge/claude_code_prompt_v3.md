@@ -192,6 +192,12 @@ No prompt — this one is yours. In order:
    `b10621` is not a candidate at this pin — taking it means moving the pin and re-running
    C6 and C7a, which is a decision, not a download.
 
+   **Loading is not serving — send one real message too.** gpt-oss-20b passed both
+   load checks and then failed every question: `-rea off` does not suppress a harmony
+   model's analysis channel, so it ran to the token cap on all six iterations and never
+   emitted a decision. `--reasoning-effort low` fixes it and goes in that candidate's
+   scorecard row. Gate zero as run on 2026-08-26 is tabulated in design §6.
+
 2. **The three candidates.** Gemma 4 12B Q4_K_M is already in `spike/` and its pin was
    verified current on 2026-08-26 (`concierge_handoff.md` §1.1) — do not re-download it
    and do not re-pin it. Then Qwen 3.5 9B, then **gpt-oss-20b (MXFP4)**, which replaces
@@ -199,7 +205,8 @@ No prompt — this one is yours. In order:
    training makes generic `tools` arrays unreliable it should score native ≪ grammar,
    which is the only direct test of CON-CG-5 available.
 
-3. **Run both modes on every candidate.** Session 2 measured a 6-point selection gap
+3. **Run both modes on every candidate.** gpt-oss-20b needs
+   `--reasoning-effort low` on every run, in both modes; the other two do not. Session 2 measured a 6-point selection gap
    between them on Gemma 4 alone (design §4.1), so a single-mode run per candidate
    measures the mode as much as the model. `--repeat 3` at minimum: the hotkey write
    varied 2-of-4 clean, 1 repaired, 1 repaired-after-a-wasted-retry across four runs of

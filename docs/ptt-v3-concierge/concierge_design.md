@@ -592,6 +592,31 @@ is a decision rather than a download. Two checks, both cheap, both before the su
    reports the alias.
 2. It loads **with the app running** — the numbers below are the reason this is not
    implied by the first.
+3. **It can produce a decision at all.** Added after gate zero ran: loading is not
+   serving. gpt-oss-20b passed both checks above and then failed every question, because
+   `-rea off` does not suppress a harmony model's analysis channel — 1024 completion
+   tokens per iteration, all of them `reasoning_content`, a `content` delta of `null`,
+   six iterations to the cap and never a decision (`development_history.md` #21). One
+   `--reasoning-effort low` fixes it: 101 tokens and a valid decision in grammar mode, 32
+   in native. So the check is one real message through the rig, and a candidate that
+   needs a reasoning setting **records it in its scorecard row** rather than being
+   disqualified — §6 has always said the reasoning budget is a per-model column.
+
+**Gate zero, as run (2026-08-26).** All three candidates loaded on `b10621` beside a
+resident Whisper. Baseline with the app running: 2318 MiB used, 13858 free.
+
+| Candidate | Load | VRAM total / free | Decision on the probe |
+|---|---|---|---|
+| Gemma 4 12B Q4_K_M | 13.3 s | 9531 / 6645 MiB | reply, after 4 redundant `get_config` calls |
+| Qwen 3.5 9B Q4_K_M | 8.9 s | 8557 / 7619 MiB | reply, after hitting the 6-call cap |
+| gpt-oss-20b MXFP4 | 11.6 s | **14393 / 1783 MiB** | nothing until `--reasoning-effort low`; then a reply in one generation |
+
+**gpt-oss-20b's headroom is the thin one and it is a genuine NFR-CG-4 risk.** 14393 MiB
+of 16175 usable, measured at steady state with the app resident — 1783 MiB free, about
+11 % of the card. It fits at the default `large-v3-turbo` Whisper tier and it does not
+have margin for a larger one: `large-v3` is roughly a gigabyte more resident, and
+`run_benchmark` briefly holds a second Whisper. If gpt-oss wins on score, that trade is
+the decision, not a footnote.
 
 **The 16 GB bound, from measurement rather than from the sticker (Q28).** "Upper bound
 for 16 GB" was the wrong quantity: the card is not the budget, because the Concierge
