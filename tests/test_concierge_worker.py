@@ -30,6 +30,7 @@ import threading
 import pytest
 
 from ptt import config, paths
+from ptt.concierge import llm
 from ptt.concierge import state as state_mod
 from ptt.concierge import tools as tools_mod
 from ptt.ui import qt_concierge_worker as worker_mod
@@ -332,6 +333,46 @@ def test_the_worker_never_calls_apply_now():
              if isinstance(node, ast.Call)
              and getattr(node.func, "attr", "") == "apply_now"]
     assert calls == []
+
+
+# -- V-CG-120b: the client is built with a transport --------------------------
+
+def test_the_client_the_adapter_builds_carries_a_transport(worker):
+    """
+    Found in the session's own hand test, twice, as "the knowledge pack
+    prewarm failed: 'NoneType' object has no attribute 'post_stream'".
+
+    `llm.Client`'s transport seam defaults to `None` on purpose -- an L1 test
+    that forgets to inject a fake must not be able to open a socket -- so
+    filling it belongs to the caller, and this adapter is the only caller in
+    the shipped app. Both of its call sites forgot, and every test in this file
+    injects a fake client, so nothing here could see it.
+    """
+    client = worker._client("http://127.0.0.1:1", "key")
+    assert client._transport is not None
+    assert isinstance(client._transport, llm.HttpTransport)
+
+
+def test_an_injected_transport_is_not_overwritten(worker):
+    """The seam stays a seam: the rig and the L1 fakes still supply their own."""
+    sentinel = object()
+    client = worker._client("http://127.0.0.1:1", "key", transport=sentinel)
+    assert client._transport is sentinel
+
+
+def test_every_client_this_adapter_builds_goes_through_that_helper():
+    """
+    Structural, because the defect was a *missing* call and not a wrong one:
+    the two call sites each constructed a client directly, so fixing one would
+    have left the other.
+    """
+    source = open(os.path.join(REPO, "app", "ptt", "ui",
+                               "qt_concierge_worker.py"), encoding="utf-8").read()
+    tree = ast.parse(source)
+    direct = [node for node in ast.walk(tree)
+              if isinstance(node, ast.Call)
+              and getattr(node.func, "attr", "") == "_make_client"]
+    assert len(direct) == 1, "only `_client` may construct a client"
 
 
 # -- V-CG-121: undo and session restore --------------------------------------

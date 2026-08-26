@@ -321,6 +321,24 @@ class ConciergeWorker(QObject):
         """Whether a Concierge model is in VRAM on our account."""
         return self.server is not None and self.server.process is not None
 
+    def _client(self, base_url, api_key, **kwargs):
+        """
+        One `llm.Client`, carrying the transport it cannot work without.
+
+        **`llm.Client(transport=None)` is not a client with a default
+        transport** -- it is a client whose first `stream()` raises
+        `'NoneType' object has no attribute 'post_stream'`. The seam is
+        deliberately left unfilled so that no L1 test can open a socket by
+        forgetting to inject a fake, which makes filling it the caller's job;
+        `rig.py` fills it in both of its own call sites for the same reason,
+        and this adapter is the only other caller in the shipped application.
+
+        Every client this class builds goes through here, so there is one place
+        to forget rather than two.
+        """
+        kwargs.setdefault("transport", llm.HttpTransport())
+        return self._make_client(base_url, api_key, **kwargs)
+
     def _prewarm(self, port, api_key):
         """
         Pay the knowledge pack's cost inside `loading` (design 5).
@@ -329,7 +347,7 @@ class ConciergeWorker(QObject):
         the **real** one, because llama-server's KV cache is a prefix cache and
         warming different bytes warms something nothing will ever hit again.
         """
-        client = self._make_client(f"http://127.0.0.1:{port}", api_key)
+        client = self._client(f"http://127.0.0.1:{port}", api_key)
         messages = [{"role": "system", "content": self.context.prefix()},
                     {"role": "user", "content": "ready?"}]
         client.stream(messages, None, self._settings.get("concierge.tool_mode"),
@@ -369,8 +387,8 @@ class ConciergeWorker(QObject):
             return
 
         self.agent = agent_mod.Agent(
-            self._make_client(self.server.base_url(), self.server.api_key,
-                              cancelled=self.cancel.is_set),
+            self._client(self.server.base_url(), self.server.api_key,
+                         cancelled=self.cancel.is_set),
             self.registry, self.context, self.journal,
             tool_mode=self._settings.get("concierge.tool_mode"),
             on_token=lambda text: self._emit(self.token, "token", text),
