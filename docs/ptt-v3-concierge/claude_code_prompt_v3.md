@@ -1,12 +1,18 @@
 # Develop — Claude Code prompts, PTT Dictation v3.0 Concierge
 
-**READY.** In the project's document architecture this is the Develop document: the
-complete instruction set for construction, consequent to `concierge_requirements.md`
-and `concierge_design.md`. Design §10's decision log is fully resolved — **Q1–Q7 from the
-design discussion and the spike, Q8–Q27 from session 0** (`stage0_review_v3.md`). The
-2026-08-25 spike (`spike_results.md`) verified the harness design empirically. The one
-remaining gate is session 2.5 — no session after it runs until a model has passed L2
-qualification.
+**READY — sessions 0–2 and gate 2.5 are complete; session 3 is next.** In the project's
+document architecture this is the Develop document: the complete instruction set for
+construction, consequent to `concierge_requirements.md` and `concierge_design.md`. Design
+§10's decision log is fully resolved — **Q1–Q7 from the design discussion and the spike,
+Q8–Q27 from session 0** (`stage0_review_v3.md`), **Q28 from the candidate review before
+gate 2.5**. The 2026-08-25 spike (`spike_results.md`) verified the harness design
+empirically.
+
+**The gate has been passed.** `model_qualification.md` records it: **Gemma 4 12B Q4_K_M,
+`tool_mode: native`, reasoning `off`** — 106/123 on the 41-scenario suite at `--repeat 3`,
+all seven thresholds PASS. Qwen 3.5 9B and gpt-oss-20b were both disqualified for making
+an unsafe write under the jailbreak scenario. Frozen artifacts: harness `3.0.0-s2`, prompt
+`fa2a83eb2f54`, pack `129c5a31d17f`. Sessions 3–5 may run.
 
 **Session 0 changed the session-1 scope materially.** Three items that were not in the
 original prompt are now load-bearing: a validated write path in `config.py` (D-CG-13,
@@ -175,9 +181,17 @@ OpenAI-compatible endpoint so a candidate model is one flag.
 
 ---
 
-## Session 2.5 — MANUAL GATE (human, not Claude Code)
+## Session 2.5 — MANUAL GATE (human, not Claude Code) — **RUN 2026-08-26, PASSED**
 
-No prompt — this one is yours. In order:
+**Outcome: Gemma 4 12B Q4_K_M, `native`. Do not re-run this gate for v3.0.** The
+decision, the six candidate scorecards, the threshold changes and what was knowingly
+accepted are all in `model_qualification.md`. Three things it produced that the later
+sessions inherit: `concierge.tool_mode` now defaults to `native`; `injection_compliance`
+is a new absolute threshold; and `tools.Registry` refuses an `update_memory` that copies
+text out of `read_log` (`development_history.md` #23, #24).
+
+The checklist below is kept because it is the procedure for the **next** qualification —
+a 24 GB+ tier, or a newer llama.cpp pin. In order:
 
 0. **Freeze `system_prompt.md` and the knowledge pack**, and record both hashes. A prompt
    that moves between candidates makes the scorecards incomparable (Q17). The runner
@@ -237,6 +251,11 @@ emits a settings-changed signal the adapter receives on the GUI thread and turns
 the existing qt_app._on_settings_changed broadcast. That hop is where FR-CG-2 is won.
 THREAD-CHECK logs once per signal type per session, at first emission (Q26) — the token
 signal fires ~30/s into the same debug_log.txt that read_log reads.
+
+The memory-note viewer must surface a REFUSED update_memory, not just a successful one:
+gate 2.5 added a harness guard that rejects a note copying text out of read_log
+(development_history.md #24), so `{"error": true, "reason": ...}` is now an ordinary
+outcome of that tool and the panel has to render it like any other refusal (FR-CG-11).
 
 QSS from existing tokens, square corners, no new colors. View-model split as in
 qt_statusview.py; test the view-model in L1. Session naming/save UI, the memory-note

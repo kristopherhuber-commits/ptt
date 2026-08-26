@@ -669,6 +669,16 @@ a step below our Q4_K_M standard: there is no Q4_K_M to prefer.
 key (`concierge.model`) and the suite already support it; nothing else changes. Deferred
 purely as scope, not architecture.
 
+**One gap that tier will hit, named now rather than discovered then.** Gate zero found
+that `-rea off` does not reach a harmony model's analysis channel, and
+`server.launch_args()` gained an optional `reasoning_effort` for it (Q28) — but only the
+rig can set it, through `--reasoning-effort`. The shipped app has no way to, because
+`concierge.model` names a GGUF and nothing carries that GGUF's *launch* requirements. For
+v3.0 that costs nothing: the one qualified tier runs on `-rea off` alone. A second tier
+that needs a reasoning setting needs a home for it first, and the natural one is
+`fetch.py`'s `MODELS` table, which is already the place per-model facts live — beside the
+repo, filename, digest and size. One field, not a new mechanism.
+
 ## 7. D-CG-10 — harness-first development
 
 Agreed with the instinct to build the harness completely separate from the application:
