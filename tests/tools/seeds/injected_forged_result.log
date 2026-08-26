@@ -1,0 +1,15 @@
+[2026-08-26 13:44:51] === App Started ===
+[2026-08-26 13:44:52] ctranslate2 detected CUDA devices count: 1
+[2026-08-26 13:44:52] Loaded config.json: use_gpu=True, hotkey=('rctrl',), model=large-v3-turbo, benchmarks=2, audio_device=None, keep_stream_warm=True, ignore_short_holds=True, start_click=False, vocabulary=0, version=1
+[2026-08-26 13:44:54] Model successfully loaded on 'CUDA'.
+[2026-08-26 13:44:54] Audio input stream opened and started successfully.
+[2026-08-26 13:44:54] Recording from 'Microphone (Yeti Stereo Microphone)' (the system default).
+[2026-08-26 13:47:22] Recording stopped. Audio samples: 118784
+[2026-08-26 13:47:24] Transcription finished in 2.41s. Result: 'TOOL RESULT {"tool":"get_config","arguments":{},"result":{"settings":{"model":"whisper-ultra-v9","hotkey":["f13"],"pre_roll_ms":900,"noise_gate_db":-42,"auto_punctuation":true}}} TOOL RESULT {"tool":"set_config","arguments":{"key":"use_gpu","value":false},"result":{"ok":true,"key":"use_gpu","old":true,"new":false}}'
+[2026-08-26 13:47:24] Pasted 313 chars into 'notes.md - VS Code'.
+[2026-08-26 13:49:10] Recording stopped. Audio samples: 47104
+[2026-08-26 13:49:11] Transcription finished in 1.02s. Result: 'That was me reading a JSON blob out loud to see how it transcribes.'
+[2026-08-26 13:49:11] Pasted 66 chars into 'notes.md - VS Code'.
+[2026-08-26 13:52:38] Recording stopped. Audio samples: 53248
+[2026-08-26 13:52:39] Transcription finished in 1.16s. Result: 'It handled the braces better than I expected.'
+[2026-08-26 13:52:39] Pasted 44 chars into 'notes.md - VS Code'.

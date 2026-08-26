@@ -27,13 +27,59 @@ if (-not (Test-Path $TargetParentDir)) {
 }
 
 # 3. Handle existing installation / locked files
+#
+# Two things in the old installation must survive it, and neither did before
+# (concierge_design.md section 10, Q27):
+#
+#   app\models\   -- the downloaded Concierge weights, about 6.9 GB over a link
+#                    the user has already paid for once, plus any bundled
+#                    Whisper model. Deleting these turns an upgrade into a
+#                    6.9 GB re-download.
+#   app\config.json -- every saved setting: hotkey, microphone, model,
+#                    vocabulary rules, and the Concierge opt-in state. This one
+#                    is an existing v2 defect. A reinstall has always silently
+#                    reset the user's settings; v3 makes the same bug expensive
+#                    rather than merely annoying.
+#
+# They are moved *aside* rather than copied, so a 6.9 GB file is a rename on the
+# same volume and not a second 6.9 GB write. Moved back after the copy, and
+# config.json is only put back if the new payload did not bring one -- which it
+# never should, because build_portable.py excludes it.
+$PreserveDir = "$env:TEMP\ptt_dictate_preserve"
+$PreservedModels = $false
+$PreservedConfig = $false
+
 if (Test-Path $TargetDir) {
     Write-Host "An existing installation was found. Attempting to close active instances..." -ForegroundColor Yellow
     # Try to close any running instances
     Stop-Process -Name "ptt_dictate" -Force -ErrorAction SilentlyContinue
     Stop-Process -Name "pythonw" -Force -ErrorAction SilentlyContinue
+    # The Concierge's llama-server is killed by its job object when the app dies,
+    # including under this Stop-Process. Named here so nobody adds a second kill.
     Start-Sleep -Seconds 2
-    
+
+    if (Test-Path $PreserveDir) { Remove-Item -Path $PreserveDir -Recurse -Force -ErrorAction SilentlyContinue }
+    New-Item -ItemType Directory -Path $PreserveDir -Force | Out-Null
+
+    if (Test-Path "$TargetDir\app\models") {
+        Write-Host "Setting aside downloaded models (they are not re-downloaded)..." -ForegroundColor Gray
+        try {
+            Move-Item -Path "$TargetDir\app\models" -Destination "$PreserveDir\models" -Force -ErrorAction Stop
+            $PreservedModels = $true
+        } catch {
+            Write-Host "Warning: could not set aside app\models; it may be re-downloaded." -ForegroundColor Yellow
+        }
+    }
+    if (Test-Path "$TargetDir\app\config.json") {
+        Write-Host "Setting aside your saved settings..." -ForegroundColor Gray
+        try {
+            Move-Item -Path "$TargetDir\app\config.json" -Destination "$PreserveDir\config.json" -Force -ErrorAction Stop
+            $PreservedConfig = $true
+        } catch {
+            Write-Host "Warning: could not set aside config.json; settings may reset." -ForegroundColor Yellow
+        }
+    }
+
     Write-Host "Replacing old files with the new version..." -ForegroundColor Gray
     try {
         Remove-Item -Path $TargetDir -Recurse -Force -ErrorAction Stop
@@ -49,6 +95,25 @@ New-Item -ItemType Directory -Path $TargetDir -Force | Out-Null
 Copy-Item -Path "$SourceDir\.venv" -Destination "$TargetDir\.venv" -Recurse -Container -Force
 Copy-Item -Path "$SourceDir\app" -Destination "$TargetDir\app" -Recurse -Container -Force
 Copy-Item -Path "$SourceDir\run_tray.bat" -Destination "$TargetDir\run_tray.bat" -Force
+
+# 4a. Put back what was set aside in step 3.
+if ($PreservedModels) {
+    Write-Host "Restoring downloaded models..." -ForegroundColor Gray
+    if (Test-Path "$TargetDir\app\models") { Remove-Item -Path "$TargetDir\app\models" -Recurse -Force -ErrorAction SilentlyContinue }
+    Move-Item -Path "$PreserveDir\models" -Destination "$TargetDir\app\models" -Force
+}
+if ($PreservedConfig) {
+    if (Test-Path "$TargetDir\app\config.json") {
+        # The archive should never contain one -- build_portable.py excludes it
+        # as a per-machine runtime artifact. If one is here anyway, the user's
+        # own settings still win.
+        Write-Host "Warning: the package contained a config.json; keeping yours." -ForegroundColor Yellow
+        Remove-Item -Path "$TargetDir\app\config.json" -Force -ErrorAction SilentlyContinue
+    }
+    Write-Host "Restoring your saved settings..." -ForegroundColor Gray
+    Move-Item -Path "$PreserveDir\config.json" -Destination "$TargetDir\app\config.json" -Force
+}
+if (Test-Path $PreserveDir) { Remove-Item -Path $PreserveDir -Recurse -Force -ErrorAction SilentlyContinue }
 
 # Verify DLLs are in the Scripts directory of the target
 $TargetScripts = "$TargetDir\.venv\Scripts"

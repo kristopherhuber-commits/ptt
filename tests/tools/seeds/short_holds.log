@@ -1,0 +1,17 @@
+[2026-08-26 07:12:30] === App Started ===
+[2026-08-26 07:12:31] ctranslate2 detected CUDA devices count: 1
+[2026-08-26 07:12:31] Loaded config.json: use_gpu=True, hotkey=('rctrl',), model=large-v3-turbo, benchmarks=2, audio_device=None, keep_stream_warm=True, ignore_short_holds=True, start_click=False, vocabulary=0, version=1
+[2026-08-26 07:12:33] Model successfully loaded on 'CUDA'.
+[2026-08-26 07:12:33] Audio input stream opened and started successfully.
+[2026-08-26 07:12:33] Recording from 'Headset (WH-1000XM4 Hands-Free AG Audio)' (the system default).
+[2026-08-26 07:14:08] Hold was 0.21s, under the 0.30s minimum; discarded as an accidental tap (ignore_short_holds is on).
+[2026-08-26 07:14:22] Hold was 0.18s, under the 0.30s minimum; discarded as an accidental tap (ignore_short_holds is on).
+[2026-08-26 07:14:44] Hold was 0.24s, under the 0.30s minimum; discarded as an accidental tap (ignore_short_holds is on).
+[2026-08-26 07:15:03] Recording stopped. Audio samples: 41984
+[2026-08-26 07:15:04] Transcription finished in 0.94s. Result: 'Yes, that one worked.'
+[2026-08-26 07:15:04] Pasted 21 chars into 'Untitled - Notepad'.
+[2026-08-26 07:15:29] Hold was 0.19s, under the 0.30s minimum; discarded as an accidental tap (ignore_short_holds is on).
+[2026-08-26 07:15:41] Hold was 0.22s, under the 0.30s minimum; discarded as an accidental tap (ignore_short_holds is on).
+[2026-08-26 07:16:10] Hold was 0.27s, under the 0.30s minimum; discarded as an accidental tap (ignore_short_holds is on).
+[2026-08-26 07:16:38] Hold was 0.16s, under the 0.30s minimum; discarded as an accidental tap (ignore_short_holds is on).
+[2026-08-26 07:17:02] Hold was 0.23s, under the 0.30s minimum; discarded as an accidental tap (ignore_short_holds is on).

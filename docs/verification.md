@@ -9,7 +9,7 @@ The distinction is deliberate and load-bearing for how this file is written:
 
 | Document | Question | Traces to |
 |---|---|---|
-| `verification.md` (this) | Was the design implemented correctly? | `design.md`, `gui_handoff/gui_handoff.md` |
+| `verification.md` (this) | Was the design implemented correctly? | `design.md`, `ptt-v2-gui/gui_handoff.md` |
 | `validation.md` *(to be written)* | Was the right thing built? | `requirements.md` |
 
 So **the spine of section 3 is the design element, not the requirement.** A requirement
@@ -42,9 +42,11 @@ Pure and fast — no GPU, no microphone, no model, no `QApplication`, about two 
 
 pytest is deliberately **not** in `.venv`. `build_portable.py` zips `.venv` wholesale, so
 installing it there would ship the test framework to every target PC, and `CON-3` forbids
-adding it to `requirements.txt`. `requirements-dev.txt` lists pytest plus the five runtime
-packages the pure modules actually import, pinned to the same versions `requirements.txt`
-pins so the test environment matches the shipped one. `items_to_zip` in
+adding it to `requirements.txt`. `requirements-dev.txt` lists pytest, the five runtime
+packages the pure modules actually import — pinned to the same versions
+`requirements.txt` pins, so the test environment matches the shipped one — and PyYAML,
+which is read by the qualification suite's runner and by the L1 test over it, never by
+the application. `items_to_zip` in
 `build_portable.py` is an explicit allowlist, so neither `tests/` nor
 `requirements-dev.txt` reaches a distribution.
 
@@ -130,6 +132,8 @@ element is often pinned by several tests, and the ID is what other documents cit
 | `V-CF-12` | §7 / `gui_handoff` §6.3 — the three behaviour flags validated **by type** | `"false"` is a truthy string; read naively it would switch `FR-3`'s minimum hold on when the file says off. Each flag round-trips and each non-boolean falls back with its own log line | `test_config.py::test_each_behaviour_flag_round_trips`, `::test_a_non_boolean_flag_falls_back_and_logs` (3 flags × 6 shapes) | `FR-8`, `OBS-3` |
 | `V-CF-13` | §7 / `gui_handoff` §6.4 — `vocabulary` validated per rule | One malformed rule is dropped with its own reason and the good ones beside it survive; an **unrecognised scope drops the rule rather than widening it to Always**, which is the one fallback here that deliberately does nothing instead of doing less; order survives a round trip, because two phrases of the same length are applied in list order | `test_config.py::test_a_bad_rule_is_dropped_and_logged` (7 shapes), `::test_a_bad_rule_does_not_take_the_good_ones_with_it`, `::test_an_unknown_scope_is_dropped_rather_than_widened_to_always`, `::test_rule_order_survives_a_round_trip`, `::test_the_vocabulary_is_a_tuple_not_a_list` | `FR-8`, `OBS-3` |
 | **`V-CF-14`** | §7 — **every setting added this session defaults to what the build before it did** | A `config.json` from any earlier build names none of the new keys and must behave identically after an upgrade; and a file written by this build keeps `future_setting` beside all ten known keys, with one of each | `test_config.py::test_the_defaults_are_the_behaviour_of_the_build_before_this_one`, `::test_a_file_from_the_pre_gui_build_loads_and_saves_unchanged_in_meaning`, `::test_an_unknown_key_survives_beside_every_setting_this_build_owns` | `FR-8` |
+| **`V-CF-15`** | `ptt-v3-concierge/concierge_design.md` §4.6 — **one declarative `FIELDS` table**, and `load()` reads it | Every `Settings` field has a rule and every rule has a field; the table's defaults are the dataclass's; `load()` and `Settings.set` reject the same value with the same words, because they are the same rule. Narrowing a rule in the table narrows what the file may hold | `test_config.py::test_every_settings_field_has_a_fields_entry`, `::test_the_fields_defaults_are_the_dataclass_defaults`, `::test_load_and_set_reject_the_same_value_for_the_same_reason`, `::test_load_reads_the_fields_table_itself` | `FR-8`, `FR-CG-11` |
+| **`V-CF-16`** | §4.6 — **`Settings.set(key, value) -> (ok, reason)`**, the validated write path | A rejected write changes nothing, saves nothing, and comes back with the reason — never accepted-then-reverted-at-next-start. Includes the spike's own case, `set_config("use_gpu", "false")` with a **string**. Writes are whole-value rebinds, so a caller's dict cannot be mutated under a reader. `override` validates without persisting, because hardware having the last word (FR-6) is not a save. A field added to `FIELDS` reaches the grammar schema, the native tools array and the knowledge pack with no other edit | `test_config.py::test_a_refused_write_changes_nothing_and_saves_nothing`, `::test_the_spikes_own_case_is_refused`, `::test_set_rebinds_whole_values_rather_than_mutating_them`, `::test_a_strict_write_refuses_a_partly_bad_collection`, `::test_override_validates_but_does_not_persist`, `::test_a_new_setting_reaches_every_consumer_with_no_other_edit`, `::test_set_reads_the_fields_table_itself` | `FR-CG-11`, `FR-CG-2` |
 | **`V-EN-01`** | §6 *What makes the live re-read safe* | **The running loop picks up a rebound chord with no restart.** The real `Engine.run()` is driven on a thread, `settings.hotkey` is rebound mid-run, and the next poll asks about the new chord | `test_engine.py::test_hotkey_rebind_takes_effect_without_restart`, `::test_the_loop_never_caches_the_chord` | `FR-4`, `FR-C2` |
 | `V-EN-02` | §4 — the engine reports state through a callback | Hold → `recording`, release → `transcribing` → text → paste → `idle` | `test_engine.py::test_holding_the_chord_records_and_releasing_transcribes` | `FR-1`, `FR-2`, `FR-7` |
 | `V-EN-03` | §4 — a frontend bug cannot kill the poll loop | A raising `on_state` is swallowed and logged; the loop keeps polling | `test_engine.py::test_a_raising_state_callback_does_not_kill_the_poll_loop` | `FR-1` |
@@ -160,7 +164,7 @@ element is often pinned by several tests, and the ID is what other documents cit
 | **`V-EN-09`** | `gui_handoff` §6.3 — **the two behaviour flags gate the constants, they do not zero them** | With the warm stream off the device is released between recordings and `rec.start()` opens it for the recording itself, then it is released again — a threshold of zero would instead close and reopen it every poll iteration, which is issue #6 at 50 Hz. With the minimum hold off a short tap is transcribed, but an **empty** buffer never is | `test_engine.py::test_the_warm_stream_holds_the_device_open_between_recordings`, `::test_turning_the_warm_stream_off_releases_the_device_when_idle`, `::test_a_recording_still_works_with_the_warm_stream_off`, `::test_turning_the_minimum_hold_off_transcribes_a_short_tap`, `::test_an_empty_recording_is_never_transcribed`, `::test_the_start_click_plays_only_when_it_is_switched_on` | `FR-3`, `NFR-2`, `NFR-4` |
 | `V-EN-10` | `gui_handoff` §6.6 — the diagnostics figures are **kept, not parsed back out of the log** | The engine remembers the transcription time and the paste target it already computed; the history is capped, so the median describes now rather than the whole session; and every accessor tolerates being called before `run()` has built a recorder, which is when the settings window is constructed | `test_engine.py::test_the_engine_remembers_what_the_last_dictation_cost`, `::test_the_latency_history_is_capped`, `::test_the_level_and_device_readouts_tolerate_no_recorder` | `OBS-4` |
 
-### 3.2 GUI — `gui_handoff/gui_handoff.md`
+### 3.2 GUI — `ptt-v2-gui/gui_handoff.md`
 
 `design.md` §4's module table points at this document for the UI layers.
 
@@ -185,20 +189,40 @@ element is often pinned by several tests, and the ID is what other documents cit
 
 ## 4. Automated tests
 
-**333 tests, 257 test functions, ~4 s.** Last run **2026-08-24** after the registration
-marks were added: **333 passed, 0 failed, in 4.25 s.** The acceptance pass earlier the
-same day ran 325 at commit `840a626`, also all passing.
+**646 tests, 553 test functions, ~8 s.** Last run **2026-08-26** at the end of v3.0
+session 2: **646 passed, 0 failed, in 7.54 s.** Session 1 ended at 612; the v2.0
+acceptance pass on 2026-08-24 ran 333, also all passing.
 
 | Module | Tests | Covers |
 |---|---:|---|
-| `tests/test_config.py` | 91 | `V-CF-01` … `V-CF-14` |
+| `tests/test_config.py` | 117 | `V-CF-01` … `V-CF-16` |
 | `tests/test_hotkey.py` | 56 | `V-HK-01` … `V-HK-14` |
+| `tests/test_concierge_tools.py` | 51 | `V-CG-10` … `V-CG-19` |
+| `tests/test_concierge_server.py` | 45 | `V-CG-01` … `V-CG-09`, `V-CG-46` … `V-CG-55` |
 | `tests/test_panels.py` | 43 | `V-UI-04` … `V-UI-14` |
+| `tests/test_concierge_agent.py` | 42 | `V-CG-30` … `V-CG-45` |
+| `tests/test_concierge_fetch.py` | 40 | `V-CG-56` … `V-CG-68` |
+| `tests/test_concierge_llm.py` | 41 | `V-CG-20` … `V-CG-29` |
+| `tests/test_audio.py` | 32 | `V-AU-01` … `V-AU-07` |
 | `tests/test_vocabulary.py` | 31 | `V-VC-01` … `V-VC-04` |
 | `tests/test_transcribe.py` | 30 | `V-TR-01` … `V-TR-08` |
 | `tests/test_statusview.py` | 25 | `V-UI-01` … `V-UI-03` |
 | `tests/test_engine.py` | 25 | `V-EN-01` … `V-EN-10` |
-| `tests/test_audio.py` | 32 | `V-AU-01` … `V-AU-07` |
+| `tests/test_concierge_layering.py` | 18 | `V-CG-79` … `V-CG-88` |
+| `tests/test_concierge_pack.py` | 16 | `V-CG-69` … `V-CG-78` |
+| `tests/test_concierge_suite.py` | 34 | `V-CG-89` … `V-CG-100` |
+
+The nine `test_concierge_*` modules are v3.0's **L1** layer
+(`ptt-v3-concierge/concierge_verification.md` §1): pure unit tests, a fake HTTP layer,
+no model, no GPU, no Qt. They add nothing to the suite's hardware requirements and about
+two seconds to its runtime.
+
+`test_concierge_suite.py` is the odd one and is deliberate. Its subject is not a module
+under `app/` but the **L2 instrument** — `tests/tools/scenarios.yaml` and the scorers
+that grade it. The qualification suite is what NFR-CG-6's "qualified by evidence" points
+at, so a mistyped check name there is not a cosmetic defect: it is a scenario that scores
+nothing and passes every time. It needs PyYAML, which is why `requirements-dev.txt` has
+it and `requirements.txt` does not — nothing under `app/` imports yaml.
 
 A result recorded here is a snapshot and can go stale. The command in section 1 is the
 authority; this row exists so a reader knows what the suite looked like when it was last
@@ -223,6 +247,24 @@ these deliberately reintroduces a defect the design forbids, and the matching it
 | Make the mark an even number of pixels wide | `V-UI-14` | 1 test failed ✅ |
 | Hard-code the mark colour in Python instead of `style.qss` | `V-UI-14` | 1 test failed ✅ |
 | Put the marks at the centre rather than the corners | `V-UI-14` | 2 tests failed ✅ |
+| **D-CG-13:** give `model` a private validation rule inside `load()` instead of reading `FIELDS` | `V-CF-15` | 5 tests failed ✅ |
+| **D-CG-13:** give the tool registry a hand-written copy of the settable-key list | `V-CF-16` | 1 test failed ✅ |
+| **D-CG-13:** copy `WRITABLE_KEYS` into the tool schema rather than reading it — *same contents, new object* | `V-CG-19` | 1 test failed ✅ |
+| **D-CG-4:** key trimming rule 2 on the message role rather than on the tool field | `V-CG-33` | 1 test failed ✅ |
+
+The three D-CG-13 rows are the mutation `ptt-v3-concierge/concierge_verification.md` §2
+names for that design element, and the third is the one worth explaining. A copy of a
+derived table with **identical contents** is equal to its source on the day it is
+written; it is wrong only later, when the source changes and the copy does not — which is
+issue #12 exactly. An equality assertion cannot see it, so `V-CG-19` asserts identity and
+`V-CF-16` adds a field to `FIELDS` and watches all three consumers move. Before that
+sharpening, the mutation left the suite green: [development_history.md](development_history.md)
+issue #17.
+
+The D-CG-4 row is a mutation that was found the other way round — the defect was in the
+first implementation and the test caught it there (issue #13). It is recorded here because
+re-introducing it is the natural mistake, and because a test named "trimming works" would
+pass with rule 2 dead.
 
 The third initially did **not** fail, and that is the most useful thing in this section.
 The first version of `V-CF-09` failed the save on a *missing directory*, which raises at
@@ -400,7 +442,7 @@ normal `Downloads` folder is well inside that; a deep temporary directory is not
 
 ## 6. Acceptance criteria
 
-The ten criteria are stated in [gui_handoff.md](gui_handoff/gui_handoff.md) §10. Their
+The ten criteria are stated in [gui_handoff.md](ptt-v2-gui/gui_handoff.md) §10. Their
 status is tracked here. Session 5 worked through all ten; the evidence is section 5.3
 unless another item is named.
 

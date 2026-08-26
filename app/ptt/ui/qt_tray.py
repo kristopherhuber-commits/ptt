@@ -273,16 +273,14 @@ class QtTray(QObject):
     @Slot()
     def _set_device_gpu(self):
         if not self._settings.use_gpu:
-            self._settings.use_gpu = True
-            self._settings.save()
+            self._settings.set("use_gpu", True)
             self._engine.request_model_reload()
         self.refresh_menu()
 
     @Slot()
     def _set_device_cpu(self):
         if self._settings.use_gpu:
-            self._settings.use_gpu = False
-            self._settings.save()
+            self._settings.set("use_gpu", False)
             self._engine.request_model_reload()
         self.refresh_menu()
 

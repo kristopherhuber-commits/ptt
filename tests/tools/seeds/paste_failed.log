@@ -1,0 +1,18 @@
+[2026-08-25 14:31:40] === App Started ===
+[2026-08-25 14:31:41] ctranslate2 detected CUDA devices count: 1
+[2026-08-25 14:31:41] Loaded config.json: use_gpu=True, hotkey=('rctrl',), model=large-v3-turbo, benchmarks=2, audio_device=None, keep_stream_warm=True, ignore_short_holds=True, start_click=False, vocabulary=2, version=1
+[2026-08-25 14:31:43] Model successfully loaded on 'CUDA'.
+[2026-08-25 14:31:43] Audio input stream opened and started successfully.
+[2026-08-25 14:31:43] Recording from 'Microphone (Yeti Stereo Microphone)' (the system default).
+[2026-08-25 14:33:02] Recording stopped. Audio samples: 55296
+[2026-08-25 14:33:03] Transcription finished in 1.21s. Result: 'Add a line about the migration window to the change request.'
+[2026-08-25 14:33:03] Pasted 60 chars into 'Change request CR-4471 - Chrome'.
+[2026-08-25 14:38:55] Recording stopped. Audio samples: 71680
+[2026-08-25 14:38:57] Transcription finished in 1.55s. Result: 'The rollback plan needs a named owner before Thursday.'
+[2026-08-25 14:38:57] ERROR inside main processing loop: PyperclipWindowsException: Error calling OpenClipboard (5, 'OpenClipboard', 'Access is denied.')
+[2026-08-25 14:41:12] Recording stopped. Audio samples: 60416
+[2026-08-25 14:41:13] Transcription finished in 1.33s. Result: 'Nothing appeared that time either, trying once more.'
+[2026-08-25 14:41:13] ERROR inside main processing loop: PyperclipWindowsException: Error calling OpenClipboard (5, 'OpenClipboard', 'Access is denied.')
+[2026-08-25 14:43:47] Recording stopped. Audio samples: 48128
+[2026-08-25 14:43:48] Transcription finished in 1.07s. Result: 'Still nothing, the text is not landing anywhere.'
+[2026-08-25 14:43:48] ERROR inside main processing loop: PyperclipWindowsException: Error calling OpenClipboard (5, 'OpenClipboard', 'Access is denied.')

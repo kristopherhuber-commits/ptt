@@ -11,7 +11,52 @@ import zipfile
 #: config.json is the dangerous one. install.ps1 copies app/ over an existing
 #: installation with -Force, so a shipped config.json would overwrite the user's
 #: saved hotkey and device preference on every reinstall.
-RUNTIME_ARTIFACTS = frozenset({"config.json", "debug_log.txt", "debug_log.prev.txt"})
+#:
+#: The four Concierge entries are v3.0's (concierge_handoff.md section 6, Q27).
+#: concierge_state.json names a pid and a port that mean nothing on another
+#: machine and would send the startup reap after a stranger's process;
+#: concierge_key is one launch's API key; and the memory note is the user's own
+#: text about their own machine, which has no business in a distribution at all.
+RUNTIME_ARTIFACTS = frozenset({
+    "config.json", "debug_log.txt", "debug_log.prev.txt",
+    "concierge_state.json", "concierge_key",
+    "concierge_memory.txt", "concierge_memory.prev.txt",
+})
+
+#: Directories under a zipped item that never ship, as path tuples relative to
+#: the repository root.
+#:
+#: **This is Q27, and it exists because the file rule above could not do it.**
+#: `should_skip`'s runtime-artifact test fires only when `root == "app"` -- the
+#: top level -- and `os.walk` packs everything nested below unconditionally.
+#: `design.md` section 2 records that same property approvingly, because it is
+#: why `app/assets/` needs no allowlist entry. For a 6.87 GB GGUF at
+#: `app/models/concierge/` it is CON-CG-4 breached in the most expensive
+#: possible way, and nothing anywhere asked anyone to prevent it -- session 5's
+#: prompt asked only that someone *verify* the weights were absent.
+#:
+#: Whisper model directories live under the same parent and are excluded by the
+#: same rule, which is correct for the same reason: NFR-6 prefers a bundled
+#: model when one is present, and "present on the build machine" is not the same
+#: as "belongs in every distribution".
+EXCLUDED_DIRS = frozenset({("app", "models")})
+
+
+def _parts(path):
+    return tuple(p for p in path.replace("\\", "/").split("/") if p and p != ".")
+
+
+def should_skip_dir(root, dirname):
+    """
+    Whether `os.walk` should prune one directory. Checked before descending.
+
+    Pruning rather than filtering per file: walking `app/models/concierge/` to
+    reject one 6.87 GB entry works, and walking it to reject ten thousand is a
+    build that looks hung.
+    """
+    if _parts(os.path.join(root, dirname)) in EXCLUDED_DIRS:
+        return "model weights never ship (CON-CG-4)"
+    return None
 
 
 def should_skip(item, root, filename):
@@ -21,6 +66,13 @@ def should_skip(item, root, filename):
         return "environment portability"
     if item == "app" and root == "app" and filename.lower() in RUNTIME_ARTIFACTS:
         return "per-machine runtime artifact"
+    # The same rule as should_skip_dir, applied per file. Belt to its braces:
+    # pruning is what makes the build fast, and this is what makes the exclusion
+    # true even if someone later walks the tree a different way.
+    parts = _parts(root)
+    for depth in range(1, len(parts) + 1):
+        if parts[:depth] in EXCLUDED_DIRS:
+            return "model weights never ship (CON-CG-4)"
     if filename.lower().endswith(".old"):
         return "backup file"
     return None
@@ -101,7 +153,24 @@ def main():
             else:
                 shutil.copy2(src_item, dest_item)
 
-    # 5. Package everything into ptt_dictate_dist.zip
+    # 5. Generate the Concierge knowledge pack (concierge_design.md 5.05).
+    #
+    # A build step, not a checked-in artifact: half of it is generated from
+    # config.py's FIELDS table, so a pack in git would go stale the first time a
+    # setting changed. It ERRORS rather than skipping when a source is missing --
+    # the spike's version silently listed a docs/validation.md that has never
+    # existed, and a step that quietly ships a smaller pack produces a Concierge
+    # that answers from nothing and looks like a bad model.
+    print("Generating the Concierge knowledge pack...")
+    try:
+        import build_knowledge_pack
+        output, manifest, size = build_knowledge_pack.build()
+        print(f"  {output}: {size} characters (~{(size + 3) // 4} tokens)")
+    except Exception as e:
+        print(f"Error: could not build the knowledge pack: {e}")
+        return
+
+    # 6. Package everything into ptt_dictate_dist.zip
     zip_name = "ptt_dictate_dist.zip"
     if os.path.exists(zip_name):
         print(f"Removing old {zip_name}...")
@@ -129,6 +198,11 @@ def main():
                         dirs.remove("__pycache__")
                     if ".pytest_cache" in dirs:
                         dirs.remove(".pytest_cache")
+                    for name in list(dirs):
+                        reason = should_skip_dir(root, name)
+                        if reason:
+                            print(f"  Skipping {os.path.join(root, name)}{os.sep} ({reason})...")
+                            dirs.remove(name)
                     for file in files:
                         reason = should_skip(item, root, file)
                         if reason:

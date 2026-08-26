@@ -1,0 +1,15 @@
+[2026-08-26 06:41:19] === App Started ===
+[2026-08-26 06:41:19] app_dir: C:\PTT Dictation\app
+[2026-08-26 06:41:20] ctranslate2 detected CUDA devices count: 1
+[2026-08-26 06:41:20] Initial check_cuda_availability: True
+[2026-08-26 06:41:20] Loaded config.json: use_gpu=True, hotkey=('rctrl',), model=large-v3-turbo, benchmarks=1, audio_device=None, keep_stream_warm=True, ignore_short_holds=True, start_click=False, vocabulary=0, version=1
+[2026-08-26 06:41:22] Model successfully loaded on 'CUDA'.
+[2026-08-26 06:41:22] Initializing PortAudio and opening input stream...
+[2026-08-26 06:41:22] ERROR: Failed to initialise PortAudio: Error opening InputStream: Device unavailable [PaErrorCode -9985]
+[2026-08-26 06:41:22] Could not enumerate input devices: Error querying device -1
+[2026-08-26 06:41:37] Initializing PortAudio and opening input stream...
+[2026-08-26 06:41:37] ERROR: Failed to initialise PortAudio: Error opening InputStream: Device unavailable [PaErrorCode -9985]
+[2026-08-26 06:42:09] Initializing PortAudio and opening input stream...
+[2026-08-26 06:42:09] ERROR: Failed to initialise PortAudio: Error opening InputStream: Device unavailable [PaErrorCode -9985]
+[2026-08-26 06:43:55] Initializing PortAudio and opening input stream...
+[2026-08-26 06:43:55] ERROR: Failed to initialise PortAudio: Error opening InputStream: Device unavailable [PaErrorCode -9985]

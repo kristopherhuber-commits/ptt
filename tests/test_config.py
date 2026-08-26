@@ -496,3 +496,391 @@ def test_a_successful_save_leaves_no_temporary_file_behind(tmp_path):
     settings.save()
     assert (tmp_path / "config.json").exists()
     assert [f for f in os.listdir(tmp_path) if f.endswith(".tmp")] == []
+
+
+# -- FIELDS: the declarative schema, and its three consumers (D-CG-13) --------
+#
+# `V-CF-15` and `V-CF-16`. The point of these is not that validation works --
+# every test above already checks that -- but that there is exactly **one**
+# declaration of it. `load()`, `Settings.set()` and the Concierge's generated
+# tool schema all read `FIELDS`, and the mutation recorded in
+# `verification.md` section 4.1 is what proves a private copy of a rule fails.
+
+def test_every_settings_field_has_a_fields_entry():
+    """
+    A field on the dataclass with no rule is a field nothing validates.
+
+    Both directions, because either gap is a real defect: an entry with no field
+    is a key `Settings.set` would accept and `to_dict` would drop.
+    """
+    declared = set(config.FIELDS)
+    on_object = set()
+    for name in config.Settings.__dataclass_fields__:
+        if name in ("extra", "path"):
+            continue
+        if name == "concierge":
+            on_object |= {
+                "concierge." + sub
+                for sub in config.ConciergeSettings.__dataclass_fields__
+                if sub != "extra"
+            }
+            continue
+        on_object.add(name)
+    assert declared == on_object
+
+
+def test_the_fields_defaults_are_the_dataclass_defaults():
+    """
+    The table's `default` is what the log line quotes when a value is rejected.
+
+    A table that says one thing and a dataclass that does another produces the
+    worst possible OBS-3 line: a reason, and the wrong value beside it.
+    """
+    fresh = config.Settings(path="unused.json")
+    for key, rule in config.FIELDS.items():
+        assert fresh.get(key) == rule.default, key
+
+
+def test_load_and_set_reject_the_same_value_for_the_same_reason():
+    """
+    The two consumers, on one declaration.
+
+    `load` falls back and logs; `set` refuses and reports. Both must be reading
+    the same rule, which is checkable by giving each the same bad value and
+    comparing the words that come back.
+    """
+    settings = config.Settings(path="unused.json")
+    for key, bad in [("use_gpu", "false"), ("model", "enormous"),
+                     ("audio_device", -1), ("concierge.opt_in", "maybe"),
+                     ("concierge.idle_unload_minutes", 45)]:
+        rule = config.FIELDS[key]
+        _, load_defect = rule.check(bad, note="config.json")
+        ok, set_reason = settings.set(key, bad)
+        assert not ok, key
+        assert load_defect and load_defect in set_reason, key
+
+
+def test_the_settable_allowlist_excludes_vocabulary_and_benchmarks():
+    """
+    The scope exclusion is an allowlist, not a sentence.
+
+    `concierge_requirements.md` section 5 puts "editing vocabulary rules" out of
+    scope for v3.0, and `set_config("vocabulary", ...)` reaches them unless the
+    registry says otherwise (review section 1.2). `benchmarks` is excluded from
+    the other side for the same reason: it is a measurement cache the harness
+    writes, not a preference anyone states.
+    """
+    assert "vocabulary" not in config.WRITABLE_KEYS
+    assert "benchmarks" not in config.WRITABLE_KEYS
+    assert "version" not in config.WRITABLE_KEYS
+    assert "vocabulary" in config.READABLE_KEYS
+    assert set(config.WRITABLE_KEYS) <= set(config.READABLE_KEYS)
+
+
+def test_every_documented_field_documents_itself():
+    """
+    The pack's per-setting half is generated from this prose, so a field with
+    none produces a pack entry that says nothing -- and FR-CG-1 is scored on
+    exactly that half.
+    """
+    for key, rule in config.FIELDS.items():
+        if rule.internal:
+            continue
+        assert rule.does, key
+        assert rule.when, key
+        assert rule.risk, key
+
+
+def test_set_writes_the_value_and_persists_it(tmp_path, log_lines):
+    settings = config.Settings(path=str(tmp_path / "config.json"))
+    ok, reason = settings.set("model", "small.en")
+    assert (ok, reason) == (True, None)
+    assert settings.model == "small.en"
+    assert config.load(str(tmp_path / "config.json")).model == "small.en"
+    assert any("Set model" in line for line in log_lines())
+
+
+def test_a_refused_write_changes_nothing_and_saves_nothing(tmp_path, log_lines):
+    """
+    FR-CG-11's shape. The path this replaced accepted the value, wrote it to
+    disk, and reverted it at the next start -- a rejection reported as success.
+    """
+    path = tmp_path / "config.json"
+    settings = config.Settings(path=str(path))
+    settings.set("model", "small.en")
+    before = path.read_text(encoding="utf-8")
+
+    ok, reason = settings.set("model", "enormous")
+    assert ok is False
+    assert "is not one of" in reason
+    assert settings.model == "small.en"
+    assert path.read_text(encoding="utf-8") == before
+    assert any("Rejected write" in line for line in log_lines())
+
+
+def test_the_spikes_own_case_is_refused(tmp_path):
+    """
+    set_config with key use_gpu and the **string** "false" -- from spike C2's
+    30/30, recorded there as a clean call. config.py exists to reject it.
+    """
+    settings = config.Settings(path=str(tmp_path / "config.json"))
+    ok, reason = settings.set("use_gpu", "false")
+    assert ok is False
+    assert "is not a boolean" in reason
+    assert settings.use_gpu is True
+
+
+def test_an_unknown_key_is_refused_rather_than_created(tmp_path):
+    settings = config.Settings(path=str(tmp_path / "config.json"))
+    ok, reason = settings.set("turbo_mode", True)
+    assert ok is False and "not a setting" in reason
+    assert not hasattr(settings, "turbo_mode")
+
+
+def test_the_version_key_is_not_writable(tmp_path):
+    settings = config.Settings(path=str(tmp_path / "config.json"))
+    ok, reason = settings.set("version", 99)
+    assert ok is False and "not writable" in reason
+
+
+def test_set_rebinds_whole_values_rather_than_mutating_them(tmp_path):
+    """
+    design.md section 7's field discipline, now binding tool code too.
+
+    The engine reads `benchmarks` and `vocabulary` from another thread without a
+    lock, which is safe only because a write is a rebind. This asserts the
+    object the caller passed is not the object that ends up on `Settings`, so an
+    in-place mutation of the caller's dict cannot reach a reader mid-write.
+    """
+    settings = config.Settings(path=str(tmp_path / "config.json"))
+    incoming = {"tiny.en|cpu": {"seconds": 2.0, "at": "now", "clip": "abc"}}
+    assert settings.set("benchmarks", incoming)[0] is True
+    assert settings.benchmarks is not incoming
+    incoming["tiny.en|cpu"]["seconds"] = 99.0
+    assert settings.benchmarks["tiny.en|cpu"]["seconds"] == 2.0
+
+
+def test_a_strict_write_refuses_a_partly_bad_collection(tmp_path):
+    """
+    The one place load and write legitimately differ, and it is a disposition
+    rather than a second rule: reading a hand-edited file drops the bad rule and
+    keeps the good ones (V-CF-13); writing is all or nothing, because a
+    partially applied write reported as success is what FR-CG-11 forbids.
+    """
+    settings = config.Settings(path=str(tmp_path / "config.json"))
+    good = {"heard": "w s l", "typed": "WSL", "scope": "always"}
+    bad = {"heard": "", "typed": "x", "scope": "always"}
+    ok, reason = settings.set("vocabulary", [good, bad])
+    assert ok is False and "rule 1" in reason
+    assert settings.vocabulary == ()
+
+
+def test_override_validates_but_does_not_persist(tmp_path):
+    """
+    Hardware having the last word (FR-6) is not a save. A driver that is broken
+    this morning must not cost the user the preference they chose.
+    """
+    path = tmp_path / "config.json"
+    settings = config.Settings(path=str(path))
+    settings.set("use_gpu", True)
+    settings.override("use_gpu", False)
+    assert settings.use_gpu is False
+    assert config.load(str(path)).use_gpu is True
+
+    ok, reason = settings.override("use_gpu", "false")
+    assert ok is False and "is not a boolean" in reason
+
+
+def test_benchmark_key_is_owned_by_config(tmp_path):
+    """
+    Moved here from the Model panel because the Concierge reports the same
+    measurements and may not import a module that imports Qt (CON-CG-6). Two
+    copies of a key format is the drift FIELDS exists to prevent, one level
+    down.
+    """
+    assert config.benchmark_key("large-v3-turbo", "cuda") == "large-v3-turbo|cuda"
+
+
+def test_a_benchmark_entry_records_whether_the_llm_was_resident(config_file):
+    """
+    Q23. Spike C5 measured a 1.46x Whisper penalty during active LLM decode, so
+    a contended figure sitting in the Model tab beside a clean one looks
+    comparable and is not. The condition is recorded with the number.
+    """
+    entry = {"seconds": 1.18, "at": "2026-08-25T10:00:00", "clip": "abc",
+             "llm_resident": True}
+    settings = load(config_file({"benchmarks": {"large-v3-turbo|cuda": entry}}))
+    assert settings.benchmarks["large-v3-turbo|cuda"]["llm_resident"] is True
+
+    older = {"seconds": 1.18, "at": "", "clip": ""}
+    settings = load(config_file({"benchmarks": {"tiny.en|cpu": older}}))
+    assert settings.benchmarks["tiny.en|cpu"]["llm_resident"] is False
+
+
+# -- the concierge block ------------------------------------------------------
+
+def test_a_pre_v3_config_arrives_opted_out_of_nothing(config_file):
+    """
+    Acceptance criterion v3-8. `enabled: true` cannot express "declined", and a
+    file written before v3 must arrive `unset` rather than silently opted in.
+    """
+    settings = load(config_file({"version": 1, "use_gpu": True, "hotkey": ["rctrl"]}))
+    assert settings.concierge.opt_in == "unset"
+    assert settings.concierge.enabled is True
+    assert settings.concierge.idle_unload_minutes == 5
+    assert settings.concierge.tool_mode == "grammar"
+
+
+def test_the_concierge_block_round_trips(config_file):
+    path = config_file({"concierge": {"opt_in": "accepted", "enabled": False,
+                                      "idle_unload_minutes": 0}})
+    settings = load(path)
+    assert settings.concierge.opt_in == "accepted"
+    assert settings.concierge.enabled is False
+    assert settings.concierge.idle_unload_minutes == 0
+    settings.save()
+    assert load(path).concierge == settings.concierge
+
+
+def test_there_is_no_port_key(config_file):
+    """
+    Q13. The port is pre-bound in Python at every launch and recorded in
+    concierge_state.json; a configured one would be a setting that is wrong the
+    moment something else takes the port.
+    """
+    assert not any(k.endswith(".port") for k in config.FIELDS)
+    settings = load(config_file({}))
+    assert "port" not in settings.to_dict()["concierge"]
+
+
+def test_an_unknown_concierge_key_survives_a_round_trip(config_file):
+    """Criterion 8's guarantee, one level down: a v3.1 key survives a v3 build."""
+    path = config_file({"concierge": {"opt_in": "declined", "future_tier": "24gb"}})
+    settings = load(path)
+    assert settings.concierge.extra == {"future_tier": "24gb"}
+    settings.save()
+    assert written(path)["concierge"]["future_tier"] == "24gb"
+    assert written(path)["concierge"]["opt_in"] == "declined"
+
+
+def test_a_non_object_concierge_block_falls_back_and_logs(config_file, log_lines):
+    settings = load(config_file({"concierge": ["accepted"]}))
+    assert settings.concierge.opt_in == "unset"
+    assert any("concierge is not an object" in line for line in log_lines())
+
+
+def test_a_bad_concierge_value_falls_back_field_by_field(config_file, log_lines):
+    """One bad key does not take the block with it, exactly as at the top level."""
+    settings = load(config_file({"concierge": {"opt_in": "maybe",
+                                               "idle_unload_minutes": 99,
+                                               "enabled": False}}))
+    assert settings.concierge.opt_in == "unset"
+    assert settings.concierge.idle_unload_minutes == 5
+    assert settings.concierge.enabled is False
+    lines = log_lines()
+    assert any("concierge.opt_in" in line for line in lines)
+    assert any("concierge.idle_unload_minutes is above 30" in line for line in lines)
+
+
+def test_the_residency_slider_accepts_its_whole_range(tmp_path):
+    settings = config.Settings(path=str(tmp_path / "config.json"))
+    for minutes in (0, 1, 5, 30):
+        assert settings.set("concierge.idle_unload_minutes", minutes)[0] is True
+    assert settings.set("concierge.idle_unload_minutes", 31)[0] is False
+    assert settings.set("concierge.idle_unload_minutes", -1)[0] is False
+
+
+def test_writing_a_concierge_key_rebinds_the_whole_block(tmp_path):
+    """
+    The block is a value, replaced wholesale, for the same reason `benchmarks`
+    is: the harness reads it from a worker thread while the GUI writes it.
+    """
+    settings = config.Settings(path=str(tmp_path / "config.json"))
+    before = settings.concierge
+    settings.set("concierge.enabled", False)
+    assert settings.concierge is not before
+    assert before.enabled is True
+    assert settings.concierge.enabled is False
+
+
+# -- D-CG-13: one declaration, and a private copy is what must fail ----------
+#
+# The three tests above check that the rules *agree*. These three check the
+# stronger thing the design element actually claims: that there is nowhere else
+# for any consumer to read a rule from. Equality is not enough for that -- a
+# hand-written tuple with today's values is equal to the derived one and drifts
+# the first time a field is added -- so each of these either asserts identity
+# with the declaration or changes the declaration and watches the consumer move.
+#
+# `verification.md` section 4.1 records the mutation these are written against.
+
+def test_load_reads_the_fields_table_itself(monkeypatch, config_file, log_lines):
+    """
+    Consumer 1. Narrow one rule in `FIELDS` and `load()` must narrow with it.
+
+    A private copy inside `load()` passes every other test in this file and
+    fails this one, which is the whole point: the copy is wrong only *later*,
+    when the table changes and the copy does not.
+    """
+    narrowed = dict(config.FIELDS)
+    narrowed["model"] = config.FIELDS["model"]._replace(choices=("tiny.en",))
+    monkeypatch.setattr(config, "FIELDS", narrowed)
+
+    assert load(config_file({"model": "tiny.en"})).model == "tiny.en"
+    settings = load(config_file({"model": "large-v3-turbo"}))
+    assert settings.model == transcribe.DEFAULT_MODEL
+    assert any("is not one of" in line for line in log_lines())
+
+
+def test_set_reads_the_fields_table_itself(monkeypatch, tmp_path):
+    """Consumer 2, the same way."""
+    narrowed = dict(config.FIELDS)
+    narrowed["model"] = config.FIELDS["model"]._replace(choices=("tiny.en",))
+    monkeypatch.setattr(config, "FIELDS", narrowed)
+
+    settings = config.Settings(path=str(tmp_path / "config.json"))
+    assert settings.set("model", "tiny.en")[0] is True
+    ok, reason = settings.set("model", "large-v3-turbo")
+    assert ok is False and "is not one of" in reason
+
+
+def test_a_new_setting_reaches_every_consumer_with_no_other_edit(monkeypatch, tmp_path):
+    """
+    Consumer 3, and the mutation's target. Add a field to the table and it must
+    appear in the generated tool schema, in the settable allowlist and in the
+    knowledge pack -- with no edit in `tools.py`, `llm.py` or
+    `build_knowledge_pack.py`.
+
+    A hand-written enum in any of those passes every equality check on the day
+    it is written and fails here, which is the drift `V-HK-01` exists to
+    prevent and issue #12 is the recorded cost of.
+    """
+    import os
+    import sys
+
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    import build_knowledge_pack
+    from ptt.concierge import llm, tools as tools_mod
+
+    extended = dict(config.FIELDS)
+    extended["daydream_mode"] = config.Field(
+        "bool", False, does="A field that exists only in this test.",
+        when="Never.", risk="Nothing; it is not real.")
+    monkeypatch.setattr(config, "FIELDS", extended)
+    monkeypatch.setattr(config, "WRITABLE_KEYS",
+                        config.WRITABLE_KEYS + ("daydream_mode",))
+    monkeypatch.setattr(config, "READABLE_KEYS",
+                        config.READABLE_KEYS + ("daydream_mode",))
+
+    registry = tools_mod.Registry(
+        config.Settings(path=str(tmp_path / "config.json")))
+    branches = llm.grammar_schema(registry)["oneOf"][1]["properties"]["tool"]["oneOf"]
+    setter = next(b for b in branches
+                  if b["properties"]["name"]["const"] == "set_config")
+    assert "daydream_mode" in setter["properties"]["arguments"]["properties"]["key"]["enum"]
+
+    array = llm.tools_array(registry)
+    native = next(f for f in array if f["function"]["name"] == "set_config")
+    assert "daydream_mode" in native["function"]["parameters"]["properties"]["key"]["enum"]
+
+    assert "`daydream_mode`" in build_knowledge_pack.settings_section()

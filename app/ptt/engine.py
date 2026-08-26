@@ -82,7 +82,10 @@ class Engine:
         # so it does not attempt CUDA on a machine without it.
         if not cuda_supported:
             log_debug("CUDA not supported on this hardware. Overriding config to use CPU.")
-            settings.use_gpu = False
+            # `override`, not `set`: this run only. A machine whose driver is
+            # broken this morning must not lose the preference the user chose
+            # (config.Settings.override).
+            settings.override("use_gpu", False)
 
         self._on_state = on_state
         self._on_text = on_text or (lambda _text: None)
@@ -204,8 +207,7 @@ class Engine:
 
     def _persist_cpu_fallback(self):
         """Remember that CUDA failed, so the next start does not retry it (FR-6)."""
-        self._settings.use_gpu = False
-        self._settings.save()
+        self._settings.set("use_gpu", False)
 
     def _reload(self):
         self._emit("loading", "Loading Model...")

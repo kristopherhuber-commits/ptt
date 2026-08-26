@@ -65,22 +65,37 @@ class InstantApplyPanel(RegistrationMarks, QWidget):
         """
         Write one setting and make it live. The only way a panel changes state.
 
-        The order is the contract: the field is written first so anything that
-        re-reads the settings object sees the new value, then it is persisted,
-        then the engine is told. Reversing the last two would mean a reload
-        racing a disk write and a crash in between losing the setting the user
-        can see has already taken effect.
+        The order is the contract: the field is written and persisted first, so
+        anything that re-reads the settings object sees the new value, then the
+        engine is told. Reversing those would mean a reload racing a disk write
+        and a crash in between losing the setting the user can see has already
+        taken effect.
 
-        `setattr` here is `settings.field = value` -- a whole-value rebind, the
-        thing `config.Settings`' docstring requires. It never reaches into a
-        tuple, list or dict already on the object.
+        Both halves of the write are `config.Settings.set`'s now, not this
+        method's (`concierge_design.md` 4.6, D-CG-13). It validates against the
+        one `FIELDS` table `load()` reads, rebinds whole values rather than
+        reaching into a tuple, list or dict already on the object, and saves.
+        The panels went through here first, and the Concierge's tool code was
+        never going to: an invariant that only holds while every caller
+        remembers it is not an invariant, so it belongs to the object.
+
+        A rejected write is a **bug in this panel**, not a user error -- every
+        control is built from the same catalogue `FIELDS` validates against, so
+        a widget can only offer a value that passes. It is reported in the
+        status bar and logged rather than swallowed, because a control that
+        appears to work and changes nothing is the failure OBS-3 exists to
+        close, and it returns False so a caller that refreshes from the
+        settings object does not redraw a change that did not happen.
 
         `reload_model` is False for the hotkey and the vocabulary, which the
         engine re-reads on its own on every poll iteration, and True for the
         model and the device, which it only reads when it builds a model.
         """
-        setattr(self._settings, field, value)
-        self._settings.save()
+        ok, reason = self._settings.set(field, value)
+        if not ok:
+            log_debug(f"WARNING: the {type(self).__name__} was refused a write: {reason}")
+            self.message.emit(f"Could not change {field}: {reason}")
+            return False
         if reload_model:
             if self._engine is not None:
                 self._engine.request_model_reload()
@@ -90,6 +105,7 @@ class InstantApplyPanel(RegistrationMarks, QWidget):
                     f"attached; it will apply at the next model load."
                 )
         self.saved.emit(field)
+        return True
 
     def paintEvent(self, event):
         """The light ground, then section 9's corner marks over it."""
