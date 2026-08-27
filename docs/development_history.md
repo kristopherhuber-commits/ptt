@@ -249,6 +249,12 @@ When packaging using PyInstaller (`--onedir` mode):
 * **Fix:** A seam may refuse, and its refusal is the tool's refusal: an `{"error": True}` dict from the benchmark callable is returned as-is. The reason and the corrective `set_config` reach the model in the shape the repair loop already understands.
 * **Note:** Every other seam in `tools.py` either returns data or raises. This one needed a third answer and there was no protocol for it, so it borrowed the protocol for "the harness is broken".
 
+### 36. A Hint That Pointed The Wrong Way (Concierge, session 3)
+* **Symptom:** "Measure the model I'm using" with `large-v3` loaded. The Concierge called `run_benchmark('medium.en')` -- the tier it had been discussing two turns earlier -- was correctly refused, and then told the user *"I cannot measure the model you are currently using."*
+* **Cause:** the refusal was right and its **hint was wrong for the case that produces it**. `BenchmarkBridge` offered one way out: `set_config('model', 'medium.en')` first. That is the correct instruction when the user genuinely wants the named tier, and the wrong one when they asked for the loaded one and the model supplied a stale argument -- which is by far the commoner path here. Given a hint that says "change the user's settings", the model declined rather than retrying, and reported the decline as a limitation of the application.
+* **Fix:** the hint names both routes, cheap one first: *"to measure what is loaded now, call `run_benchmark('large-v3')`; to measure `'medium.en'` instead, call `set_config(...)` first"*. Pinned in both directions, including the order.
+* **Note:** design §1 puts refusals on the harness rather than the model, and a refusal is only half of that -- the model still has to choose what to do next, and it can only choose from what the hint offers. A hint that omits the obvious repair is a refusal that reads as a dead end.
+
 ## 🛠️ Maintenance & Execution Protocols
 
 ### Native Terminal Execution

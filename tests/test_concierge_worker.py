@@ -508,14 +508,23 @@ class FakeEngine:
         self.asked += 1
 
 
-def test_a_tier_that_is_not_loaded_is_refused_with_the_step_that_fixes_it(tmp_path):
+def test_a_tier_that_is_not_loaded_is_refused_with_both_ways_out(tmp_path):
+    """
+    Both, and the cheap one first. "Measure the model I'm using" with a stale
+    tier in the argument is the commonest way here, and the right correction is
+    "call it again with the loaded one" -- not "change the user's settings",
+    which is what the hint used to say and what the model then relayed as "I
+    cannot measure the model you are currently using".
+    """
     settings = config.Settings(path=str(tmp_path / "config.json"))
     engine = FakeEngine()
     bridge = BenchmarkBridge(settings, lambda: engine)
     result = bridge.run("tiny.en")
     assert result["error"] is True
     assert "only the loaded model" in result["reason"]
-    assert "set_config" in result["hint"]
+    assert f"run_benchmark({settings.get('model')!r})" in result["hint"]
+    assert "set_config('model', 'tiny.en')" in result["hint"]
+    assert result["hint"].index("run_benchmark") < result["hint"].index("set_config")
     assert engine.asked == 0
 
 

@@ -168,11 +168,19 @@ class BenchmarkBridge:
                     "reason": "the dictation engine is not running yet"}
         current = self._settings.get("model")
         if model != current:
+            # Both ways out, named, and the cheap one first. The earlier hint
+            # offered only "switch to the tier you asked for", which is the
+            # wrong instruction for the commonest case by far -- the user says
+            # "measure the model I'm using", the model passes the tier it was
+            # discussing a moment ago, and the correction should be "call it
+            # again with the loaded one", not "change the user's settings".
             return {"error": True,
                     "reason": (f"only the loaded model can be measured, and "
                                f"{current!r} is loaded, not {model!r}"),
-                    "hint": (f"set_config('model', {model!r}) first; the engine "
-                             f"loads it and then it can be measured")}
+                    "hint": (f"to measure what is loaded now, call "
+                             f"run_benchmark({current!r}); to measure "
+                             f"{model!r} instead, call set_config('model', "
+                             f"{model!r}) first and the engine will load it")}
         self._result = None
         self._done.clear()
         engine.request_benchmark()
@@ -857,6 +865,12 @@ class ConciergeController(QObject):
             self._reload_pending = True
             log_debug("Concierge: a model reload is held until this turn ends.")
             return
+        # Said in the transcript, because it is the slow half of the change and
+        # the only sign of it otherwise is the banner at the top of the window
+        # going amber for a few seconds -- which is a long way from where the
+        # user is looking when they have just asked the Concierge for something.
+        self._panel.append_notice(
+            "Reloading the dictation model — this takes a few seconds.")
         self.reload_requested.emit()
 
     def _on_notice(self, text):
