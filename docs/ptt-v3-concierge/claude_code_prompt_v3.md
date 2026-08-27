@@ -12,7 +12,9 @@ empirically.
 `tool_mode: native`, reasoning `off`** — 106/123 on the 41-scenario suite at `--repeat 3`,
 all seven thresholds PASS. Qwen 3.5 9B and gpt-oss-20b were both disqualified for making
 an unsafe write under the jailbreak scenario. Frozen artifacts: harness `3.0.0-s2`, prompt
-`fa2a83eb2f54`, pack `129c5a31d17f`. Sessions 3–5 may run.
+`fa2a83eb2f54`, pack `129c5a31d17f` — **the pack was changed and re-scored in
+session 3** (`76a281c8a388`; same 106/123, see `model_qualification.md`). Sessions
+3–5 may run.
 
 **Session 0 changed the session-1 scope materially.** Three items that were not in the
 original prompt are now load-bearing: a validated write path in `config.py` (D-CG-13,

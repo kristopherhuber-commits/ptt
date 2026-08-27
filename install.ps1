@@ -42,12 +42,32 @@ if (-not (Test-Path $TargetParentDir)) {
 #                    rather than merely annoying.
 #
 # They are moved *aside* rather than copied, so a 6.9 GB file is a rename on the
-# same volume and not a second 6.9 GB write. Moved back after the copy, and
-# config.json is only put back if the new payload did not bring one -- which it
-# never should, because build_portable.py excludes it.
+# same volume and not a second 6.9 GB write. Moved back after the copy, and a
+# file is only put back if the new payload did not bring one -- which it never
+# should, because build_portable.py excludes every name below.
+#
+# **The file list, and why it is a list (session 3).** Q27 named two things
+# because two things existed when it was written. The Concierge has since added
+# durable state of its own -- the memory note it keeps about the user, the one
+# kept previous version of it, and the transcripts the user chose to save -- and
+# a reinstall deleted all three while carefully preserving 6.9 GB of weights.
+# They are per-machine files the user cannot recreate, which is the test
+# config.json already passes, so they join the same list rather than becoming
+# three more variables.
+#
+# What is deliberately *absent* is the rest of build_portable.py's
+# RUNTIME_ARTIFACTS: both debug logs rotate at every start (OBS-4), and
+# concierge_state.json and concierge_key describe one launch of one process.
+# Carrying those across a reinstall would preserve a stale pid and a dead key.
 $PreserveDir = "$env:TEMP\ptt_dictate_preserve"
 $PreservedModels = $false
-$PreservedConfig = $false
+$PreservedFiles = @(
+    "config.json",
+    "concierge_memory.txt",
+    "concierge_memory.prev.txt",
+    "concierge_sessions.json"
+)
+$PreservedNames = @()
 
 if (Test-Path $TargetDir) {
     Write-Host "An existing installation was found. Attempting to close active instances..." -ForegroundColor Yellow
@@ -70,13 +90,15 @@ if (Test-Path $TargetDir) {
             Write-Host "Warning: could not set aside app\models; it may be re-downloaded." -ForegroundColor Yellow
         }
     }
-    if (Test-Path "$TargetDir\app\config.json") {
-        Write-Host "Setting aside your saved settings..." -ForegroundColor Gray
-        try {
-            Move-Item -Path "$TargetDir\app\config.json" -Destination "$PreserveDir\config.json" -Force -ErrorAction Stop
-            $PreservedConfig = $true
-        } catch {
-            Write-Host "Warning: could not set aside config.json; settings may reset." -ForegroundColor Yellow
+    foreach ($Name in $PreservedFiles) {
+        if (Test-Path "$TargetDir\app\$Name") {
+            Write-Host "Setting aside $Name..." -ForegroundColor Gray
+            try {
+                Move-Item -Path "$TargetDir\app\$Name" -Destination "$PreserveDir\$Name" -Force -ErrorAction Stop
+                $PreservedNames += $Name
+            } catch {
+                Write-Host "Warning: could not set aside $Name; it will be lost." -ForegroundColor Yellow
+            }
         }
     }
 
@@ -102,16 +124,16 @@ if ($PreservedModels) {
     if (Test-Path "$TargetDir\app\models") { Remove-Item -Path "$TargetDir\app\models" -Recurse -Force -ErrorAction SilentlyContinue }
     Move-Item -Path "$PreserveDir\models" -Destination "$TargetDir\app\models" -Force
 }
-if ($PreservedConfig) {
-    if (Test-Path "$TargetDir\app\config.json") {
-        # The archive should never contain one -- build_portable.py excludes it
-        # as a per-machine runtime artifact. If one is here anyway, the user's
-        # own settings still win.
-        Write-Host "Warning: the package contained a config.json; keeping yours." -ForegroundColor Yellow
-        Remove-Item -Path "$TargetDir\app\config.json" -Force -ErrorAction SilentlyContinue
+foreach ($Name in $PreservedNames) {
+    if (Test-Path "$TargetDir\app\$Name") {
+        # The archive should never contain one -- build_portable.py excludes
+        # every name in $PreservedFiles as a per-machine runtime artifact. If
+        # one is here anyway, the user's own file still wins.
+        Write-Host "Warning: the package contained a $Name; keeping yours." -ForegroundColor Yellow
+        Remove-Item -Path "$TargetDir\app\$Name" -Force -ErrorAction SilentlyContinue
     }
-    Write-Host "Restoring your saved settings..." -ForegroundColor Gray
-    Move-Item -Path "$PreserveDir\config.json" -Destination "$TargetDir\app\config.json" -Force
+    Write-Host "Restoring $Name..." -ForegroundColor Gray
+    Move-Item -Path "$PreserveDir\$Name" -Destination "$TargetDir\app\$Name" -Force
 }
 if (Test-Path $PreserveDir) { Remove-Item -Path $PreserveDir -Recurse -Force -ErrorAction SilentlyContinue }
 

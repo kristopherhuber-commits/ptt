@@ -268,7 +268,9 @@ FIELDS = {
     ),
     "use_gpu": Field(
         "bool", True,
-        does="Run Whisper on the NVIDIA GPU (CUDA) rather than the CPU.",
+        does="Run Whisper on the NVIDIA GPU (CUDA) rather than the CPU. "
+             "Changing it reloads the model on the chosen device by "
+             "itself, within a few seconds, with no restart.",
         when="Turn it off if CUDA is unavailable or you want the GPU free for "
              "something else; transcription still works, several times slower.",
         risk="Hardware has the last word. If a CUDA load fails, the engine "
@@ -315,7 +317,10 @@ FIELDS = {
     ),
     "model": Field(
         "str", transcribe.DEFAULT_MODEL, choices=transcribe.MODEL_NAMES,
-        does="Which Whisper size tier transcribes (FR-5).",
+        does="Which Whisper size tier transcribes (FR-5). Changing it **is** "
+             "loading it: the engine rebuilds the model on its next poll "
+             "iteration, which takes a few seconds and needs no restart and no "
+             "separate load step.",
         when="Larger is more accurate and slower; large-v3-turbo is near-large "
              "accuracy at about half the time, which is why it is the default.",
         risk="Validated against the catalogue, because an unrecognised name "

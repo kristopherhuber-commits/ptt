@@ -247,6 +247,19 @@ def test_the_knowledge_pack_does_ship():
         "app", os.path.join("app", "assets"), "concierge_kb.md") is None
 
 
+def installer_text():
+    return open(os.path.join(REPO, "install.ps1"), encoding="utf-8").read()
+
+
+def preserved_files():
+    """The `$PreservedFiles` list, read out of `install.ps1`."""
+    text = installer_text()
+    body = text[text.index("$PreservedFiles = @("):]
+    body = body[: body.index(")")]
+    return {line.strip().strip('",') for line in body.splitlines()[1:]
+            if line.strip()}
+
+
 def test_the_installer_preserves_models_and_settings():
     """
     Q27's other half. `install.ps1` deleted `$TargetDir` recursively before
@@ -254,10 +267,54 @@ def test_the_installer_preserves_models_and_settings():
     user's settings -- an existing v2 defect that v3 makes expensive rather than
     merely annoying.
     """
-    text = open(os.path.join(REPO, "install.ps1"), encoding="utf-8").read()
+    text = installer_text()
     assert "$PreserveDir" in text
     assert 'Move-Item -Path "$TargetDir\\app\\models"' in text
-    assert 'Move-Item -Path "$TargetDir\\app\\config.json"' in text
+    assert "config.json" in preserved_files()
     # Set aside *before* the delete, put back *after* the copy.
     assert text.index("$PreservedModels = $true") < text.index("Remove-Item -Path $TargetDir")
     assert text.index("Remove-Item -Path $TargetDir") < text.index("Restoring downloaded models")
+
+
+def test_the_installer_preserves_every_durable_artifact():
+    """
+    **Derived, so the next durable file cannot be forgotten (session 3).** Q27
+    named two things to preserve because two existed when it was written; the
+    Concierge then added a memory note, its kept previous version and the saved
+    transcripts, and a reinstall deleted all three while carefully keeping
+    6.9 GB of weights.
+
+    The rule, stated once: everything `build_portable.py` calls a per-machine
+    runtime artifact is either **preserved** across a reinstall or **listed
+    here as deliberately disposable**. A new name in `RUNTIME_ARTIFACTS` that is
+    in neither set fails this test, which is the only moment anybody is thinking
+    about that file.
+    """
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "build_portable", os.path.join(REPO, "build_portable.py"))
+    build = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(build)
+
+    #: Rotated or per-launch, and worthless after a reinstall: both debug logs
+    #: are replaced at the next start (`OBS-4`), and the state file and key
+    #: describe one launch of one process -- keeping them would carry a stale
+    #: pid and a dead API key into a new installation.
+    disposable = {"debug_log.txt", "debug_log.prev.txt",
+                  "concierge_state.json", "concierge_key"}
+
+    kept = preserved_files()
+    assert kept | disposable == set(build.RUNTIME_ARTIFACTS), (
+        "a per-machine artifact is neither preserved nor declared disposable: "
+        f"{set(build.RUNTIME_ARTIFACTS) - kept - disposable}")
+    assert not (kept & disposable)
+
+
+def test_every_preserved_file_is_put_back_after_the_copy():
+    """One loop over one list, so a file cannot be set aside and left there."""
+    text = installer_text()
+    assert text.index("foreach ($Name in $PreservedFiles)") < \
+        text.index("Remove-Item -Path $TargetDir")
+    assert text.index("Remove-Item -Path $TargetDir") < \
+        text.index("foreach ($Name in $PreservedNames)")

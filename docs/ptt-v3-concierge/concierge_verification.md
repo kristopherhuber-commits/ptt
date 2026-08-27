@@ -24,7 +24,7 @@ closed by narrowing a requirement.
 
 | Requirement | Design element | Verified by | Session 1 |
 |---|---|---|---|
-| FR-CG-1 | D-CG-4 (context), **§5.05 two-part pack** | L1 digest manifest + budget; L2 explanation class; L3 | **L1 ✅** `V-CG-69`…`V-CG-78` |
+| FR-CG-1 | D-CG-4 (context), **§5.05 two-part pack** | L1 digest manifest + budget; L2 explanation class; L3 | **L1 ✅** `V-CG-69`…`V-CG-78`. **Pack amended and re-scored in session 3**: hand testing found the Concierge inventing a restart requirement for a model switch because nothing in the pack said that changing `model` *is* loading it. Two sentences in `config.FIELDS`; digest `129c5a31d17f` → `76a281c8a388`; the qualified configuration re-scored twice at **106/123**, the gate's own total (`model_qualification.md`) |
 | FR-CG-2 | D-CG-5 dispatch → **`Settings.set()`** → queued settings-changed → `refresh_panels()` | L1 dispatch + the worker→GUI hop; L2 write class; L3 | **L1 ✅** dispatch `V-CG-13`, `V-CF-16`; **the queued hop `V-CG-120` (session 3)** — emitted on a write, not on a refusal, and `apply_now` unreachable from the adapter. L3 owed |
 | FR-CG-3 | D-CG-5 undo journal, **incl. `update_memory` and reverse-order restore** | L1; L3 | **L1 ✅** `V-CG-40`…`V-CG-45`; **the chips and `↺ session` `V-CG-106`, `V-CG-121` (session 3)** — a refused undo stays pending, a restore touches only journalled keys |
 | FR-CG-4 | system prompt setup flow | L2 dialogue scenario; L3 | prompt drafted (`V-CG-38`); **L2 scenario written** (session 2) — `sel-11`, the only multi-turn scenario in the file, scored with `dialogue_tools` because "one at a time, waiting for an answer" is a shape no single turn can show. L3 still owed |
@@ -104,18 +104,31 @@ never a concern" are different facts.
 
 ### Still open
 
+- **`required facts covered` at 0.9 is finer than the suite can resolve.** Two runs of
+  one configuration, same prompt and pack, returned 0.8889 and 0.9048 — two facts apart,
+  either side of the bar — and the gate itself passed it by half a fact. Design §6 step 4
+  covers confirming or *raising* a threshold and not this: the bar has to drop to
+  something measurable, or `--repeat` has to rise until 0.9 means something. **A decision
+  for the next qualification**, recorded so it is taken deliberately rather than by
+  whichever run went last.
+- **A Whisper model that is not on disk has no download UI.** Raised during session 3's
+  hand test: selecting an uninstalled tier on the Model tab should read as *downloading*
+  and then as installed. `gui_handoff.md` §11 deferred model downloading entirely and the
+  Delete button is still a stub, so there is no state to render — this is a **v2 feature
+  request**, not a v3 defect, and it is recorded here only so it is not lost.
+
 - **v3-6 needs the same no-CUDA machine v2-7 still waits for.**
-- **A reinstall destroys the Concierge's durable state (found in session 3).**
-  `install.ps1` sets `app/models/` and `app/config.json` aside around its
-  `Remove-Item -Recurse` and puts them back (Q27) — and nothing else. So a reinstall
-  keeps the settings and the 6.87 GB of weights and deletes `concierge_memory.txt`,
-  its `.prev`, and `concierge_sessions.json`: everything the Concierge has learned
-  about the user, plus every transcript they chose to keep. Nothing was broken by
-  session 3, which only added the third file to a list that was already short; but Q27
-  was written before those files existed and the preservation list was never revisited.
-  **Session 5 owns `install.ps1` and criterion v3-11, so it is the place to decide** —
-  the fix is three more `Move-Item` pairs, and the alternative is stating in the release
-  note that reinstalling forgets the Concierge's memory.
+- ~~**A reinstall destroys the Concierge's durable state.**~~ **Closed in session 3.**
+  `install.ps1` set `app/models/` and `app/config.json` aside around its
+  `Remove-Item -Recurse` and nothing else, so a reinstall kept 6.87 GB of weights and
+  deleted the memory note, its `.prev` and the saved transcripts. Q27 was written
+  before those files existed. The two variables are now one `$PreservedFiles` list, and
+  `test_the_installer_preserves_every_durable_artifact` derives its expectation:
+  **every name in `build_portable.py`'s `RUNTIME_ARTIFACTS` is either preserved or
+  declared disposable in the test**, so the next durable file fails the suite rather
+  than being forgotten. The four disposable ones are the two rotated logs and the
+  per-launch state file and key. **Still owed at L3**: criterion v3-11 runs
+  `install.bat` over a real installation, and session 5 owns that.
 - **`QFont::setPointSize: Point size <= 0 (-1)` on every menu hover — diagnosed, not
   fixed (session 3).** Reported during the hand test and traced to its cause: `style.qss`
   opens with `QWidget { font-size: 14px }`, so **every widget in this application carries

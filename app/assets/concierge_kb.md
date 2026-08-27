@@ -22,7 +22,7 @@ These are the complete settings this application has. There are no others. A nam
 - **Type:** true or false
 - **Default:** `True`
 - **The Concierge may change it:** yes
-- **What it does:** Run Whisper on the NVIDIA GPU (CUDA) rather than the CPU.
+- **What it does:** Run Whisper on the NVIDIA GPU (CUDA) rather than the CPU. Changing it reloads the model on the chosen device by itself, within a few seconds, with no restart.
 - **When to change it:** Turn it off if CUDA is unavailable or you want the GPU free for something else; transcription still works, several times slower.
 - **What can go wrong:** Hardware has the last word. If a CUDA load fails, the engine forces this to false and saves it, so the setting can change without anyone touching it (FR-6).
 
@@ -67,7 +67,7 @@ These are the complete settings this application has. There are no others. A nam
 - **Type:** one of `tiny.en`, `base.en`, `small.en`, `medium.en`, `large-v3`, `large-v3-turbo`
 - **Default:** `large-v3-turbo`
 - **The Concierge may change it:** yes
-- **What it does:** Which Whisper size tier transcribes (FR-5).
+- **What it does:** Which Whisper size tier transcribes (FR-5). Changing it **is** loading it: the engine rebuilds the model on its next poll iteration, which takes a few seconds and needs no restart and no separate load step.
 - **When to change it:** Larger is more accurate and slower; large-v3-turbo is near-large accuracy at about half the time, which is why it is the default.
 - **What can go wrong:** Validated against the catalogue, because an unrecognised name would be handed to faster-whisper, which tries to fetch it from Hugging Face by name.
 
