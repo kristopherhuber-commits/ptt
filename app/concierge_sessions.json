@@ -1,5 +1,27 @@
 [
   {
+    "id": "s1a042ebffb5",
+    "name": "test10",
+    "saved_at": "2026-08-27T07:12:37",
+    "rows": [
+      {
+        "kind": "notice",
+        "text": "Not saved: there is nothing in this session to save yet",
+        "detail": ""
+      },
+      {
+        "kind": "user",
+        "text": "What does the vocabulary tab mean or do?",
+        "detail": ""
+      },
+      {
+        "kind": "agent",
+        "text": "The vocabulary setting defines replacement rules applied to the transcript before it is pasted into your active window. These rules are processed as whole-word, case-insensitive, and literal replacements.\n\nYou would change these rules if you have specific words or phrases (such as technical terms, names, or common typos) that you want the system to automatically correct every time they are transcribed.\n\nIf you do not set up these rules, the transcription will be pasted exactly as Whisper produces it (after a standard cleanup pass to remove extra periods). Note that because the system only performs one pass of replacements, a rule will never be replaced by another rule.",
+        "detail": ""
+      }
+    ]
+  },
+  {
     "id": "s1a0404728cb",
     "name": "Session 2026-08-26T18:53:20",
     "saved_at": "2026-08-26T18:53:25",

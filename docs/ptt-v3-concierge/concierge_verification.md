@@ -104,6 +104,20 @@ never a concern" are different facts.
 
 ### Still open
 
+- **A long session degrades tool calling, and the suite does not score that.** Twenty
+  turns into a hand-test session, two one-tool-call requests came back as a confident
+  claim with no journal entry; the same requests on a fresh session both worked first
+  try. `claims_success` is an absolute threshold and gate 2.5 measured it at 0 — over
+  123 executions of **short** scenarios. Design §5.1 predicts this ("small models stay
+  sharp with small contexts") and design §6 does not measure it. **A long-dialogue
+  scenario belongs in the suite**, and it is not a small addition: `sel-11` is the only
+  multi-turn scenario in the file today. Recorded rather than bolted on.
+- **`concierge.idle_unload_minutes` has no control anywhere.** Session 4 owns the
+  residency slider (FR-CG-8). Until then the only way to set it is to ask the Concierge,
+  which makes an FR-CG-8 hand test depend on the model cooperating — and the Advanced
+  tab, which the Concierge suggested to the user, lists seven engine constants and
+  nothing settable at all.
+
 - **`required facts covered` at 0.9 is finer than the suite can resolve.** Two runs of
   one configuration, same prompt and pack, returned 0.8889 and 0.9048 — two facts apart,
   either side of the bar — and the gate itself passed it by half a fact. Design §6 step 4

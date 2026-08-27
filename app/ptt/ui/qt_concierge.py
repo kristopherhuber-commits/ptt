@@ -370,6 +370,11 @@ class ConciergeView:
         self._streaming = None
         #: How many trailing rows are live progress lines (rule 2).
         self._pending = 0
+        #: Whether the chip at the end of `rows` belongs to the tool call that
+        #: has not settled yet (rule 3). Without it, the *next* call's narration
+        #: is absorbed too: a turn that changes a setting and then measures
+        #: something shows the chip and never says it measured anything.
+        self._chip_pending = False
 
     # -- state --------------------------------------------------------------
 
@@ -396,6 +401,7 @@ class ConciergeView:
         self.rows = []
         self._streaming = None
         self._pending = 0
+        self._chip_pending = False
 
     def _drop_pending(self):
         if self._pending:
@@ -422,6 +428,7 @@ class ConciergeView:
         """
         self._drop_pending()
         self._close_stream(discard=True)
+        self._chip_pending = False
         self.rows.append(Row(USER, text))
 
     def add_token(self, text):
@@ -465,11 +472,12 @@ class ConciergeView:
         """
         self._drop_pending()
         self._close_stream(discard=True)
+        absorbed, self._chip_pending = self._chip_pending, False
         if is_refusal(result):
             row = refusal_row(name, result)
             self.rows.append(row)
             return row
-        if self.rows and self.rows[-1].kind == CHANGE:
+        if absorbed and self.rows and self.rows[-1].kind == CHANGE:
             return None
         row = Row(TOOL, f"Concierge is {describe_tool(name, arguments)}…",
                   detail=summarise_result(name, result))
@@ -482,6 +490,7 @@ class ConciergeView:
         self._close_stream(discard=True)
         row = Row(CHANGE, chip_text(kind, key, old, new), seq=int(seq))
         self.rows.append(row)
+        self._chip_pending = True
         return row
 
     def add_notice(self, text):

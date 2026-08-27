@@ -76,6 +76,18 @@ class Engine:
         self.cuda_supported = cuda_supported
         self.current_device = "cpu"
 
+        #: The tier **actually resident**, which is not the same thing as
+        #: `settings.model` and stopped being the same thing in v3.0. A
+        #: Concierge `set_config("model", …)` writes the setting immediately and
+        #: the reload that follows it can be seconds behind -- deliberately so,
+        #: because the reload is a CUDA allocation and the model may still be
+        #: mid-sentence (`qt_concierge_worker._request_reload`). Anything that
+        #: reports on the loaded model has to read this, not the setting.
+        #: Empty until the first successful load, and empty again after a failed
+        #: one, because "nothing is loaded" is a different answer from "the old
+        #: one is still there".
+        self.current_model = ""
+
         # Hardware has the last word over the saved preference. Done here rather
         # than in each frontend so the rule lives once: the tray needs it so the
         # menu checkmark tells the truth, and load_model_with_fallback needs it
@@ -218,10 +230,12 @@ class Engine:
         # LOAD-BEARING for the same reason the chord is: the model name is read
         # from the settings object here, not cached, so the Model panel's
         # selection takes effect on the next reload with no restart.
+        requested = self._settings.model
         self._model, self.current_device, status_text = transcribe.load_model_with_fallback(
-            self._settings.model, self._settings.use_gpu, self.cuda_supported,
+            requested, self._settings.use_gpu, self.cuda_supported,
             on_fallback=self._persist_cpu_fallback,
         )
+        self.current_model = requested if self._model is not None else ""
         self._emit("idle", status_text)
 
     def _benchmark(self):
@@ -239,8 +253,16 @@ class Engine:
         status text is new, and it comes from here, which is the rule: the
         headline is whatever the engine reported.
         """
-        model_name = self._settings.model
-        if self._model is None:
+        # **The resident tier, not the selected one.** These were the same
+        # thing until v3.0: the only caller was the Model tab, and selecting a
+        # row set the setting and requested the reload before the measurement,
+        # so the poll loop's ordering guaranteed they agreed. The Concierge can
+        # write the setting and have its reload deferred behind a turn, and a
+        # measurement labelled with the setting then records the *old* model's
+        # time under the *new* model's name -- in `settings.benchmarks`, where
+        # it persists and shows up in the Model tab as fact.
+        model_name = self.current_model
+        if self._model is None or not model_name:
             log_debug("Benchmark requested with no model loaded; ignoring.")
             self._emit("idle", self._ready_text())
             return

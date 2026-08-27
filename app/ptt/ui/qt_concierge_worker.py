@@ -68,6 +68,7 @@ end.
 
 import os
 import threading
+import time
 
 from PySide6.QtCore import QObject, Qt, QThread, Signal, Slot
 
@@ -95,6 +96,12 @@ RELOAD_KEYS = ("model", "use_gpu")
 #: rather than indefinite because this blocks the worker thread, and a tool that
 #: never returns is a turn that never ends.
 BENCHMARK_TIMEOUT_SEC = 180.0
+
+#: How long `run_benchmark` waits for the engine to finish loading the tier it
+#: is about to measure. A Whisper load is a few seconds; this is generous
+#: enough to cover one that has to come off a cold disk, and bounded because it
+#: blocks the worker thread inside a tool call.
+LOAD_WAIT_TIMEOUT_SEC = 90.0
 
 #: How long the exit path waits for the runtime to stop before leaving it to the
 #: job object. Short: the kernel is holding the same guarantee, and a settings
@@ -148,17 +155,59 @@ class BenchmarkBridge:
     own docstring.
     """
 
-    def __init__(self, settings, engine_provider, timeout=BENCHMARK_TIMEOUT_SEC):
+    def __init__(self, settings, engine_provider, timeout=BENCHMARK_TIMEOUT_SEC,
+                 flush_reload=None, sleep=time.sleep,
+                 load_timeout=LOAD_WAIT_TIMEOUT_SEC):
         self._settings = settings
         self._engine = engine_provider
         self._timeout = timeout
+        self._flush_reload = flush_reload or (lambda: False)
+        self._sleep = sleep
+        self._load_timeout = load_timeout
         self._done = threading.Event()
         self._result = None
+        self._wanted = ""
 
-    def deliver(self, device, seconds):
-        """Called on the GUI thread when the engine reports a measurement."""
-        self._result = {"seconds": float(seconds), "device": device}
+    def deliver(self, model, device, seconds):
+        """
+        Called on the GUI thread when the engine reports a measurement.
+
+        A measurement for a tier nobody here is waiting for is ignored rather
+        than taken: the Model tab's own Measure button reaches this same hop,
+        and handing its number to a tool call that asked about something else is
+        how a benchmark comes back confidently wrong.
+        """
+        if self._wanted and model != self._wanted:
+            log_debug(f"Concierge: ignoring a measurement of {model!r}; this "
+                      f"tool call is waiting for {self._wanted!r}.")
+            return
+        self._result = {"seconds": float(seconds), "device": device,
+                        "model": model}
         self._done.set()
+
+    def _await_load(self, engine, model):
+        """
+        Wait for the engine to finish loading `model`. `(ok, reason)`.
+
+        This is the half that makes "switch to medium.en and then measure it"
+        one turn rather than two. `_request_reload` holds a reload while the
+        model is *generating*, because a CUDA allocation during decode trips the
+        stall bound -- and a tool call is the opposite situation: the worker
+        thread is inside this function, no SSE stream is open, and there is
+        nothing to stall. So the held reload is flushed here on purpose.
+        """
+        if self._flush_reload():
+            log_debug(f"Concierge: flushing the held reload before measuring "
+                      f"{model!r}.")
+        deadline = self._load_timeout
+        waited = 0.0
+        while waited < deadline:
+            if getattr(engine, "current_model", "") == model:
+                return True, None
+            self._sleep(0.5)
+            waited += 0.5
+        return False, (f"the engine did not finish loading {model!r} within "
+                       f"{int(deadline)} seconds")
 
     def run(self, model):
         """The registry's `benchmark` seam. Runs on the worker thread."""
@@ -181,13 +230,23 @@ class BenchmarkBridge:
                              f"run_benchmark({current!r}); to measure "
                              f"{model!r} instead, call set_config('model', "
                              f"{model!r}) first and the engine will load it")}
+        # The setting says `model`; that does not mean it is loaded yet.
+        ok, reason = self._await_load(engine, model)
+        if not ok:
+            return {"error": True, "reason": reason,
+                    "hint": "try again in a few seconds"}
+
         self._result = None
+        self._wanted = model
         self._done.clear()
         engine.request_benchmark()
-        if not self._done.wait(self._timeout):
-            return {"error": True,
-                    "reason": (f"the measurement did not finish within "
-                               f"{int(self._timeout)} seconds")}
+        try:
+            if not self._done.wait(self._timeout):
+                return {"error": True,
+                        "reason": (f"the measurement did not finish within "
+                                   f"{int(self._timeout)} seconds")}
+        finally:
+            self._wanted = ""
         return self._result
 
 
@@ -452,6 +511,19 @@ class ConciergeWorker(QObject):
         try:
             turn = self.agent.send(text)
             reply, forced = turn.reply, turn.forced
+            if turn.trims:
+                # Design 5.0 rule 5 writes every trim to the log; nothing put
+                # one on screen. A trimmed turn is a **double** degradation --
+                # the answer is worse because the model can see less, and the
+                # next turn is slower because the KV cache is invalidated from
+                # the trim point -- and both of those look, from the chair, like
+                # the model having a bad day. Saying so is what turns "it got
+                # worse and I don't know why" into one action.
+                self._emit(self.notice, "notice",
+                           f"This conversation is long enough that "
+                           f"{len(turn.trims)} older item(s) were dropped from "
+                           f"what I can see. Start a new session for the "
+                           f"sharpest answers — the memory note carries over.")
         except agent_mod.ContextOverflow as overflow:
             self._emit(self.notice, "notice", overflow.message)
             forced = "context-overflow"
@@ -646,7 +718,8 @@ class ConciergeController(QObject):
         self._panel = panel
         self._audit = SignalAudit()
         self._engine = engine_provider
-        self.benchmark = BenchmarkBridge(settings, engine_provider)
+        self.benchmark = BenchmarkBridge(settings, engine_provider,
+                                         flush_reload=self._take_pending_reload)
         #: A `RELOAD_KEYS` write that landed mid-turn, waiting for the turn to
         #: end. See `_on_settings_applied`.
         self._reload_pending = False
@@ -843,6 +916,24 @@ class ConciergeController(QObject):
         self._panel.set_idle_minutes(
             self._settings.get("concierge.idle_unload_minutes"))
         self.status_changed.emit(self._panel.status_segment())
+
+    def _take_pending_reload(self):
+        """
+        Claim a held reload and perform it now. Returns whether there was one.
+
+        Called from the **worker** thread, by `run_benchmark`, which is the one
+        moment a reload is safe: the turn's generation is not running, because
+        the worker is inside the tool call. `request_model_reload` is
+        thread-safe by its own docstring, and the flag is a plain bool rebind.
+        """
+        if not self._reload_pending:
+            return False
+        self._reload_pending = False
+        engine = self._engine()
+        if engine is None:
+            return False
+        engine.request_model_reload()
+        return True
 
     def _request_reload(self):
         """

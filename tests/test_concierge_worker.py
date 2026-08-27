@@ -501,11 +501,25 @@ def test_deleting_when_there_is_nothing_to_delete_says_so(worker):
 # -- V-CG-124: the benchmark handshake ---------------------------------------
 
 class FakeEngine:
-    def __init__(self):
+    """
+    The engine, as the benchmark bridge sees it.
+
+    `current_model` is the tier **actually resident**, which stopped being the
+    same thing as `settings.model` in v3.0 -- a Concierge write lands
+    immediately and the reload behind it can be seconds late. The bridge waits
+    for this to catch up before it measures anything.
+    """
+
+    def __init__(self, current_model="large-v3-turbo"):
         self.asked = 0
+        self.reloads = 0
+        self.current_model = current_model
 
     def request_benchmark(self):
         self.asked += 1
+
+    def request_model_reload(self):
+        self.reloads += 1
 
 
 def test_a_tier_that_is_not_loaded_is_refused_with_both_ways_out(tmp_path):
@@ -530,12 +544,63 @@ def test_a_tier_that_is_not_loaded_is_refused_with_both_ways_out(tmp_path):
 
 def test_the_measurement_the_engine_reports_is_what_comes_back(tmp_path):
     settings = config.Settings(path=str(tmp_path / "config.json"))
-    engine = FakeEngine()
+    engine = FakeEngine(current_model=settings.get("model"))
     bridge = BenchmarkBridge(settings, lambda: engine)
-    threading.Timer(0.05, lambda: bridge.deliver("cuda", 2.34)).start()
+    threading.Timer(0.05, lambda: bridge.deliver(settings.get("model"),
+                                                 "cuda", 2.34)).start()
     result = bridge.run(settings.get("model"))
-    assert result == {"seconds": 2.34, "device": "cuda"}
+    assert result["seconds"] == 2.34 and result["device"] == "cuda"
     assert engine.asked == 1
+
+
+def test_a_measurement_of_some_other_tier_is_not_taken_as_this_one(tmp_path):
+    """
+    The Model tab's own Measure button reaches the same hop. Handing its number
+    to a tool call that asked about a different tier is how a benchmark comes
+    back confidently wrong -- which is the defect this whole path was rebuilt
+    around.
+    """
+    settings = config.Settings(path=str(tmp_path / "config.json"))
+    engine = FakeEngine(current_model=settings.get("model"))
+    bridge = BenchmarkBridge(settings, lambda: engine, timeout=0.4)
+    threading.Timer(0.05, lambda: bridge.deliver("tiny.en", "cuda", 0.4)).start()
+    result = bridge.run(settings.get("model"))
+    assert result["error"] is True and "did not finish" in result["reason"]
+
+
+def test_a_held_reload_is_flushed_before_the_measurement(tmp_path):
+    """
+    The other half of `_request_reload`. A reload is held while the model is
+    *generating*, because the allocation trips the stall bound; a tool call is
+    the opposite case -- the worker is inside this function and no stream is
+    open -- so the held reload happens here, and the measurement waits for it.
+    """
+    settings = config.Settings(path=str(tmp_path / "config.json"))
+    engine = FakeEngine(current_model="medium.en")
+    flushed = []
+
+    def flush():
+        flushed.append(True)
+        engine.current_model = settings.get("model")
+        return True
+
+    bridge = BenchmarkBridge(settings, lambda: engine, flush_reload=flush)
+    threading.Timer(0.05, lambda: bridge.deliver(settings.get("model"),
+                                                 "cuda", 1.1)).start()
+    result = bridge.run(settings.get("model"))
+    assert flushed == [True]
+    assert result["seconds"] == 1.1
+
+
+def test_a_load_that_never_finishes_ends_the_tool_call(tmp_path):
+    settings = config.Settings(path=str(tmp_path / "config.json"))
+    engine = FakeEngine(current_model="medium.en")
+    bridge = BenchmarkBridge(settings, lambda: engine, sleep=lambda _s: None,
+                             load_timeout=1.0)
+    result = bridge.run(settings.get("model"))
+    assert result["error"] is True
+    assert "did not finish loading" in result["reason"]
+    assert engine.asked == 0
 
 
 def test_a_measurement_that_never_arrives_ends_the_tool_call(tmp_path):
@@ -544,7 +609,8 @@ def test_a_measurement_that_never_arrives_ends_the_tool_call(tmp_path):
     a turn that never ends, and the turn timeout only bounds *generations*.
     """
     settings = config.Settings(path=str(tmp_path / "config.json"))
-    bridge = BenchmarkBridge(settings, lambda: FakeEngine(), timeout=0.05)
+    engine = FakeEngine(current_model=settings.get("model"))
+    bridge = BenchmarkBridge(settings, lambda: engine, timeout=0.05)
     result = bridge.run(settings.get("model"))
     assert result["error"] is True and "did not finish" in result["reason"]
 

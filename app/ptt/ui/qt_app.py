@@ -74,7 +74,7 @@ class EngineBridge(QObject):
 
     state_changed = Signal(str, str)     # state, status_text
     text_ready = Signal(str)             # wired to the engine in session 2
-    benchmark_done = Signal(str, float)  # device, seconds -- see Engine.request_benchmark
+    benchmark_done = Signal(str, str, float)  # model, device, seconds
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -94,10 +94,19 @@ class EngineBridge(QObject):
         A latency measurement, from the engine thread. Emits and nothing else,
         for exactly the reason `on_state` does -- the slot on the far side
         writes config.json and repaints a table, and both belong on the GUI
-        thread. The model name is dropped rather than carried: by the time this
-        fires it is `settings.model`, which the receiving panel already reads.
+        thread.
+
+        **The model name is carried (v3.0), where it used to be dropped.** The
+        reasoning for dropping it -- "by the time this fires it is
+        `settings.model`, which the receiving panel already reads" -- was true
+        while the Model tab was the only thing that could ask for a measurement.
+        The Concierge can write the setting and have the reload that follows it
+        deferred behind a turn, so the setting and the resident model disagree
+        for a few seconds, and a measurement filed under the setting is filed
+        under the wrong tier. `Engine.current_model` is the one that produced
+        the number.
         """
-        self.benchmark_done.emit(device, seconds)
+        self.benchmark_done.emit(model_name, device, seconds)
 
 
 class QtApp:
@@ -233,7 +242,7 @@ class QtApp:
         self._window.refresh_panels()
         self._tray.refresh_menu()
 
-    def _on_benchmark_done(self, device, seconds):
+    def _on_benchmark_done(self, model, device, seconds):
         """
         Hand a measurement to the Model panel, on the GUI thread.
 
@@ -244,8 +253,8 @@ class QtApp:
         "how fast is this model", and the bridge ignores one nobody is waiting
         for.
         """
-        self._window.record_benchmark(self._settings.model, device, seconds)
-        self._concierge.benchmark.deliver(device, seconds)
+        self._window.record_benchmark(model, device, seconds)
+        self._concierge.benchmark.deliver(model, device, seconds)
 
     # -- the Concierge --------------------------------------------------------
 

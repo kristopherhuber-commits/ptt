@@ -150,6 +150,22 @@ def test_a_successful_write_shows_the_chip_and_nothing_else(view):
     assert kinds(view) == [panel_mod.CHANGE]
 
 
+def test_a_later_call_in_the_same_turn_is_still_narrated(view):
+    """
+    The chip is the narration of **the call that produced it**, and of nothing
+    after it. Found live: "switch to medium.en and measure that" showed the
+    chip and then never said it had measured anything, because the benchmark's
+    line was absorbed by a chip two calls earlier.
+    """
+    view.add_user("switch to medium.en and measure that")
+    view.add_change(1, "config", "model", "large-v3-turbo", "medium.en")
+    assert view.add_tool("set_config", {"key": "model"}, {"ok": True}) is None
+    row = view.add_tool("run_benchmark", {"model": "medium.en"},
+                        {"seconds": 1.47, "device": "cuda"})
+    assert row is not None and row.detail == "1.47 s"
+    assert kinds(view) == [panel_mod.USER, panel_mod.CHANGE, panel_mod.TOOL]
+
+
 def test_the_chip_reads_the_way_the_handoff_writes_it():
     assert panel_mod.chip_text("config", "use_gpu", False, True) == \
         "use_gpu: false → true"
