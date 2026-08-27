@@ -595,6 +595,15 @@ class Registry:
         resident = bool(self._llm_resident())
         started = time.time()
         outcome = self._benchmark(model)
+        # A seam is allowed to refuse, and its refusal is the tool's refusal.
+        # The Qt adapter's benchmark bridge does exactly that -- the engine
+        # measures the model that is **already resident**, so a request for any
+        # other tier comes back with a reason and the `set_config` that fixes
+        # it. Wrapping that in "the benchmark returned nothing usable ({...})"
+        # buried a usable instruction inside a stringified dict, and the model
+        # then explained the mess to the user instead of acting on it.
+        if isinstance(outcome, dict) and outcome.get("error"):
+            return cap(outcome)
         if not isinstance(outcome, dict) or "seconds" not in outcome:
             return error(f"the benchmark returned nothing usable ({outcome!r})",
                          "try again, or use the Model tab's Measure button")

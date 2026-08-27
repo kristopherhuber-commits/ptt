@@ -749,6 +749,15 @@ QLabel#conciergeTag {
     padding: 2px 7px;
 }
 
+/* The state tag, and the one moving thing in the panel.
+
+   The colour is selected on a dynamic `state` property carrying the
+   machine's own name for the state -- the same indirection the status
+   dot uses, so no colour lives in Python. Amber for the four states
+   where the user is waiting, matching the tray's amber for loading and
+   transcribing; the accent for ready; dark red for disabled, which is
+   this UI's error ink. Nothing here is a new value. */
+
 QLabel#conciergeStateTag {
     color: #2c455d;
     background: #eef6ff;
@@ -756,6 +765,40 @@ QLabel#conciergeStateTag {
     font-family: Consolas, "Courier New", monospace;
     font-size: 11px;
     padding: 1px 6px;
+}
+
+QLabel#conciergeStateTag[state="loading"],
+QLabel#conciergeStateTag[state="downloading"],
+QLabel#conciergeStateTag[state="generating"],
+QLabel#conciergeStateTag[state="unloading"] {
+    color: #1d1f20;
+    background: #f59e0b;
+    border: 1px solid #f59e0b;
+}
+
+QLabel#conciergeStateTag[state="stopped"],
+QLabel#conciergeStateTag[state="not_downloaded"] {
+    color: rgba(29, 31, 32, 0.55);
+    background: #e9e9ea;
+    border: 1px solid rgba(29, 31, 32, 0.16);
+}
+
+QLabel#conciergeStateTag[state="disabled"] {
+    color: #f2f2f3;
+    background: #8c3a2e;
+    border: 1px solid #8c3a2e;
+}
+
+/* The indeterminate bar under the header: a hairline that moves, shown
+   only in the four busy states. Qt animates a 0..0 range itself. */
+
+QProgressBar#conciergeBusy {
+    background: #e9e9ea;
+    border: none;
+}
+
+QProgressBar#conciergeBusy::chunk {
+    background: #f59e0b;
 }
 
 QLabel#conciergeCaption {

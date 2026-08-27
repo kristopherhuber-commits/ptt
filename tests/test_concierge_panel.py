@@ -258,19 +258,55 @@ def test_the_machines_own_detail_wins_over_the_default_caption():
     assert panel_mod.state_caption(state_mod.STOPPED, detail) == detail
 
 
-def test_a_message_can_be_sent_only_when_the_machine_says_so_or_while_answering():
+def test_a_message_can_be_sent_in_exactly_three_states():
     """
-    The `ready` half is `state.can_serve`, not a second opinion about it.
-    `generating` is added deliberately: design 2 says a new send cancels the
-    current generation rather than queueing behind it.
+    The `ready` half is `state.can_serve`, not a second opinion about it. The
+    other two are deliberate: a send during `generating` cancels it (design 2),
+    and a send while `stopped` starts the runtime -- the residency timer unloads
+    whether or not the panel is open, and the panel it left behind had no way
+    back except closing and reopening it.
     """
     allowed = {s for s in state_mod.STATES if panel_mod.can_send(s)}
-    assert allowed == {state_mod.READY, state_mod.GENERATING}
+    assert allowed == {state_mod.READY, state_mod.GENERATING, state_mod.STOPPED}
+
+
+def test_a_stopped_panel_invites_the_send_that_restarts_it():
+    assert "Send to start" in panel_mod.placeholder(state_mod.STOPPED, "")
 
 
 def test_every_state_says_something_in_the_empty_input_box():
     for state in state_mod.STATES:
         assert panel_mod.placeholder(state, "")
+
+
+# -- V-CG-107b: the states the user is waiting through ------------------------
+
+def test_the_busy_states_are_the_ones_with_nothing_to_do_but_wait():
+    busy = {s for s in state_mod.STATES if panel_mod.is_busy(s)}
+    assert busy == {state_mod.LOADING, state_mod.DOWNLOADING,
+                    state_mod.GENERATING, state_mod.UNLOADING}
+
+
+def test_a_state_that_is_waiting_for_the_user_is_not_busy():
+    for state in (state_mod.READY, state_mod.STOPPED, state_mod.DISABLED,
+                  state_mod.NOT_DOWNLOADED):
+        assert not panel_mod.is_busy(state)
+
+
+def test_every_state_the_machine_declares_has_a_colour_rule():
+    """
+    The tag is coloured from `style.qss` on a dynamic property carrying the
+    machine's own name, so a ninth state would render in the default style
+    rather than failing. The stylesheet is the thing to check.
+    """
+    import os
+    qss = open(os.path.join(os.path.dirname(os.path.dirname(
+        os.path.abspath(__file__))), "app", "assets", "style.qss"),
+        encoding="utf-8").read()
+    styled = {state for state in state_mod.STATES
+              if f'conciergeStateTag[state="{state}"]' in qss}
+    # `ready` is the unqualified rule, so it is styled without being named.
+    assert styled == set(state_mod.STATES) - {state_mod.READY}
 
 
 # -- V-CG-108: the status bar segment -----------------------------------------

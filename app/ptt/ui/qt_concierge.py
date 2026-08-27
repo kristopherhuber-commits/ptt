@@ -41,7 +41,8 @@ from typing import NamedTuple
 from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtWidgets import (
     QFrame, QHBoxLayout, QLabel, QLineEdit, QMenu, QMessageBox, QPlainTextEdit,
-    QPushButton, QScrollArea, QSizePolicy, QStackedWidget, QVBoxLayout, QWidget,
+    QProgressBar, QPushButton, QScrollArea, QSizePolicy, QStackedWidget,
+    QVBoxLayout, QWidget,
 )
 
 from ptt.concierge import state as state_mod
@@ -80,6 +81,18 @@ INPUT_MAX_LINES = 4
 #: transcript where both speakers use the full width stops looking like a
 #: conversation and starts looking like a log.
 BUBBLE_WIDTH_FRACTION = 0.82
+
+#: The states in which the panel is *doing something the user is waiting for*.
+#: They drive two things and nothing else: the indeterminate bar under the
+#: header, and the amber the state tag turns. Everything else about a state
+#: comes from the machine.
+BUSY_STATES = (state_mod.LOADING, state_mod.DOWNLOADING, state_mod.GENERATING,
+               state_mod.UNLOADING)
+
+
+def is_busy(state):
+    """Whether the panel should show that it is working. See `BUSY_STATES`."""
+    return state in BUSY_STATES
 
 
 class Row(NamedTuple):
@@ -285,13 +298,22 @@ def can_send(state):
     Whether the input accepts a message.
 
     `ready` comes from the state machine rather than from a literal here, so the
-    two cannot drift. `generating` is added deliberately and is not a second
-    opinion about `can_serve`: design 2 says a new send **cancels** the current
-    generation, because `-np 1` means a concurrent request would either queue or
-    land somewhere that re-pays the knowledge pack in full. So the panel accepts
-    the message and the controller cancels what is running.
+    two cannot drift. Two states are added deliberately and neither is a second
+    opinion about `can_serve`, which answers "can this message be served *now*":
+
+    - `generating`, because design 2 says a new send **cancels** the current
+      generation -- with `-np 1` a concurrent request would either queue or land
+      somewhere that re-pays the knowledge pack in full. The panel takes the
+      message and the controller cancels what is running.
+    - `stopped`, because the residency timer unloads the runtime after N minutes
+      **whether or not the panel is open** (FR-CG-8), and the panel it leaves
+      behind had no way back: every control that starts the runtime is on the
+      open/close path, so the user had to close the panel and reopen it. Typing
+      the next question is the obvious way to ask for it back, so that is what
+      it now does -- the controller starts the runtime, then sends.
     """
-    return state_mod.can_serve(state) or state == state_mod.GENERATING
+    return (state_mod.can_serve(state)
+            or state in (state_mod.GENERATING, state_mod.STOPPED))
 
 
 def placeholder(state, detail=""):
@@ -308,6 +330,8 @@ def placeholder(state, detail=""):
         return "The model has not been downloaded yet"
     if state == state_mod.DOWNLOADING:
         return "Downloading the model — dictation is unaffected"
+    if state == state_mod.STOPPED:
+        return "Send to start the Concierge — it takes about ten seconds"
     return detail or "The Concierge is not running"
 
 
@@ -888,6 +912,19 @@ class ConciergePanel(RegistrationMarks, QWidget):
 
         self._caption = _wrapping_label("", "conciergeCaption")
         box.addWidget(self._caption)
+
+        # An indeterminate bar, shown only while the panel is working. The
+        # states are honest about what is happening -- `loading`, `generating`
+        # -- but a word that does not move is a word that might be stale, and
+        # the two things it covers take ten seconds and several seconds. Range
+        # 0..0 is Qt's indeterminate mode; it animates itself.
+        self._busy = QProgressBar()
+        self._busy.setObjectName("conciergeBusy")
+        self._busy.setRange(0, 0)
+        self._busy.setTextVisible(False)
+        self._busy.setFixedHeight(2)
+        self._busy.hide()
+        box.addWidget(self._busy)
         return header
 
     def _header_button(self, text, handler):
@@ -975,9 +1012,14 @@ class ConciergePanel(RegistrationMarks, QWidget):
         box.addWidget(title)
 
         note = _wrapping_label(
-            "What the Concierge remembers about you and this machine. It is "
-            "loaded at the start of every session; nothing else from a previous "
-            "conversation is.", "conciergeSectionNote")
+            "Every conversation starts from nothing — the Concierge does not "
+            "read old chats. This note is the one exception: a few lines it "
+            "keeps about you and this machine, loaded at the start of every "
+            "session, so you are not introducing yourself each time. "
+            "Ask it to remember something (try ‘remember that I use a Jabra "
+            "headset’) and it writes here. You can edit or clear it yourself, "
+            "and every version it writes leaves the one before it recoverable.",
+            "conciergeSectionNote")
         box.addWidget(note)
 
         self._memory_edit = QPlainTextEdit()
@@ -1099,6 +1141,18 @@ class ConciergePanel(RegistrationMarks, QWidget):
         self._tag.setText(f"{self.view.model_label} · local"
                           if self.view.model_label else "local")
         self._state_tag.setText(self.view.state)
+        # The tag's colour comes from the stylesheet, selected on this dynamic
+        # property -- the same indirection `StatusDot` uses, and for the same
+        # reason: no colour lives in Python. `qproperty-` and selectors on a
+        # dynamic property are both resolved at polish time, so changing the
+        # property means re-polishing.
+        if self._state_tag.property("state") != self.view.state:
+            self._state_tag.setProperty("state", self.view.state)
+            style = self._state_tag.style()
+            style.unpolish(self._state_tag)
+            style.polish(self._state_tag)
+        busy = is_busy(self.view.state)
+        self._busy.setVisible(busy)
         self._caption.setText(self.view.caption())
         self._input.setPlaceholderText(self.view.placeholder())
         self._input.setEnabled(self.view.can_send())

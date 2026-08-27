@@ -639,6 +639,9 @@ class ConciergeController(QObject):
         self._audit = SignalAudit()
         self._engine = engine_provider
         self.benchmark = BenchmarkBridge(settings, engine_provider)
+        #: A `RELOAD_KEYS` write that landed mid-turn, waiting for the turn to
+        #: end. See `_on_settings_applied`.
+        self._reload_pending = False
         self.store = store or sessions_mod.SessionStore(
             paths.concierge_sessions_path(),
             limit_provider=lambda: settings.get("concierge.history_limit"))
@@ -761,7 +764,7 @@ class ConciergeController(QObject):
 
     def _on_panel_send(self, text):
         """
-        A message. Cancels whatever is generating **before** it is queued.
+        A message. Starts a stopped runtime, or cancels a running generation.
 
         The event, not a slot: the worker thread is inside `agent.send()` and a
         queued call could not be delivered until that returned, which is the
@@ -769,9 +772,15 @@ class ConciergeController(QObject):
         """
         self._audit.check("send (GUI emit)", expect_gui=True)
         self._panel.append_user(text)
-        if self.worker.machine.state == state_mod.GENERATING:
+        state = self.worker.machine.state
+        if state == state_mod.GENERATING:
             self.worker.cancel.set()
             self._audit.check("cancel (GUI emit)", expect_gui=True)
+        elif state == state_mod.STOPPED:
+            # Queued ahead of the send and on the same thread, so `on_start`
+            # runs to completion -- launch, health, prewarm -- before `on_send`
+            # is dispatched. The panel shows `loading` throughout.
+            self.open()
         self.send_requested.emit(text)
 
     def _on_panel_undo(self, seq):
@@ -822,10 +831,33 @@ class ConciergeController(QObject):
         self._audit.check("settings_applied (GUI slot)", expect_gui=True)
         self.settings_applied.emit(key)
         if key in RELOAD_KEYS:
-            self.reload_requested.emit()
+            self._request_reload()
         self._panel.set_idle_minutes(
             self._settings.get("concierge.idle_unload_minutes"))
         self.status_changed.emit(self._panel.status_segment())
+
+    def _request_reload(self):
+        """
+        Reload the dictation model -- but **not while a turn is in flight**.
+
+        Measured the hard way. `set_config("model", …)` lands mid-turn: the tool
+        has run and the model is still composing the sentence that says so. A
+        reload at that instant loads a second Whisper onto a card already
+        holding llama-server's 9.4 GB and the resident 2.3 GB, and the LLM's
+        decode stops long enough to trip the 30 s stall timeout -- the turn ends
+        with "The Concierge stopped responding" **after** the write it was
+        reporting had already succeeded.
+
+        The broadcast is not deferred, only the reload: the banner, the tabs and
+        the status bar still update on the same event, which is what FR-CG-2
+        asks for. What waits is the seconds-long CUDA allocation, and it waits
+        for as long as one sentence takes.
+        """
+        if self.worker.machine.state == state_mod.GENERATING:
+            self._reload_pending = True
+            log_debug("Concierge: a model reload is held until this turn ends.")
+            return
+        self.reload_requested.emit()
 
     def _on_notice(self, text):
         self._audit.check("notice (GUI slot)", expect_gui=True)
@@ -834,6 +866,9 @@ class ConciergeController(QObject):
     def _on_turn_finished(self, reply, forced):
         self._audit.check("turn_finished (GUI slot)", expect_gui=True)
         self._panel.close_turn(reply, forced)
+        if self._reload_pending:
+            self._reload_pending = False
+            self.reload_requested.emit()
 
     def _on_undo_finished(self, seq, ok, reason):
         self._audit.check("undo_finished (GUI slot)", expect_gui=True)
