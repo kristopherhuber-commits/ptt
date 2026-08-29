@@ -32,7 +32,7 @@ There are two ways to install. **Most people want Option 1.**
 | **Option 1** | Anyone who just wants to use the app | A browser. Nothing else. |
 | **Option 2** | Developers, or anyone modifying the code | Git and a Python 3.14 installation |
 
-Both produce the same application. The published archive is built from the tagged commit it is attached to, so the two are equivalent.
+Both produce the same application. The published archives are built from the tagged commit they are attached to, so the two routes are equivalent.
 
 **Requirements either way:** Windows 11, and a microphone. An NVIDIA GPU is optional and only affects speed (see section 1). The first launch downloads the speech model (~1.6 GB) and takes a few minutes; every launch after that takes a few seconds.
 
@@ -40,10 +40,24 @@ Both produce the same application. The published archive is built from the tagge
 
 No Python, no developer tools, no command line.
 
-1. Download **`ptt_dictate_dist.zip`** (~1.45 GB) from the [**Releases page**](https://github.com/kristopherhuber-commits/ptt/releases/latest).
-2. Extract the ZIP file completely.
+1. Download from the [**Releases page**](https://github.com/kristopherhuber-commits/ptt/releases/latest). There are **two** files:
+
+   | File | Size | Needed? |
+   |---|---|---|
+   | **`ptt_dictate_dist.zip`** | ~1.43 GB | **Yes.** The application. |
+   | **`ptt_llama_runtime.zip`** | ~0.61 GB | Only if you want the **Concierge** — the local assistant that explains and changes your settings. Dictation does not use it. |
+
+2. Extract them **into the same folder**. Order does not matter; together they
+   produce one tree, with `app\llama\` sitting beside `app\ptt\`.
 3. Double-click **`install.bat`** inside the extracted folder.
 4. Click **Yes** on the User Account Control (UAC) prompt. The batch script will automatically self-elevate to Administrator to complete the setup.
+
+> **Why two files?** A GitHub release asset must be under 2 GiB and the whole
+> thing is 2.04 GiB. The split is at the one component the application does not
+> need, so the second download is genuinely optional rather than a package you
+> have to reassemble. If you install without it, the installer says so and
+> dictation works normally; you can add it later by extracting it into the same
+> folder and running `install.bat` again.
 
 The application is distributed as a portable Python environment, so no pre-existing Python installation or library configuration is required on the target computer.
 
@@ -63,6 +77,11 @@ For developers, or if you pull the repository onto a new computer and want to re
 
 1. Ensure any running executable is closed (right-click the tray icon and select **Exit**),
    and anything else running out of `.venv`.
+
+   The distribution is **one archive**, `ptt_dictate_dist.zip` (1.67 GiB). Its root
+   holds exactly one executable — `install.bat` — with `install.ps1` and
+   `run_tray.bat` in `_internal\`, because Windows hides known file extensions by
+   default and two files both displayed as `install` is a coin toss.
 2. Run the build script **with the interpreter inside `.venv`**:
    ```powershell
    .venv\Scripts\python.exe build_portable.py

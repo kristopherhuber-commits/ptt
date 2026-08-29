@@ -2,7 +2,11 @@
 # Installer script for Push-to-Talk Dictation
 
 $AppName = "PTT Dictation"
-$SourceDir = $PSScriptRoot
+# This script lives in _internal\; the payload it installs is its parent.
+# Moved there in v3.0 so the extracted folder offers the user exactly one
+# executable -- with extensions hidden, which is the Windows default,
+# `install.bat` and `install.ps1` both render as `install`.
+$SourceDir = Split-Path $PSScriptRoot -Parent
 $TargetParentDir = "$env:LOCALAPPDATA\Programs"
 $TargetDir = "$TargetParentDir\ptt_dictate"
 
@@ -19,6 +23,24 @@ if (-not (Test-Path "$SourceDir\.venv") -or -not (Test-Path "$SourceDir\app")) {
     Write-Host "Error: Installation source files not found!" -ForegroundColor Red
     Write-Host "Please ensure you have extracted all files from the ZIP before running this installer." -ForegroundColor Yellow
     Exit
+}
+
+# 1a. The Concierge's runtime ships as a second archive, because one asset over
+# 2 GiB is one GitHub will not accept (build_portable.py, DISTRIBUTION_ARCHIVE).
+# Its absence is not an error: dictation never touches llama-server, and a user
+# who does not want a local assistant is right to have skipped 628 MB. It is
+# said out loud here because the alternative is finding out later, from a chat
+# panel reporting a path that means nothing to anybody.
+$ConciergeRuntime = "$SourceDir\app\llama\llama-server.exe"
+if (-not (Test-Path $ConciergeRuntime)) {
+    Write-Host ""
+    Write-Host "Note: the Concierge runtime is not in this folder." -ForegroundColor Yellow
+    Write-Host "  Dictation will work normally. The Concierge -- the local assistant that" -ForegroundColor Gray
+    Write-Host "  explains and changes your settings -- will not start without it." -ForegroundColor Gray
+    Write-Host "  To add it: download ptt_llama_runtime.zip from the same release and" -ForegroundColor Gray
+    Write-Host "  extract it into this folder, so that app\llama\ exists beside app\ptt\." -ForegroundColor Gray
+    Write-Host "  Then run this installer again." -ForegroundColor Gray
+    Write-Host ""
 }
 
 # 2. Create target directory if it doesn't exist
@@ -136,7 +158,8 @@ New-Item -ItemType Directory -Path $TargetDir -Force | Out-Null
 
 Copy-Item -Path "$SourceDir\.venv" -Destination "$TargetDir\.venv" -Recurse -Container -Force
 Copy-Item -Path "$SourceDir\app" -Destination "$TargetDir\app" -Recurse -Container -Force
-Copy-Item -Path "$SourceDir\run_tray.bat" -Destination "$TargetDir\run_tray.bat" -Force
+New-Item -ItemType Directory -Path "$TargetDir\_internal" -Force | Out-Null
+Copy-Item -Path "$SourceDir\_internal\run_tray.bat" -Destination "$TargetDir\_internal\run_tray.bat" -Force
 
 # 4a. Put back what was set aside in step 3.
 if ($PreservedModels) {
@@ -183,7 +206,7 @@ Write-Host "Creating Desktop shortcut..." -ForegroundColor Gray
 
 $WshShell = New-Object -ComObject WScript.Shell
 $Shortcut = $WshShell.CreateShortcut($ShortcutPath)
-$Shortcut.TargetPath = "$TargetDir\run_tray.bat"
+$Shortcut.TargetPath = "$TargetDir\_internal\run_tray.bat"
 $Shortcut.WorkingDirectory = "$TargetDir"
 $Shortcut.IconLocation = "C:\Windows\System32\mmres.dll,-3014"
 $Shortcut.Description = "Push-to-Talk Local GPU Dictation"
@@ -200,7 +223,7 @@ $StartupShortcutPath = "$StartupPath\PTT Dictation.lnk"
 Write-Host "Creating Startup shortcut (to run automatically on Windows login)..." -ForegroundColor Gray
 
 $StartupShortcut = $WshShell.CreateShortcut($StartupShortcutPath)
-$StartupShortcut.TargetPath = "$TargetDir\run_tray.bat"
+$StartupShortcut.TargetPath = "$TargetDir\_internal\run_tray.bat"
 $StartupShortcut.WorkingDirectory = "$TargetDir"
 $StartupShortcut.IconLocation = "C:\Windows\System32\mmres.dll,-3014"
 $StartupShortcut.Description = "Push-to-Talk Local GPU Dictation"

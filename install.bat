@@ -12,5 +12,5 @@ if %errorLevel% == 0 (
 :admin
 cd /d "%~dp0"
 echo Starting Push-to-Talk Dictation Installer (Elevated)...
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0install.ps1"
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0_internal\install.ps1"
 pause

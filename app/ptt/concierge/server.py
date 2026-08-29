@@ -534,6 +534,63 @@ def launch_args(exe, model, port, key_path, host="127.0.0.1",
     return args
 
 
+
+def cublas_directories():
+    """
+    Where the pinned cuBLAS lives, for `llama-server`'s DLL search.
+
+    **This is what lets the distribution be one download.** `ggml-cuda.dll`
+    statically imports `cublas64_12.dll` and `cublasLt64_12.dll`; llama.cpp's
+    own build ships 547 MB of them, and the application already carries a
+    pinned 735 MB copy for CTranslate2 (`nvidia-cublas-cu12==12.9.2.10` in
+    `requirements.txt`, which faster-whisper needs). Shipping both put the
+    archive over GitHub's 2 GiB asset limit, so `build_portable.py` ships only
+    one and this points llama-server at it.
+
+    Resolved by importing the `nvidia` namespace package rather than by
+    importing `ptt.transcribe`, which does the same job for CTranslate2 and
+    would drag faster-whisper into a module that has to run without it: the CLI
+    rig and every L1 test construct a `Server` with no model stack present at
+    all (CON-CG-6).
+
+    Returns whatever exists, in search order, and never raises. An empty list
+    is not an error here -- a developer tree with llama.cpp's own cuBLAS still
+    in place resolves it from the executable's own directory, which Windows
+    searches first.
+    """
+    directories = []
+    try:
+        import nvidia
+    except Exception:                                    # noqa: BLE001
+        return directories
+    for root in list(getattr(nvidia, "__path__", []) or []):
+        candidate = os.path.join(root, "cublas", "bin")
+        if os.path.isdir(candidate):
+            directories.append(candidate)
+    return directories
+
+
+def launch_env(directories=None, environ=None):
+    """
+    The child's environment: ours, with the cuBLAS directory ahead on `PATH`.
+
+    `PATH` rather than `add_dll_directory`, because the process that has to
+    find the library is `llama-server.exe` and not this one -- and a child
+    inherits an environment, not a DLL-directory list.
+
+    Ahead of the existing `PATH` rather than appended, so a stray cuBLAS
+    somewhere else on the machine cannot win. The executable's own directory is
+    still searched first by Windows, so a tree that does have llama.cpp's copy
+    keeps using it and this changes nothing.
+    """
+    environ = dict(os.environ if environ is None else environ)
+    directories = cublas_directories() if directories is None else list(directories)
+    if directories:
+        environ["PATH"] = os.pathsep.join(
+            directories + [environ.get("PATH", "")]).rstrip(os.pathsep)
+    return environ
+
+
 class Server:
     """
     One llama-server process, from launch to unload.
@@ -594,7 +651,14 @@ class Server:
             if self.process is not None:
                 return False, "the Concierge runtime is already running"
             if not os.path.exists(self.exe):
-                return self._fail(f"llama-server is not at {self.exe}")
+                # The runtime ships inside the distribution, so this is a
+                # broken installation rather than anything the user chose. The
+                # sentence says what to do; the path stays, because it is what
+                # an investigator needs and the panel body is selectable (#44).
+                return self._fail(
+                    f"the Concierge runtime is missing from this installation. "
+                    f"Reinstalling restores it -- your settings, notes and any "
+                    f"downloaded model are preserved. Looked for {self.exe}")
             if not os.path.exists(self.model):
                 return self._fail(f"the model file is not at {self.model}")
 
@@ -628,7 +692,7 @@ class Server:
             try:
                 self.process = self._spawn(
                     args, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
-                    creationflags=_no_window())
+                    creationflags=_no_window(), env=launch_env())
             except Exception as e:
                 log_exception("Concierge: llama-server would not start")
                 return self._fail(f"llama-server would not start: {str(e)}")

@@ -503,15 +503,23 @@ def test_a_machine_with_no_job_objects_still_starts_and_says_so(
 
 
 def test_a_missing_binary_fails_to_stopped_with_a_reason(tmp_path):
+    """
+    The runtime ships inside the distribution, so a missing binary is a broken
+    installation rather than anything the user chose. The reason says what to do
+    about it and still carries the path an investigator needs; the panel body is
+    selectable, which is why a long sentence is affordable here (#44).
+    """
     server = server_mod.Server(str(tmp_path / "nope.exe"), str(tmp_path / "m.gguf"),
                                state_path=str(tmp_path / "s.json"),
                                key_path=str(tmp_path / "k"),
                                probe=FakeProbe(), win32=FakeWin32(),
                                spawn=lambda *a, **k: FakeProcess())
     ok, reason = server.start()
-    assert ok is False and "llama-server is not at" in reason
-    assert server.machine.state == "stopped"
-
+    assert ok is False
+    assert server.machine.state == state_mod.STOPPED
+    assert "runtime is missing" in reason
+    assert "Reinstalling" in reason
+    assert "nope.exe" in reason
 
 def test_a_missing_model_fails_to_stopped_with_a_reason(tmp_path, paths_for):
     exe, _ = paths_for
@@ -683,3 +691,63 @@ def test_the_base_url_is_loopback(tmp_path, paths_for):
     server = make_server(tmp_path, paths_for)
     server.start()
     assert server.base_url().startswith("http://127.0.0.1:")
+
+
+# -- V-CG-141: the cuBLAS the runtime is no longer shipped with ---------------
+
+def test_the_launch_environment_puts_the_pinned_cublas_first():
+    """
+    **`V-CG-141`.** `ggml-cuda.dll` statically imports cuBLAS and the
+    distribution stopped carrying llama.cpp's copy, so the child has to find the
+    one pinned for CTranslate2. `PATH` and not `add_dll_directory`, because the
+    process that must find the library is `llama-server.exe`, and a child
+    inherits an environment rather than a DLL-directory list.
+
+    Prepended, so a stray cuBLAS elsewhere on the machine cannot win.
+    """
+    env = server_mod.launch_env(directories=[r"C:\cublas\bin"],
+                            environ={"PATH": r"C:\windows", "OTHER": "kept"})
+    assert env["PATH"] == r"C:\cublas\bin;C:\windows"
+    assert env["OTHER"] == "kept"
+
+
+def test_a_tree_with_no_pinned_cublas_is_left_alone():
+    """
+    An empty list is not an error. A developer tree that still has llama.cpp's
+    own cuBLAS beside `llama-server.exe` resolves it from the executable's own
+    directory, which Windows searches first, and this must not disturb that.
+    """
+    assert server_mod.launch_env(directories=[], environ={"PATH": "x"}) == {"PATH": "x"}
+
+
+def test_finding_the_cublas_directory_never_raises():
+    """It runs on every launch, and an import that fails is not a reason not to
+    start: the server may well find its libraries anyway."""
+    assert isinstance(server_mod.cublas_directories(), list)
+
+
+def test_the_child_is_spawned_with_that_environment(tmp_path, monkeypatch):
+    """
+    **`V-CG-141`.** The seam is only worth having if `start()` uses it. Without
+    the environment reaching the child, `ggml-cuda.dll` fails to load, llama.cpp
+    skips the backend without complaint and the server comes up on CPU -- which
+    still answers, four times slower, saying nothing (`V-M-96`).
+    """
+    exe, model = tmp_path / "llama-server.exe", tmp_path / "m.gguf"
+    exe.write_text("x", encoding="utf-8")
+    model.write_text("x", encoding="utf-8")
+    seen = {}
+
+    def spawn(args, **kwargs):
+        seen.update(kwargs)
+        return FakeProcess()
+
+    monkeypatch.setattr(server_mod, "launch_env",
+                        lambda: {"PATH": "sentinel", "KEPT": "1"})
+    server = server_mod.Server(str(exe), str(model),
+                               state_path=str(tmp_path / "s.json"),
+                               key_path=str(tmp_path / "k"),
+                               probe=FakeProbe(), win32=FakeWin32(), spawn=spawn)
+    ok, _reason = server.start()
+    assert ok, _reason
+    assert seen["env"] == {"PATH": "sentinel", "KEPT": "1"}

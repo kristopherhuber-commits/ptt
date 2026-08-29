@@ -73,9 +73,36 @@ LLAMA_RUNTIME_FILES = frozenset({
     "llama-common.dll", "ggml.dll", "ggml-base.dll", "libomp.dll", "mtmd.dll",
     # Loaded by ggml-base at runtime, so they appear in no import table.
     "ggml-cuda.dll",
-    # The separate cudart archive. Without these the executable does not start
-    # on a machine that has no CUDA toolkit -- which is every target PC.
-    "cudart64_12.dll", "cublas64_12.dll", "cublasLt64_12.dll",
+    # From the separate cudart archive. Without it the executable does not
+    # start on a machine that has no CUDA toolkit -- which is every target PC.
+    "cudart64_12.dll",
+    #
+    # **cuBLAS is deliberately absent, and that is what makes the distribution
+    # one download.** `ggml-cuda.dll` statically imports `cublas64_12.dll` and
+    # `cublasLt64_12.dll`, and llama.cpp's cuda-12.4 build brings its own copies
+    # -- 547.0 MB of them. The application already ships cuBLAS for a different
+    # consumer: `requirements.txt` pins `nvidia-cublas-cu12==12.9.2.10` for
+    # CTranslate2, which faster-whisper needs, and that copy is 735.5 MB. One
+    # distribution carrying 1.28 GB of the same library twice is what put the
+    # archive 42 MiB over GitHub's 2 GiB release-asset limit.
+    #
+    # Dropping llama.cpp's pair saves 382 MiB compressed and brings the archive
+    # to 1.668 GiB with 340 MiB to spare. `server.launch_env` puts the pinned
+    # `nvidia/cublas/bin` on llama-server's PATH so its statically-imported
+    # cuBLAS resolves there instead.
+    #
+    # **Measured, not assumed** (`V-M-96`). CUDA's minor-version compatibility
+    # says a 12.9 cuBLAS should serve a binary built against 12.4, and the
+    # experiment that settled it needed a control, because llama.cpp **skips a
+    # backend it cannot load and runs on CPU without complaint**: all three
+    # arms "started and generated tokens". VRAM and decode rate tell them
+    # apart -- 8395 MiB / 25.3 tok/s on its own cuBLAS, 0 MiB / 5.7 tok/s with
+    # none, and 8395 MiB / 25.7 tok/s on CTranslate2's.
+    #
+    # The cost is a coupling that did not exist before: two pins that were
+    # independent now have to move together. Both are pinned exactly, and
+    # `concierge_design.md` section 6's gate-zero step is where a change to
+    # either gets re-measured.
     # Licences. llama.cpp's own is fetched by `build_llama_runtime.py`; the
     # OpenMP one is in the binaries archive. The OFL precedent (`V-M-64`) is
     # that a bundled component's licence file travels with it.
@@ -87,6 +114,26 @@ LLAMA_RUNTIME_FILES = frozenset({
 #: this machine picked would tie the distribution to the build machine's CPU.
 #: All fourteen cost 17 MB.
 LLAMA_RUNTIME_PATTERNS = ("ggml-cpu-*.dll",)
+
+#: One archive, and the reason it is one.
+#:
+#: A GitHub release asset must be under 2 GiB ("Each file included in a release
+#: must be under 2 GiB", GitHub's own docs). With llama.cpp's own cuBLAS in it
+#: the archive was 2.041 GiB, and the session that found that briefly split the
+#: distribution in two along `app/llama/`. That was the wrong answer to the
+#: right problem: a user extracts a zip, looks for something called install and
+#: double-clicks it -- a second download they have to know about is a step most
+#: people will not take, and the ones who skip it get an application whose
+#: assistant does not work, for reasons they never read.
+#:
+#: It fits in one piece because it stopped shipping cuBLAS twice; see
+#: `LLAMA_RUNTIME_FILES`. 1.67 GiB, with 340 MiB of headroom.
+DISTRIBUTION_ARCHIVE = "ptt_dictate_dist.zip"
+
+#: GitHub's per-asset limit, checked against the finished archive. Not a
+#: splitter -- a refusal. An archive 40 MB too big is not discovered by building
+#: it; it is discovered at the end of a 2 GB upload, on release day.
+MAX_ASSET_BYTES = 2 * 1024 ** 3
 
 #: What the archive must contain for the Concierge to start at all. Checked
 #: before zipping, and a failure stops the build: a distribution whose
@@ -305,8 +352,8 @@ def main():
         print(f"Error: could not build the knowledge pack: {e}")
         return
 
-    # 7. Package everything into ptt_dictate_dist.zip
-    zip_name = "ptt_dictate_dist.zip"
+    # 7. Package everything into the two archives.
+    zip_name = DISTRIBUTION_ARCHIVE
     if os.path.exists(zip_name):
         print(f"Removing old {zip_name}...")
         os.remove(zip_name)
@@ -315,9 +362,8 @@ def main():
     items_to_zip = [
         ".venv",
         "app",
-        "run_tray.bat",
+        "_internal",
         "install.bat",
-        "install.ps1",
         "README.md"
     ]
 
@@ -353,16 +399,19 @@ def main():
 
     # 8. Audit the finished archive. The two checks above are about the source
     # tree; this one is about the artefact that leaves the building, which is
-    # the only thing a user ever sees. Both properties it asserts have already
-    # gone wrong once each in this project's history -- a licence file that was
-    # meant to travel with its component (`V-M-64`), and a weights directory
-    # that `os.walk` packed because nothing told it not to (Q27).
+    # the only thing a user ever sees. Four of the properties it asserts have
+    # already gone wrong once each in this project's history -- a licence file
+    # that was meant to travel with its component (`V-M-64`), a weights
+    # directory that `os.walk` packed because nothing told it not to (Q27), an
+    # asset too large for the release meant to carry it, and a root folder
+    # offering the user two files both displayed as `install`.
     print("Auditing the archive...")
     with zipfile.ZipFile(zip_name) as zipf:
         names = set(n.replace("\\", "/") for n in zipf.namelist())
     prefix = "/".join(LLAMA_RUNTIME_DIR) + "/"
-    problems = [f"{prefix}{name} is not in the archive" for name in LLAMA_REQUIRED
-                if prefix + name not in names]
+
+    problems = [f"{prefix}{name} is not in the archive"
+                for name in LLAMA_REQUIRED if prefix + name not in names]
     problems += [f"{name} is in the archive and must never be"
                  for name in sorted(names)
                  if name.lower().endswith(".gguf")
@@ -370,17 +419,40 @@ def main():
                                                 "concierge_key")]
     if not any(n.endswith("app/assets/concierge_kb.md") for n in names):
         problems.append("app/assets/concierge_kb.md is not in the archive")
+    for required in ("install.bat", "_internal/install.ps1",
+                     "_internal/run_tray.bat"):
+        if required not in names:
+            problems.append(f"{required} is not in the archive")
+
+    # Exactly one thing in the root may look clickable. Windows hides known
+    # extensions by default, so `install.bat` and `install.ps1` side by side
+    # both render as `install`, and the user picks by icon.
+    offered = sorted(n for n in names if "/" not in n
+                     and n.lower().endswith((".exe", ".bat", ".cmd", ".com")))
+    if offered != ["install.bat"]:
+        problems.append(f"the archive root offers {offered}; it must offer "
+                        f"exactly ['install.bat']")
+
+    size = os.path.getsize(zip_name)
+    if size >= MAX_ASSET_BYTES:
+        problems.append(
+            f"the archive is {size / 1024 ** 3:.3f} GiB, over GitHub's 2 GiB "
+            f"per-asset limit by {(size - MAX_ASSET_BYTES) / 1048576:.1f} MiB")
+
     if problems:
         for problem in problems:
             print(f"  {problem}")
         print(f"Error: {zip_name} failed its own audit and is not fit to ship.")
         return
-    print(f"  {len(names)} entries; runtime, licences and knowledge pack "
-          f"present; no weights, no per-launch state")
+    print(f"  {len(names)} entries, {size / 1024 ** 3:.3f} GiB "
+          f"({100 * size / MAX_ASSET_BYTES:.0f} % of GitHub's asset limit); "
+          f"runtime, licences and knowledge pack present; no weights, no "
+          f"per-launch state; one executable in the root")
 
     print(f"\nSuccess! Created ready-to-distribute package: {zip_name}")
-    print(f"Total size: {os.path.getsize(zip_name) / (1024*1024):.2f} MB")
+    print(f"Total size: {size / (1024*1024):.2f} MB")
     print(f"Total files zipped: {count}")
+
 
 if __name__ == "__main__":
     main()

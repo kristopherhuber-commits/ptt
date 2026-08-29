@@ -14,6 +14,7 @@ unit-testable without a `QApplication`.
 
 import builtins
 import importlib
+import inspect
 import os
 import sys
 
@@ -291,7 +292,9 @@ def test_the_cuda_runtime_dlls_ship_and_the_archives_they_came_in_do_not():
 
     The `cudart-*` archive is separate from the binaries archive, and a build
     that ships only the second produces an executable that will not start on a
-    machine with no CUDA toolkit -- which is every target PC.
+    machine with no CUDA toolkit -- which is every target PC. cuBLAS arrives
+    from the CTranslate2 wheels instead and is `V-CG-141`'s business; `cudart`
+    has no second source and still ships.
 
     And `fetch.bundle_llama_runtime` leaves both downloaded zips **inside the
     destination directory**, which is `app/llama/`. Without a rule they are
@@ -299,8 +302,7 @@ def test_the_cuda_runtime_dlls_ship_and_the_archives_they_came_in_do_not():
     """
     build = build_module()
 
-    for name in ("cudart64_12.dll", "cublas64_12.dll", "cublasLt64_12.dll"):
-        assert build.should_skip("app", LLAMA, name) is None, name
+    assert build.should_skip("app", LLAMA, "cudart64_12.dll") is None
 
     for name in ("llama-b10621-bin-win-cuda-12.4-x64.zip",
                  "cudart-llama-bin-win-cuda-12.4-x64.zip"):
@@ -380,7 +382,83 @@ def test_the_licence_fetch_refuses_to_run_in_the_shipped_app():
 
 
 def installer_text():
-    return open(os.path.join(REPO, "install.ps1"), encoding="utf-8").read()
+    return open(os.path.join(REPO, "_internal", "install.ps1"),
+                encoding="utf-8").read()
+
+
+def test_the_root_of_the_distribution_offers_one_executable():
+    """
+    **`V-CG-140`.** Windows hides known extensions by default -- `HideFileExt`
+    is `1` on a stock install -- so `install.bat` and `install.ps1` side by side
+    both render as `install`, and the user chooses by icon. The distribution's
+    root therefore offers exactly one thing that looks clickable, and the
+    helpers live in `_internal/`.
+
+    Checked against the source tree rather than a built archive so it runs in
+    L1; `build_portable.py` asserts the same property over the finished zip,
+    which is the artefact that matters.
+    """
+    executable = (".exe", ".bat", ".cmd", ".com")
+    offered = sorted(n for n in os.listdir(REPO)
+                     if os.path.isfile(os.path.join(REPO, n))
+                     and n.lower().endswith(executable))
+    assert offered == ["install.bat"], offered
+
+    helpers = os.path.join(REPO, "_internal")
+    assert os.path.isfile(os.path.join(helpers, "install.ps1"))
+    assert os.path.isfile(os.path.join(helpers, "run_tray.bat"))
+
+
+def test_the_installer_and_launcher_reach_out_of_their_own_directory():
+    """
+    **`V-CG-140`.** Both helpers moved one level down, so both have to climb
+    back up. `install.ps1` installs its *parent*, and `run_tray.bat` launches
+    an interpreter that lives beside `app/`, not beside itself.
+    """
+    assert "$SourceDir = Split-Path $PSScriptRoot -Parent" in installer_text()
+
+    launcher = open(os.path.join(REPO, "_internal", "run_tray.bat"),
+                    encoding="utf-8").read()
+    assert 'cd /d "%~dp0.."' in launcher
+
+    entry = open(os.path.join(REPO, "install.bat"), encoding="utf-8").read()
+    assert "_internal\\install.ps1" in entry
+
+    # And the shortcuts the installer writes have to point at the new location,
+    # or every Desktop icon on an upgraded machine targets a file that moved.
+    text = installer_text()
+    assert text.count('$TargetDir\\_internal\\run_tray.bat') >= 3
+
+
+def test_cublas_is_not_shipped_twice():
+    """
+    **`V-CG-141`, and it is what makes the distribution one download.**
+
+    `ggml-cuda.dll` statically imports `cublas64_12.dll` and
+    `cublasLt64_12.dll`; llama.cpp's cuda-12.4 build carries its own 547 MB of
+    them, and `requirements.txt` already pins `nvidia-cublas-cu12` for
+    CTranslate2 at 735 MB. Shipping both put the archive 42 MiB over GitHub's
+    2 GiB release-asset limit.
+
+    `V-M-96` measured that llama-server runs on the pinned copy -- 8395 MiB of
+    VRAM and 25.7 tok/s against 8395 MiB and 25.3 tok/s on its own, where a
+    server with **no** cuBLAS silently falls back to CPU at 5.7 tok/s and still
+    answers, which is why that measurement needed a control.
+    """
+    build = build_module()
+
+    for name in ("cublas64_12.dll", "cublasLt64_12.dll"):
+        assert name not in build.LLAMA_RUNTIME_FILES
+        assert build.should_skip("app", LLAMA, name)
+    # cudart is a different library and still ships: nothing else provides it.
+    assert build.should_skip("app", LLAMA, "cudart64_12.dll") is None
+    assert build.should_skip("app", LLAMA, "ggml-cuda.dll") is None
+
+    requirements = open(os.path.join(REPO, "requirements.txt"),
+                        encoding="utf-8").read()
+    assert "nvidia-cublas-cu12==" in requirements, (
+        "llama-server now resolves cuBLAS from the CTranslate2 wheels, so an "
+        "unpinned version would move that library underneath it")
 
 
 def ps_list(name):

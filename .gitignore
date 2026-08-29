@@ -85,3 +85,5 @@ tests/tools/runs/
 # the repository is a check that cannot run on a fresh clone. Same argument as
 # `!spike/*.py` above and as the note about concierge_kb.md.
 !tests/tools/seeds/*.log
+tests/tools/.cublas/
+tests/tools/.rig/
