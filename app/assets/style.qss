@@ -1047,3 +1047,68 @@ QFrame#conciergeArchiveHead {
     background: #e9e9ea;
     border-bottom: 1px solid rgba(29, 31, 32, 0.16);
 }
+
+
+/* -- the four gate pages (v3.0 session 4) ------------------------------
+   The opt-in card, the download card and the two "there is no chat here"
+   cards. Every value below already appears above; the only new selector
+   shapes are the card body and the residency slider, and both are built
+   from tokens the panel already uses.
+
+   `conciergeCardBody` is 13px rather than the 12px of `conciergeSection-
+   Note` because these are the one place in the panel where a paragraph
+   is the content rather than an annotation on a control -- a first-run
+   card set in note-size type reads as small print, which is the last
+   thing an opt-in prompt should look like.
+   -------------------------------------------------------------------- */
+
+QWidget#conciergeOptInPage, QWidget#conciergeDownloadPage,
+QWidget#conciergeBlockedPage, QWidget#conciergeSettingsPage {
+    background: #f2f2f3;
+}
+
+QLabel#conciergeCardBody {
+    color: #1d1f20;
+    font-size: 13px;
+}
+
+/* Determinate, unlike `conciergeBusy`: the pinned spec carries the exact
+   size, so the download always knows how far along it is. Same amber, so
+   the two read as the same application working. */
+QProgressBar#conciergeDownloadBar {
+    background: #e9e9ea;
+    border: none;
+}
+
+QProgressBar#conciergeDownloadBar::chunk {
+    background: #f59e0b;
+}
+
+/* The one slider in the application. Square, like everything else: the
+   handle is a 10px block, not a knob. */
+QSlider#conciergeResidency::groove:horizontal {
+    background: #d4d4d7;
+    height: 2px;
+}
+
+QSlider#conciergeResidency::sub-page:horizontal {
+    background: #5980a6;
+    height: 2px;
+}
+
+QSlider#conciergeResidency::handle:horizontal {
+    background: #1d2d3d;
+    border: none;
+    width: 10px;
+    margin: -7px 0px;
+}
+
+QSlider#conciergeResidency::handle:horizontal:hover {
+    background: #5980a6;
+}
+
+QLabel#conciergeResidencyValue {
+    color: #1d1f20;
+    font-family: Consolas, "Courier New", monospace;
+    font-size: 12px;
+}

@@ -38,6 +38,7 @@ from PySide6.QtWidgets import (
     QTabWidget, QVBoxLayout, QWidget,
 )
 
+from ptt import config
 from ptt.ui.panels import InstantApplyPanel
 from ptt.ui.panels.advanced import AdvancedPanel
 from ptt.ui.panels.audio import AudioPanel
@@ -82,6 +83,30 @@ def restored_width(before, current, panel_width=CONCIERGE_WIDTH,
     """
     manual = current - (before + panel_width)
     return max(before + manual, minimum)
+
+
+def should_offer_concierge(already_offered, opt_in):
+    """
+    Whether to expand the Concierge panel unasked. Pure, for `restored_width`'s
+    reason: this is the half of the behaviour that can be checked without a
+    screen, and it is the more consequential half.
+
+    **This is a deliberate amendment to `concierge_handoff.md` 8.1**, which says
+    the opt-in card appears at the first *app launch* after the upgrade.
+    `install.ps1` puts a shortcut in the Startup folder, so "app launch" is
+    "login" on most installations, and a settings window arriving over whatever
+    the user is doing at login would be the first thing every upgrading v2.0
+    user saw -- which is what FR-CG-6's "strictly optional" is written against.
+
+    So the offer is made inside a window the user opened themselves, once per
+    run, and it is one click to decline. The tray's `Concierge...` and the tab
+    strip's button reach the same card at any time, which keeps "prompt once" a
+    promise about frequency rather than about timing.
+
+    `unset` and nothing else: `accepted` needs no offer and `declined` is the
+    answer that means never again.
+    """
+    return not already_offered and opt_in == config.OPT_IN_UNSET
 
 
 class SettingsWindow(QMainWindow):
@@ -141,6 +166,9 @@ class SettingsWindow(QMainWindow):
         #: The window's width the last time the panel was expanded, so closing
         #: it gives the pixels back. See `set_concierge_visible`.
         self._width_before_concierge = None
+        #: Whether the first-run offer has been made in this run. See
+        #: `offer_concierge_once`.
+        self._offered_concierge = False
 
         self._split = QSplitter(Qt.Orientation.Horizontal)
         self._split.setObjectName("conciergeSplitter")
@@ -337,6 +365,20 @@ class SettingsWindow(QMainWindow):
         self._saved_timer.start()
 
     # -- lifecycle ----------------------------------------------------------
+
+    def offer_concierge_once(self, opt_in):
+        """
+        Expand the panel the first time this window is opened un-answered.
+
+        Returns whether it expanded, so the caller can tell a first run from a
+        later one without asking a widget. The decision is
+        `should_offer_concierge`; this is the half that needs a screen.
+        """
+        if not should_offer_concierge(self._offered_concierge, opt_in):
+            return False
+        self._offered_concierge = True
+        self.set_concierge_visible(True)
+        return True
 
     def show_and_raise(self):
         self.show()

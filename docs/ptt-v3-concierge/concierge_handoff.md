@@ -223,19 +223,90 @@ alongside `config.json` and `debug_log.txt`.
 - The panel shows `loading` until the knowledge-pack prefix is warm (design §5/§8):
   `ready` means the first message will be fast.
 
+### 7.1 The five things the panel can be showing (rev. session 4)
+
+A chat is one of them. `gate_for(state, opt_in, enabled)` decides which, and its
+**precedence order is the decision**: `disabled` → `opt in` → `off` → `download` → `chat`.
+
+| Gate | When | What is on screen |
+|---|---|---|
+| `disabled` | no CUDA device (FR-CG-12) | A card naming the hardware fact, the consequence and the Diagnostics tab — criterion v2-7's pattern, which is a shape rather than a wording. **No button**: a card that can offer nothing offers nothing |
+| `opt in` | `concierge.opt_in` is `unset` | The first-run card (§8) |
+| `off` | declined, or accepted and `concierge.enabled: false` | The same page as `disabled`, with a `Turn the Concierge on` button that writes **both** keys, because either can be the reason |
+| `download` | `not_downloaded` or `downloading` | The download card (§8), determinate bar |
+| `chat` | everything else | §7 above |
+
+**No-CUDA beats the opt-in card**, so a machine that cannot run the Concierge is never
+asked and its `opt_in` stays `unset`, truthfully. **The opt-in card beats the download
+card**, because a Download button is not a question.
+
+`concierge_switched_on(opt_in, enabled)` in `config.py` is the one place the pair is
+interpreted, and `unset` is **off** there: the card is reachable because the gate tests
+`unset` first, not because the switch permits anything (`development_history.md` #42).
+
+The user's own pages — the memory note, a saved transcript, the Concierge's settings —
+sit **on top of** whichever gate is current and are not closed by a state change; their
+`Back` returns to the gate rather than to the chat specifically.
+
+### 7.2 The Concierge's own settings page (session 4)
+
+Reached from the header's `…` menu. It holds what `concierge_narrative.md` already told
+the user lives "on this panel", none of which had a control before session 4:
+
+- **The residency slider, 0–30** (FR-CG-8), bounded by `config.FIELDS`' own minimum and
+  maximum rather than by two literals. `0` reads `unloads as soon as this panel is
+  closed`, never "after 0 minutes" — the event is different, not shorter. The write waits
+  for the drag to settle and is guarded against the FR-CG-2 broadcast writing it back
+  (#47); `Server.start_idle_timer` re-reads the value every tick, so it applies to a
+  running server with no restart.
+- **`Delete model (6.87 GB)`**, the same confirmed action as the menu's (Q25).
+- **`Switch the Concierge off`**, writing `concierge.enabled`. Added because the off card
+  claims it and because `FIELDS` documents the key to the user through the knowledge
+  pack, while the only way to set it was to ask the Concierge — the same gap the
+  residency slider had. Switching off stops the runtime **immediately** rather than at
+  the residency timer, and leaves the weights alone.
+
 ## 8. First run and download (5b)
 
-1. First app launch after upgrade shows the opt-in card once. Decline = nothing ever
-   again except the menu entries.
-2. Accept (or first later open) starts the GGUF download with a progress bar in the
-   panel; resumable; dictation unaffected. **The pinned SHA-256 (§1) is the authority**;
-   the HF tree API's LFS `oid` is fetched first and compared against it, so a re-uploaded
-   file is refused with a clear message rather than silently accepted (FR-CG-7, Q26). A
-   refusal is a re-qualification event, not something the user can click past.
+1. **The opt-in card is shown once, in a settings window the user opened themselves**
+   (rev. session 4). Decline = nothing ever again except the menu entries.
+
+   *Amended from "first app launch after upgrade".* `install.ps1` writes a Startup-folder
+   shortcut, so "app launch" is "login" on most installations, and a settings window
+   arriving over whatever somebody is doing at login would be the first thing every
+   upgrading v2.0 user saw — which is what FR-CG-6's "strictly optional" is written
+   against. So `should_offer_concierge` expands the panel the first time this run that
+   the settings window is opened with `opt_in: unset`, and the tray's `Concierge…` and
+   the tab strip's button reach the same card at any time. "Prompt once" stays a promise
+   about frequency; it was never a promise about timing.
+
+2. Accept (or a later open with no weights on disk) starts the GGUF download with a
+   progress bar in the panel; resumable; dictation unaffected. **The pinned SHA-256 (§1)
+   is the authority**; the HF tree API's LFS `oid` is fetched first and compared against
+   it, so a re-uploaded file is refused with a clear message rather than silently
+   accepted (FR-CG-7, Q26). A refusal is a re-qualification event, not something the user
+   can click past — the card carries **no button at all** in that state, hidden *and*
+   disabled, and the latch is never cleared within the run (#46).
+
+   Four outcomes, and they are reported as four (session 4): **done** starts the runtime;
+   **paused** says nothing, because the user paused it, and leaves the `.part` file the
+   next launch resumes from; **refused** latches; **failed** is a notice and stays
+   retryable, because a dropped connection is worth retrying and a substituted file is
+   not. `Delete model` and a refusal both clear `auto_download`, so neither is undone by
+   reopening the panel (#45).
+
 3. When ready, the Concierge greets with the guided setup: microphone check → hotkey
    choice → model choice with an offer to run the benchmark against
    `benchmark_sample.wav` → done. Each step is ordinary conversation backed by the same
    tools, not a separate wizard UI.
+
+   **How it is triggered (session 4).** `system_prompt.md` runs the four steps *only when
+   the person asks to be set up or says they are new*, so the trigger is a **real user
+   message** in the transcript — `SETUP_KICKOFF` — sent once, to whoever accepted the
+   card in this run, after the download finishes and the runtime is asked to start. It is
+   session-scoped: `opt_in` is persisted the instant the card is answered, so a relaunch
+   does not re-run a setup the user has been through. `Guided setup` in the header menu
+   is how anybody asks for it again.
 
 ## 9. Acceptance criteria
 

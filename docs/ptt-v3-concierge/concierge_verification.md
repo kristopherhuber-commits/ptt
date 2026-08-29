@@ -12,7 +12,7 @@ below.
 
 | Layer | What | Runs | Hardware |
 |---|---|---|---|
-| L1 | Unit suite: loop mechanics against a fake HTTP layer; **both** `tool_mode` paths generated from one registry, including the streaming `tool_calls` delta accumulator (Q15); the two-level union schema (Q12); truncation-repair routing (`finish_reason: "length"` never parses as a valid decision); **the 16 KiB fetch-time result cap (Q16)**; **§5.0's five trimming rules, one test each, including that a trim is logged (Q16b)**; **the three timeouts — stall, turn, server-ready (Q18)**; state machine; undo journal **including `update_memory` and reverse-order session restore (Q22, Q24)**; dispatch refusal through `Settings.set()` **and the `FIELDS` table's three consumers (Q9)**; **job-object assignment and the state-file + `/props` reap (Q10, Q11)**; resume logic against a fake range server **plus the `oid`-vs-pin comparison (Q26)**; pack prewarm / cache-persistence logic; **pack digest-manifest and budget tests (Q20)**; **`get_state()`'s declared key list (Q26)**; Qt-absence import test; **the panel's view model and the thread adapter (session 3)** — row suppression and refusal rendering, the `THREAD-CHECK` audit keyed by signal *and* thread, `state_snapshot` filling the declared keys, and the `settings_applied` hop firing on a write and not on a refusal | `pytest`, with the existing suite, ~seconds | none |
+| L1 | Unit suite: loop mechanics against a fake HTTP layer; **both** `tool_mode` paths generated from one registry, including the streaming `tool_calls` delta accumulator (Q15); the two-level union schema (Q12); truncation-repair routing (`finish_reason: "length"` never parses as a valid decision); **the 16 KiB fetch-time result cap (Q16)**; **§5.0's five trimming rules, one test each, including that a trim is logged (Q16b)**; **the three timeouts — stall, turn, server-ready (Q18)**; state machine; undo journal **including `update_memory` and reverse-order session restore (Q22, Q24)**; dispatch refusal through `Settings.set()` **and the `FIELDS` table's three consumers (Q9)**; **job-object assignment and the state-file + `/props` reap (Q10, Q11)**; resume logic against a fake range server **plus the `oid`-vs-pin comparison (Q26)**; pack prewarm / cache-persistence logic; **pack digest-manifest and budget tests (Q20)**; **`get_state()`'s declared key list (Q26)**; Qt-absence import test; **the panel's view model and the thread adapter (session 3)**; **the gate, the download card and the first-run controller (session 4)** — row suppression and refusal rendering, the `THREAD-CHECK` audit keyed by signal *and* thread, `state_snapshot` filling the declared keys, and the `settings_applied` hop firing on a write and not on a refusal | `pytest`, with the existing suite, ~seconds | none |
 | L2 | Model qualification suite (41 scenarios, `concierge_design.md` §6) through the CLI rig against a real llama-server + candidate GGUF. **Built in session 2**: `tests/tools/scenarios.yaml` (41, as data), `qualify.py` (the runner), `scoring.py` (the checks), `seeds/` (the seeded logs), all over the shared bench `rig.py` the CLI rig uses, so the prompt is iterated through exactly the wiring the suite scores. Every scorecard records the SHA-256 of the frozen prompt and the pack (Q17, Q20) | by hand per candidate; results appended to `model_qualification.md` | GPU |
 | L3 | Integrated manual sessions in the app (V-M numbering continues) | by hand | GPU + full app |
 
@@ -27,15 +27,15 @@ closed by narrowing a requirement.
 | FR-CG-1 | D-CG-4 (context), **§5.05 two-part pack** | L1 digest manifest + budget; L2 explanation class; L3 | **L1 ✅** `V-CG-69`…`V-CG-78`. **Pack amended and re-scored in session 3**: hand testing found the Concierge inventing a restart requirement for a model switch because nothing in the pack said that changing `model` *is* loading it. Two sentences in `config.FIELDS`; digest `129c5a31d17f` → `76a281c8a388`; the qualified configuration re-scored twice at **106/123**, the gate's own total (`model_qualification.md`) |
 | FR-CG-2 | D-CG-5 dispatch → **`Settings.set()`** → queued settings-changed → `refresh_panels()` | L1 dispatch + the worker→GUI hop; L2 write class; L3 | **L1 ✅** dispatch `V-CG-13`, `V-CF-16`; **the queued hop `V-CG-120` (session 3)** — emitted on a write, not on a refusal, and `apply_now` unreachable from the adapter. **L3 ✅ (§3.1)**: a Concierge write reaches the banner, the Model tab and the tray menu without a restart |
 | FR-CG-3 | D-CG-5 undo journal, **incl. `update_memory` and reverse-order restore** | L1; L3 | **L1 ✅** `V-CG-40`…`V-CG-45`; **the chips and `↺ session` `V-CG-106`, `V-CG-121` (session 3)** — a refused undo stays pending, a restore touches only journalled keys |
-| FR-CG-4 | system prompt setup flow | L2 dialogue scenario; L3 | prompt drafted (`V-CG-38`); **L2 scenario written** (session 2) — `sel-11`, the only multi-turn scenario in the file, scored with `dialogue_tools` because "one at a time, waiting for an answer" is a shape no single turn can show. L3 still owed |
+| FR-CG-4 | system prompt setup flow | L2 dialogue scenario; L3 | prompt drafted (`V-CG-38`); **L2 scenario written** (session 2) — `sel-11`, the only multi-turn scenario in the file, scored with `dialogue_tools` because "one at a time, waiting for an answer" is a shape no single turn can show. **Session 4 wired the trigger**: `SETUP_KICKOFF`, a real user message, sent once to whoever accepted the first-run card, after the download finishes and the runtime is asked to start; `Guided setup` in the header menu asks for it again. `V-CG-132`. L3 still owed |
 | FR-CG-5 | `read_log` tool, **both files (Q21)** | L1 previous-log inclusion + shared budget; L2 log-diagnosis class (seeded fake logs) | **L1 ✅** `V-CG-17` |
-| FR-CG-6 | additive integration | L3: all ten v2.0 criteria re-run | v2.0's 333 tests still green inside 607 |
-| FR-CG-7 | D-CG-6 fetch (**pin as authority, tree `oid` as pre-download cross-check**; `nightly-tag.txt` resolution at build time only) | L1 resume/hash + `oid`-mismatch refusal; L3 kill-and-relaunch | **L1 ✅** `V-CG-56`…`V-CG-68` |
-| FR-CG-8 | D-CG-1 idle timer | L1 timer logic; L3 nvidia-smi observation | **L1 ✅** `V-CG-54`. **L3 ✅ (session 3, §3.1)**: the timer fires with the panel open and the panel survives it; residency 0 unloads on panel close; a send restarts a stopped runtime |
+| FR-CG-6 | additive integration, **the tri-state gate** | L3: all ten v2.0 criteria re-run; **L1 the gate** | v2.0's 333 tests still green inside 837. **L1 ✅ (session 4)** `V-CG-125`, `V-CG-130`, `V-CG-132`, `V-CG-133`: `unset`, `declined` and `enabled: false` each start no runtime and no download, the panel and the adapter read one rule (`config.concierge_switched_on`), and the first-run offer is made once per run inside a window the user opened — the amendment to handoff §8.1, argued there |
+| FR-CG-7 | D-CG-6 fetch (**pin as authority, tree `oid` as pre-download cross-check**; `nightly-tag.txt` resolution at build time only) | L1 resume/hash + `oid`-mismatch refusal; **L1 the panel's four outcomes**; L3 kill-and-relaunch | **L1 ✅** `V-CG-56`…`V-CG-68`. **Session 4 wired it to the panel**: `V-CG-126`, `V-CG-129`, `V-CG-131` — progress on two channels (the state machine's detail and a byte-carrying signal, throttled, last chunk never dropped); a cancellation that keeps its `.part` file so app exit during a transfer is a pause rather than 6.87 GB lost; and the refusal latched, stated in short digests the 360 px panel can actually fit, with **no button at all** — hidden *and* disabled, because a hidden `QPushButton` still takes a `click()` (#44, #46) |
+| FR-CG-8 | D-CG-1 idle timer | L1 timer logic; L3 nvidia-smi observation | **L1 ✅** `V-CG-54`. **L3 ✅ (session 3, §3.1)**: the timer fires with the panel open and the panel survives it; residency 0 unloads on panel close; a send restarts a stopped runtime. **Session 4 built the control** — a 0–30 slider on the Concierge panel's settings page, bounded by `FIELDS`' own minimum and maximum, guarded against the FR-CG-2 broadcast writing it back (#47). `V-CG-128`, `V-CG-132` |
 | FR-CG-9 | D-CG-1 **job object (§8.1)** + state-file reap | L1 reap logic; **L3 exit, `TerminateProcess`, and Task-Manager-kill process audits** | **L1 ✅** `V-CG-48`…`V-CG-53`. **Session 3 wired the reap**: `server.reap_orphan` was built in session 1 and called by nothing, so v3-7's fourth audit had no code path; `ConciergeController` now runs it at **app** startup on its own thread — not on panel open, since an orphan holds ~9.4 GB and "until you next open the chat panel" is not a bound. Pinned structurally by `V-CG-124`. **L3, one of v3-7's four audits (§3.1)**: `Stop-Process -Force` on the app killed `llama-server` immediately — the job object, which is the case no Python can cover. Clean exit and the simulated orphan still owed |
 | FR-CG-10 | no network paths besides fetch, **enumerated host allowlist**; keyed loopback listener | L1 (socket monkeypatch asserts the exact allowlist); L3 offline run | **L1 ✅** `V-CG-56`, `V-CG-66`, `V-CG-67` |
 | FR-CG-11 | **D-CG-13 `Settings.set()`** + D-CG-3 repair loop (incl. truncation class) | L1 forced-rejection at write time + forced-truncation; L2 refusal class; **L1 the panel renders it as a refusal** | **L1 ✅** `V-CF-15`, `V-CF-16`, `V-CG-13`, `V-CG-25`, `V-CG-36`; **`V-CG-102` (session 3)** — a refused `set_config` **and** a refused `update_memory` render as refusals, including one arriving straight after a chip |
-| FR-CG-12 | state machine `disabled` | L1; L3 on non-CUDA machine (same gap as criterion 7) | **L1 ✅** `V-CG-02` |
+| FR-CG-12 | state machine `disabled`, **and the card that says why** | L1; L3 on non-CUDA machine (same gap as criterion 7) | **L1 ✅** `V-CG-02`; **`V-CG-125`, `V-CG-127`, `V-CG-130` (session 4)** — `disabled` outranks every other gate, so such a machine is never asked to opt in and never offered the download; the card names the hardware fact, the consequence and the Diagnostics tab, and carries no button |
 | FR-CG-13/14 | D-CG-11 session model | L1: fresh-context assembly, **mutable note last in the prefix**, note cap, note round-trip, **`.prev` round-trip**; **L1 the saved-transcript store and the note viewer** | **L1 ✅** `V-CG-18`, `V-CG-30`, `V-CG-34`; **`V-CG-110`…`V-CG-114`, `V-CG-122` (session 3)** |
 | NFR-CG-1/2 | runtime + load path + §5 pack-cost resolution | L2 measured, numbers recorded | **C6 measured**: persistence does not work; the prewarm path measures 9.1–12.1 s to genuinely ready, inside [15 s]. NFR-CG-1 re-confirmed at 0.693 s. **Session 3 re-measured through the Qt adapter** rather than the rig — the shipped path, real server, real GGUF: **11.6 s to `ready`**, then 2.1 s for a grounded answer and 1.9 s for a turn that wrote a setting |
 | NFR-CG-3/4 | residency design | L3 before/after latency **in both the resident-idle and actively-generating states** + VRAM measurement | unchanged; owed at L3 |
@@ -66,7 +66,9 @@ sessions 2–4 extend it rather than renumbering it.
 | `V-CG-109b` (session 3) | handoff §7 — the panel's width | Collapsing the panel returns the window to the width it had before it was expanded; a resize the user made while it was open survives the close; the restored width never goes below `MINIMUM_SIZE`. Pure arithmetic (`qt_window.restored_width`), because the rest of the geometry needs a screen | `test_concierge_panel.py` |
 | `V-CG-110`…`V-CG-114` (session 3) | FR-CG-13 — saved transcripts | Save, list and load round-trip; the newest first; `history_limit` honoured and **read at every save rather than captured**; re-saving one session replaces it rather than leaving two halves; an unreadable or wrongly-shaped file reads as empty and logs the reason; an oversized transcript is trimmed from the oldest end and says in the transcript that it was; rename, delete, and a store whose directory does not exist yet | `test_concierge_panel.py` |
 | `V-CG-115`…`V-CG-124` (session 3) | design §2 (rev.), Q26 — the thread adapter | The adapter imports from `PySide6.QtCore` and nothing else in PySide6, and never calls `apply_now`; **`state_snapshot` supplies exactly the keys `tools.STATE_KEYS` declares** — the Qt half of Q26's seam, with a mutation adding a key proving it is derived and not written out; `RELOAD_KEYS` equals the set of fields the panels pass `reload_model=True` for, read out of their call sites by `ast`; `THREAD-CHECK` logs once per signal and **again for the same signal from a second thread**, which is the only way v3-10's idle-timer hop can be shown; a successful `set_config` emits `settings_applied` and a refused one emits nothing; both writing tools record a chip; an undo re-broadcasts; a session restore reports every change and touches only journalled keys; the note is republished on every write and `.prev` restore swaps rather than one-way-doors; deleting the model removes the `.part` file too and returns the machine to `not_downloaded`; the benchmark handshake refuses a tier that is not loaded, naming the `set_config` that fixes it, and is bounded so a tool call cannot hang the worker thread | `test_concierge_worker.py` |
-
+| `V-CG-125`…`V-CG-128` (session 4) | handoff §7.1, §7.2 — the gate and its cards | Five things the panel can be, and the **precedence between them**: no CUDA outranks the opt-in card, which outranks the download card, which outranks the chat; every gate has a page and no user page is a gate's; the panel says "off" exactly when `config.concierge_switched_on` says the runtime may not start, over all six `(opt_in, enabled)` pairs, with `unset` off in both. The download card's four readings — a fresh offer, a resumable partial stated in bytes, a live fraction, and a refusal that states the mismatch and offers **nothing**, latched against every state change and every partial file. `downloading` is busy and is the one busy state with no indeterminate bar, because it knows how far along it is. The residency slider's bounds read off `FIELDS` rather than written twice, `0` reading as "unloads when this panel is closed" and never as "after 0 minutes", every position between saying what it means, and the status-bar segment agreeing with the slider about zero | `test_concierge_panel.py` |
+| `V-CG-129`…`V-CG-131` (session 4) | D-CG-6, FR-CG-7 — the download, wired | The adapter's four outcomes told apart: **done** (verified file, `stopped`), **paused** (a `.part` file kept, no report, `paused at N` as the detail), **refused** (latched, `auto_download` cleared, and a retry that does not so much as reach the tree API), **failed** (reported, not latched). Progress on both channels with the last chunk never throttled away, and a size a 32-bit `int` could not carry pushed through the signal and read back. `fetch` itself: cancellation mid-transfer and before the first byte, a resume that opens a `Range` at exactly where the cancel stopped, the progress hook firing once *before* the first chunk so a resumed bar opens at 41 % rather than at zero, and `refused` set for a substituted file and not for a dropped connection | `test_concierge_worker.py`, `test_concierge_fetch.py` |
+| `V-CG-132`…`V-CG-133` (session 4) | FR-CG-4, FR-CG-6 — the first run | The controller against a **fake panel** and a stood-down thread, so the *request* is the only observable thing: an unanswered or declined panel asks for no runtime and no download and starts no thread; an accepted one with no weights starts the transfer itself, and a deleted or refused model is not re-fetched by reopening; accepting writes `opt_in` **and** clears `enabled`'s off, declining writes neither; the guided setup runs once, as a real user message, only for whoever accepted in this run; a delete cancels a transfer **from the GUI thread**, because a queued slot could not run until the transfer it is trying to stop had finished; shutdown interrupts a download as well as a turn; the residency write goes through `Settings.set` and a value the field rejects is reported rather than accepted; a panel whose thread never started emits no stop request; and the first-run offer is made for `unset` only, once per run | `test_concierge_worker.py` |
 **Why L2's instrument gets an L1 suite of its own.** The suite is what NFR-CG-6's
 "qualified by evidence" points at, so a scorer that never runs is a scorecard that
 measured less than it claims — and this project has been bitten by that twice already,
@@ -124,6 +126,56 @@ console lines carry and nobody has tabulated.
 **Measured through the app rather than the rig** (NFR-CG-2 allows 15 s): 11.6 s and
 14.0 s from `on_start` to `ready`, prewarm included, across two runs.
 
+### 3.2 What session 4 established, and what it deliberately did not
+
+Session 4 wired the download, the first-run card, the guided setup's trigger, the no-CUDA
+card and the residency slider. Criterion **v3-5** — "kill during download → relaunch
+resumes, pinned hash verifies; a tree-API `oid` that differs from the pin → download
+refused" — is the one it comes closest to closing, and it does **not** close it: session
+5 executes §3 with V-M numbers, against the real 6.87 GB file and the real endpoint.
+
+What exists now is the layer below that, and it is worth saying exactly what it proves.
+
+**Driven end to end, with the real panel, the real controller and the real worker on a
+real `QThread`, against a fake transport** (a six-megabyte body over the real
+`fetch.Download`, `QT_QPA_PLATFORM=offscreen`):
+
+| What ran | Evidence for | Result |
+|---|---|---|
+| A fresh install opened | **FR-CG-6** | Opt-in card; no thread started, no byte fetched, nothing written to `app/models/` |
+| `Yes — set it up` | handoff §8.2, **FR-CG-4** | Download ran by itself; the panel's bar moved; the file verified against the pin; the panel flipped to the chat; `SETUP_KICKOFF` appeared in the transcript as a user message |
+| `Pause` part-way | **FR-CG-7**, criterion v3-5's resume half | `not_downloaded`, detail `paused at 3 MB`, `.part` file kept |
+| A fresh panel over that `.part` | criterion v3-5 | Card read `3 MB is already downloaded. Continuing picks up where it stopped.`, bar at 49 %, and `Continue the download` finished it with the bytes matching |
+| A tree API publishing a different `oid` | **FR-CG-7**, criterion v3-5's refusal half | Refused before the CDN was touched; card stated the mismatch; **no button, hidden and disabled**; a retry and a direct button click both fetched nothing |
+
+**Rendered offscreen and looked at** — the opt-in card, the download card in its four
+readings, the two blocked cards and the settings page. This is how #44 was found: the
+refusal's text was correct and its layout was not, and no assertion about a string would
+have caught it.
+
+**Not established, and owed to session 5 or later:**
+
+- Everything above ran against a **six-megabyte** fake. Nothing here has downloaded 6.87
+  GB, and the two things that only the real transfer can show are the throttle's
+  behaviour over ~7 000 chunks and whether a resumed `Range` request is honoured by the
+  actual LFS CDN rather than by a fake that answers 206 because it was told to.
+- **No `oid` mismatch has ever been seen in the wild.** The refusal path is exercised by
+  a transport that reports a digest we chose. What it cannot show is that Hugging Face
+  publishes `lfs.oid` for this file in the shape `remote_oid` reads — the spike confirmed
+  that once, on 2026-08-25, and it is a fact about somebody else's API.
+- **FR-CG-12 has no non-CUDA machine to run on**, the same hardware gap criteria v2-7 and
+  v3-6 have always had. The card, the gate's precedence and the "nothing starts" property
+  are L1; the machine is not.
+- The guided setup's **content** is L2's `sel-11` and L3's, not this. Session 4 pinned
+  that the kickoff is sent once, to the right person, at the right moment; whether the
+  model then walks four steps one at a time is what the qualification suite scores.
+- The knowledge pack was **not** regenerated. `concierge_narrative.md` already described
+  the residency slider, `Delete model` and the download as controls on this panel, and
+  session 4 made all three true; nothing in the pack is now wrong, so the digest gate 2.5
+  froze (`76a281c8a388`) stands and no re-score is owed. Recorded because "the pack was
+  checked and did not need changing" and "the pack was not thought about" are different
+  facts (cf. #37, which was the other outcome).
+
 ## 4. Known holes
 
 Stated at design time rather than discovered later, and **updated 2026-08-25 at the end
@@ -141,11 +193,12 @@ never a concern" are different facts.
   sharp with small contexts") and design §6 does not measure it. **A long-dialogue
   scenario belongs in the suite**, and it is not a small addition: `sel-11` is the only
   multi-turn scenario in the file today. Recorded rather than bolted on.
-- **`concierge.idle_unload_minutes` has no control anywhere.** Session 4 owns the
-  residency slider (FR-CG-8). Until then the only way to set it is to ask the Concierge,
-  which makes an FR-CG-8 hand test depend on the model cooperating — and the Advanced
-  tab, which the Concierge suggested to the user, lists seven engine constants and
-  nothing settable at all.
+- ~~**`concierge.idle_unload_minutes` has no control anywhere.**~~ **Closed by session
+  4.** The residency slider is on the Concierge panel's own settings page (handoff §7.2),
+  where `concierge_narrative.md` already told the user it lived, with its bounds read off
+  `config.FIELDS`. `concierge.enabled` had the same gap and got the same treatment —
+  `FIELDS` documents that switch to the user through the knowledge pack while the only
+  way to set it was to ask the Concierge. Both are `V-CG-128`/`V-CG-132`.
 
 - **`required facts covered` at 0.9 is finer than the suite can resolve.** Two runs of
   one configuration, same prompt and pack, returned 0.8889 and 0.9048 — two facts apart,

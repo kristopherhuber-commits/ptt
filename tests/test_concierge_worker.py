@@ -24,16 +24,20 @@ each fail silently:
 """
 
 import ast
+import hashlib
 import os
 import threading
 
 import pytest
 
 from ptt import config, paths
-from ptt.concierge import llm
+from ptt.concierge import fetch, llm
+from ptt.concierge import sessions as sessions_mod
 from ptt.concierge import state as state_mod
 from ptt.concierge import tools as tools_mod
+from ptt.ui import qt_concierge as panel_mod
 from ptt.ui import qt_concierge_worker as worker_mod
+from ptt.ui import qt_window as window_mod
 from ptt.ui.qt_concierge_worker import BenchmarkBridge, ConciergeWorker
 from ptt.ui.qt_statusview import UiState
 from ptt.ui.qt_threadcheck import SignalAudit
@@ -211,6 +215,10 @@ def workspace(tmp_path):
 @pytest.fixture
 def worker(tmp_path, workspace):
     settings = config.Settings(path=str(tmp_path / "config.json"))
+    # Opted in, because that is the state every test below except the gate's
+    # own is about. A fresh `Settings` arrives `unset` -- which is the whole
+    # point of Q26's tri-state, and which now stops the runtime starting.
+    settings.set("concierge.opt_in", config.OPT_IN_ACCEPTED)
     memory = tools_mod.MemoryNote(str(tmp_path / "note.txt"),
                                   str(tmp_path / "note.prev.txt"))
     made = ConciergeWorker(
@@ -657,3 +665,683 @@ def test_the_controller_runs_the_startup_reap():
 def test_saved_transcripts_live_beside_config_json():
     assert os.path.dirname(paths.concierge_sessions_path()) == paths.APP_DIR
     assert paths.concierge_sessions_path().endswith("concierge_sessions.json")
+
+
+# -- V-CG-129: the download slot (FR-CG-7, session 4) -------------------------
+#
+# Everything here runs the real `on_download` against a fake transport. What is
+# worth pinning is not that a file arrives -- `test_concierge_fetch.py` owns
+# that -- but the four *outcomes* the adapter has to tell apart, because three
+# of them look like "it did not download" from the outside and only one of them
+# is worth reporting as a failure.
+
+BODY = b"g" * (3 * fetch.Download.CHUNK + 7)
+DIGEST = hashlib.sha256(BODY).hexdigest()
+
+
+def fake_spec(name="fake.gguf"):
+    return fetch.ModelSpec(
+        key="gemma-4-12b-q4_k_m",
+        repo="lmstudio-community/gemma-4-12B-it-GGUF",
+        filename=name, sha256=DIGEST, size_bytes=len(BODY),
+        label="Gemma 4 12B")
+
+
+class FakeReader:
+    def __init__(self, data, hook=None):
+        self.data, self.hook = data, hook
+
+    def read(self, size):
+        if self.hook:
+            self.hook()
+        block, self.data = self.data[:size], self.data[size:]
+        return block
+
+    def close(self):
+        pass
+
+
+class FakeTransport:
+    """The tree API and the CDN, without either."""
+
+    def __init__(self, oid=None, hook=None, body=BODY):
+        self.oid = DIGEST if oid is None else oid
+        self.hook = hook
+        self.body = body
+        self.opened = []
+
+    def get_json(self, url):
+        return [{"path": "fake.gguf",
+                 "lfs": {"oid": self.oid, "size": len(self.body)}}]
+
+    def open_range(self, url, start=0):
+        self.opened.append(start)
+        return (206 if start else 200), len(self.body), \
+            FakeReader(self.body[start:], self.hook)
+
+
+@pytest.fixture
+def downloader(worker, tmp_path, monkeypatch):
+    """`worker`, with the pinned tier swapped for a three-megabyte fake."""
+    monkeypatch.setitem(fetch.MODELS, "gemma-4-12b-q4_k_m", fake_spec())
+    transport = FakeTransport()
+    worker._make_download = lambda spec, directory, **kwargs: fetch.Download(
+        spec, directory, transport=transport, **kwargs)
+    worker.transport = transport
+    return worker
+
+
+def test_a_finished_download_leaves_a_verified_file_and_a_stopped_machine(downloader):
+    states = collect(downloader.state_changed)
+    finished = collect(downloader.download_finished)
+    downloader.on_download()
+
+    assert open(downloader.model_path(), "rb").read() == BODY
+    assert downloader.machine.state == state_mod.STOPPED
+    assert finished[-1] == (True, "", False)
+    assert any(s[0] == state_mod.DOWNLOADING for s in states)
+
+
+def test_progress_arrives_as_bytes_and_as_a_state_detail(downloader):
+    """
+    Two channels, one throttle. Design 8 makes the percentage a re-entry into
+    `downloading` rather than eight more states, so the caption and the status
+    bar read it there; the signal carries the numbers a determinate bar needs.
+    """
+    progress = collect(downloader.download_progress)
+    states = collect(downloader.state_changed)
+    downloader.on_download()
+
+    assert progress, "the bar was never told anything"
+    assert progress[-1] == (len(BODY), len(BODY))
+    assert all(total == len(BODY) for _done, total in progress)
+    downloading = [detail for state, detail in states
+                   if state == state_mod.DOWNLOADING]
+    assert any("of" in d and "%" in d for d in downloading)
+
+
+def test_the_last_chunk_is_never_throttled_away(downloader, monkeypatch):
+    """
+    A bar that stops at 99 % because the final call landed inside the interval
+    is the one position on it anybody looks at.
+    """
+    monkeypatch.setattr(worker_mod, "PROGRESS_INTERVAL_SEC", 3600.0)
+    progress = collect(downloader.download_progress)
+    downloader.on_download()
+    assert progress[-1] == (len(BODY), len(BODY))
+
+
+def test_the_signal_carries_a_size_a_32_bit_int_could_not(downloader):
+    """
+    The GGUF is 7 381 382 944 bytes. PySide6 marshals a signal declared `int`
+    as a C++ 32-bit `int`, so a total declared that way arrives negative at 78 %
+    of the way through -- and the bar runs backwards. `object` is why it does
+    not.
+    """
+    seen = collect(downloader.download_progress)
+    downloader._on_download_progress(7_000_000_000, 7_381_382_944)
+    assert seen[-1] == (7_000_000_000, 7_381_382_944)
+
+
+def test_a_substituted_upstream_file_is_refused_before_a_byte_is_fetched(downloader):
+    """
+    **FR-CG-7's whole point (Q26).** The `oid` is compared with the pin first,
+    so a re-uploaded GGUF costs nothing and produces no partial file.
+    """
+    downloader.transport.oid = "0" * 64
+    finished = collect(downloader.download_finished)
+
+    downloader.on_download()
+
+    ok, reason, refused = finished[-1]
+    assert (ok, refused) == (False, True)
+    assert "not the pinned" in reason
+    assert downloader.transport.opened == [], "the CDN was reached anyway"
+    assert not os.path.exists(downloader.model_path())
+    assert not os.path.exists(downloader.model_path() + ".part")
+    assert downloader.machine.state == state_mod.NOT_DOWNLOADED
+
+
+def test_a_refusal_latches_and_a_retry_never_reaches_the_network(downloader):
+    """
+    The refusal is a re-qualification event, not a retryable failure: a second
+    attempt must not so much as ask, because the answer cannot have changed and
+    a request that looks like a retry invites a UI that offers one.
+    """
+    downloader.transport.oid = "0" * 64
+    downloader.on_download()
+    first = downloader.download_refusal
+    assert first
+
+    downloader.transport.oid = DIGEST          # even if upstream is fixed
+    finished = collect(downloader.download_finished)
+    downloader.on_download()
+
+    assert downloader.download_refusal == first
+    assert finished[-1] == (False, first, True)
+    assert not os.path.exists(downloader.model_path())
+
+
+def test_a_refusal_also_stops_the_panel_starting_one_by_itself(downloader):
+    downloader.transport.oid = "0" * 64
+    downloader.on_download()
+    assert downloader.auto_download is False
+
+
+def test_a_cancelled_download_keeps_its_partial_file_and_is_not_a_failure(downloader):
+    """
+    Criterion v3-5. The application exits during a 6.87 GB transfer far more
+    often than it finishes one, and what makes the next launch a resume rather
+    than a restart is exactly this file.
+    """
+    def stop_after_one_chunk():
+        if os.path.exists(downloader.model_path() + ".part"):
+            downloader.cancel_download.set()
+
+    downloader.transport.hook = stop_after_one_chunk
+    finished = collect(downloader.download_finished)
+    downloader.on_download()
+
+    ok, reason, refused = finished[-1]
+    assert (ok, refused) == (False, False)
+    assert reason == fetch.Download.CANCELLED
+    assert os.path.getsize(downloader.model_path() + ".part") > 0
+    assert not os.path.exists(downloader.model_path())
+    assert downloader.machine.state == state_mod.NOT_DOWNLOADED
+    assert "paused at" in downloader.machine.detail
+
+
+def test_a_relaunch_resumes_from_the_partial_file(downloader):
+    def stop_after_one_chunk():
+        if os.path.exists(downloader.model_path() + ".part"):
+            downloader.cancel_download.set()
+
+    downloader.transport.hook = stop_after_one_chunk
+    downloader.on_download()
+    resumed_from = downloader.partial_bytes()
+    assert resumed_from
+
+    downloader.transport.hook = None
+    downloader.cancel_download.clear()
+    downloader.on_download()
+
+    assert downloader.transport.opened[-1] == resumed_from
+    assert open(downloader.model_path(), "rb").read() == BODY
+
+
+def test_a_download_already_on_disk_is_not_fetched_again(downloader):
+    downloader.on_download()
+    downloader.transport.opened.clear()
+    downloader.on_download()
+    assert downloader.transport.opened == []
+    assert downloader.machine.state == state_mod.STOPPED
+
+
+def test_deleting_the_model_switches_the_automatic_download_off(downloader):
+    """
+    Handoff 8.2 starts the transfer when an opted-in panel opens with no model
+    on disk. That is right for a first run and wrong straight after a delete: a
+    6.87 GB file that comes back by itself is not a file the user deleted.
+    """
+    downloader.on_download()
+    assert downloader.auto_download is True
+    downloader.on_delete_model()
+    assert downloader.auto_download is False
+    assert downloader.machine.state == state_mod.NOT_DOWNLOADED
+    assert not os.path.exists(downloader.model_path())
+
+
+def test_the_download_slot_carries_the_gate_as_well_as_the_controller(downloader):
+    """
+    Defence in depth on the expensive action. The controller refuses to ask and
+    the card that carries the button is not on screen -- but 6.87 GB is the
+    wrong thing to protect with a UI state alone (`development_history.md` #42).
+    """
+    for opt_in in (config.OPT_IN_UNSET, config.OPT_IN_DECLINED):
+        downloader._settings.set("concierge.opt_in", opt_in)
+        downloader.transport.opened.clear()
+        downloader.on_download()
+        assert downloader.transport.opened == []
+        assert not os.path.exists(downloader.model_path())
+
+    downloader._settings.set("concierge.opt_in", config.OPT_IN_ACCEPTED)
+    downloader._settings.set("concierge.enabled", False)
+    downloader.on_download()
+    assert not os.path.exists(downloader.model_path())
+
+
+# -- V-CG-130: the two keys that decide whether anything runs (FR-CG-6, Q26) --
+
+def place_model(worker):
+    """An empty file where the GGUF would be, so only the gate can stop a start."""
+    os.makedirs(os.path.dirname(worker.model_path()), exist_ok=True)
+    open(worker.model_path(), "wb").close()
+
+
+def test_an_unanswered_install_starts_no_runtime(worker, tmp_path):
+    """
+    A fresh `config.json` arrives `unset`, and `unset` starts nothing. This is
+    criterion v3-8's other half: the upgrade must not opt anybody in, and "not
+    opted in" has to mean something at the moment a panel opens.
+    """
+    worker._settings.set("concierge.opt_in", config.OPT_IN_UNSET)
+    place_model(worker)
+    states = collect(worker.state_changed)
+    worker.on_start()
+    assert worker.server is None
+    assert states == []
+
+
+def test_a_declined_install_starts_no_runtime(worker):
+    worker._settings.set("concierge.opt_in", config.OPT_IN_DECLINED)
+    place_model(worker)
+    worker.on_start()
+    assert worker.server is None
+
+
+def test_switched_off_starts_no_runtime_even_though_it_was_accepted(worker):
+    """`enabled: false` is not `declined`, and both stop the runtime."""
+    worker._settings.set("concierge.enabled", False)
+    place_model(worker)
+    worker.on_start()
+    assert worker.server is None
+
+
+def test_the_adapter_reads_the_switch_through_config_and_not_by_hand(worker):
+    for opt_in in config.OPT_IN_STATES:
+        for enabled in (True, False):
+            worker._settings.set("concierge.opt_in", opt_in)
+            worker._settings.set("concierge.enabled", enabled)
+            assert worker_mod.switched_on(worker._settings) == \
+                config.concierge_switched_on(opt_in, enabled)
+
+
+def test_no_cuda_starts_nothing_and_has_no_way_out(tmp_path, workspace):
+    """FR-CG-12, and design 8's `disabled` having no outgoing edges."""
+    settings = config.Settings(path=str(tmp_path / "config.json"))
+    settings.set("concierge.opt_in", config.OPT_IN_ACCEPTED)
+    made = ConciergeWorker(
+        settings, state_provider=lambda: worker_mod.state_snapshot(UiState()),
+        cuda_supported=False, exe_path=str(tmp_path / "llama-server.exe"),
+        model_dir=str(tmp_path / "models"), pack_path=workspace["pack"],
+        prompt_path=workspace["prompt"],
+        memory=tools_mod.MemoryNote(str(tmp_path / "n.txt"),
+                                    str(tmp_path / "n.prev.txt")))
+    assert made.machine.state == state_mod.DISABLED
+    made.on_start()
+    made.on_download()
+    assert made.server is None
+    assert made.machine.state == state_mod.DISABLED
+    assert not os.path.exists(str(tmp_path / "models"))
+
+
+# -- V-CG-132: the controller's gates and the first run (session 4) -----------
+#
+# `ConciergeController` is built here against a **fake panel**, not a widget:
+# what is under test is which of the worker's slots it asks for and which it
+# refuses to, and every one of those decisions is taken before a pixel is
+# involved. The worker is moved to a thread that is never started, so a queued
+# request piles up rather than running -- which is exactly what makes the
+# *request* observable and the side effect not.
+
+
+class FakeSignal:
+    """`connect`/`emit`, and a record of what went out."""
+
+    def __init__(self):
+        self.slots = []
+        self.emissions = []
+
+    def connect(self, slot, *_args, **_kwargs):
+        self.slots.append(slot)
+
+    def emit(self, *args):
+        self.emissions.append(args)
+        for slot in list(self.slots):
+            slot(*args)
+
+
+class FakePanel:
+    """
+    Every panel method the controller calls, recorded rather than drawn.
+
+    `calls` is annotated at class level so it resolves as a list rather than
+    through `__getattr__`, which is what a reader -- and a type checker -- would
+    otherwise have to guess at.
+    """
+
+    calls: list
+
+    SIGNALS = (
+        "send_requested", "undo_requested", "restore_requested",
+        "new_session_requested", "save_session_requested",
+        "open_session_requested", "memory_open_requested",
+        "memory_save_requested", "memory_restore_requested",
+        "delete_model_requested", "opt_in_requested", "enabled_requested",
+        "download_requested", "pause_download_requested", "residency_requested",
+        "setup_requested",
+    )
+
+    def __init__(self):
+        object.__setattr__(self, "calls", [])
+        for name in self.SIGNALS:
+            object.__setattr__(self, name, FakeSignal())
+        self.view = panel_mod.ConciergeView()
+
+    def status_segment(self):
+        return ""
+
+    def set_state(self, state, detail=""):
+        self.calls.append(("set_state", state, detail))
+        self.view.set_state(state, detail)
+
+    def set_opt_in(self, opt_in, enabled=True):
+        self.calls.append(("set_opt_in", opt_in, enabled))
+        self.view.opt_in, self.view.enabled = opt_in, bool(enabled)
+
+    def set_download_refusal(self, reason):
+        self.calls.append(("set_download_refusal", reason))
+        self.view.download_refusal = reason or ""
+
+    def __getattr__(self, name):
+        if name.startswith("_"):
+            raise AttributeError(name)
+
+        def record(*args, **_kwargs):
+            self.calls.append((name, *args))
+        return record
+
+    def named(self, name):
+        return [c for c in self.calls if c[0] == name]
+
+
+class FakeThread:
+    """
+    The `QThread` the controller owns, stood down.
+
+    Started for real, it would run an event loop that delivers `on_start` --
+    which launches a subprocess, writes `app/concierge_state.json` and waits on
+    a health probe. None of that is what these tests are about, and all of it
+    reaches outside `tmp_path`. What the tests need is the *request*, and a
+    thread that never runs is what makes the request the only observable thing.
+    """
+
+    def __init__(self):
+        self.started = []
+        self.running = False
+
+    def isRunning(self):
+        return self.running
+
+    def start(self):
+        self.started.append(True)
+
+    def quit(self):
+        pass
+
+    def wait(self, _ms=0):
+        return True
+
+    def setObjectName(self, _name):
+        pass
+
+
+@pytest.fixture
+def controller(worker, tmp_path, monkeypatch):
+    """A real controller over the `worker` fixture and a fake panel."""
+    monkeypatch.setattr(worker_mod.server_mod, "reap_orphan",
+                        lambda *a, **kw: (False, "stubbed"))
+    panel = FakePanel()
+    made = worker_mod.ConciergeController(
+        worker._settings, panel,
+        ui_state=UiState(), engine_provider=lambda: None,
+        cuda_supported=True, worker=worker,
+        store=sessions_mod.SessionStore(str(tmp_path / "sessions.json")))
+    made.thread = FakeThread()
+    return made
+
+
+def emitted(controller, name):
+    """Watch one controller-to-worker request without running the worker."""
+    seen = []
+    getattr(controller, name).connect(lambda *args: seen.append(args))
+    return seen
+
+
+def test_an_unanswered_panel_opens_to_the_card_and_asks_for_nothing(controller):
+    """
+    FR-CG-6, and the expensive half of it: `unset` must not start a 6.87 GB
+    download on behalf of somebody who has not been asked.
+    """
+    controller._settings.set("concierge.opt_in", config.OPT_IN_UNSET)
+    starts = emitted(controller, "start_requested")
+    downloads = emitted(controller, "download_requested")
+
+    controller.open()
+
+    assert starts == [] and downloads == []
+    assert controller.thread.started == [], "a worker thread nobody will use"
+    assert controller._panel.named("set_opt_in")[-1][1] == config.OPT_IN_UNSET
+
+
+def test_a_declined_panel_opens_to_the_off_card_and_asks_for_nothing(controller):
+    controller._settings.set("concierge.opt_in", config.OPT_IN_DECLINED)
+    starts = emitted(controller, "start_requested")
+    downloads = emitted(controller, "download_requested")
+
+    controller.open()
+
+    assert starts == [] and downloads == []
+    assert controller._panel.view.gate() == panel_mod.GATE_OFF
+
+
+def test_accepting_the_card_writes_the_key_and_arms_the_guided_setup(controller):
+    controller._settings.set("concierge.opt_in", config.OPT_IN_UNSET)
+    controller._settings.set("concierge.enabled", False)
+    applied = emitted(controller, "settings_applied")
+
+    controller._panel.opt_in_requested.emit(True)
+
+    assert controller._settings.get("concierge.opt_in") == config.OPT_IN_ACCEPTED
+    # Accepting clears the switch's "off" as well: the button says "set it up",
+    # and a yes that left the runtime disabled would have done nothing.
+    assert controller._settings.get("concierge.enabled") is True
+    assert controller._setup_owed is True
+    assert ("concierge.opt_in",) in applied
+
+
+def test_declining_writes_the_key_and_arms_nothing(controller):
+    controller._settings.set("concierge.opt_in", config.OPT_IN_UNSET)
+    controller._panel.opt_in_requested.emit(False)
+    assert controller._settings.get("concierge.opt_in") == config.OPT_IN_DECLINED
+    assert controller._setup_owed is False
+
+
+def test_declining_does_not_switch_the_enabled_key(controller):
+    """
+    Q26 keeps the keys separate. Declining is an answer to a question; `enabled`
+    is a switch, and conflating them loses the distinction the tri-state exists
+    for.
+    """
+    controller._settings.set("concierge.opt_in", config.OPT_IN_UNSET)
+    controller._panel.opt_in_requested.emit(False)
+    assert controller._settings.get("concierge.enabled") is True
+
+
+def test_an_accepted_panel_with_no_weights_starts_the_download_itself(controller):
+    """Handoff 8.2: accepting is what starts it, not hunting for a button."""
+    controller._settings.set("concierge.opt_in", config.OPT_IN_ACCEPTED)
+    downloads = emitted(controller, "download_requested")
+    starts = emitted(controller, "start_requested")
+
+    controller.open()
+
+    assert len(downloads) == 1
+    assert starts == [], "the runtime cannot start before the weights arrive"
+
+
+def test_a_deleted_model_is_not_re_fetched_by_reopening_the_panel(controller):
+    controller._settings.set("concierge.opt_in", config.OPT_IN_ACCEPTED)
+    controller.worker.auto_download = False
+    downloads = emitted(controller, "download_requested")
+    controller.open()
+    assert downloads == []
+
+
+def test_a_refused_download_is_not_re_attempted_by_reopening_the_panel(controller):
+    controller._settings.set("concierge.opt_in", config.OPT_IN_ACCEPTED)
+    controller.worker.download_refusal = "not the pinned digest"
+    downloads = emitted(controller, "download_requested")
+    controller.open()
+    assert downloads == []
+
+
+def test_deleting_the_model_cancels_a_transfer_from_the_gui_thread(controller):
+    """
+    The copy that matters. With a download in flight the worker thread is inside
+    `on_download` for as long as the rest of 6.87 GB takes, so a queued
+    `on_delete_model` could not run until something stopped it -- and this is
+    what stops it, exactly as `_on_panel_send` sets `cancel` from here.
+    """
+    assert not controller.worker.cancel_download.is_set()
+    controller._panel.delete_model_requested.emit()
+    assert controller.worker.cancel_download.is_set()
+
+
+def test_shutdown_interrupts_a_download_as_well_as_a_turn(controller):
+    controller.shutdown()
+    assert controller.worker.cancel.is_set()
+    assert controller.worker.cancel_download.is_set()
+
+
+def test_a_finished_download_starts_the_runtime_and_runs_the_setup(controller):
+    """
+    FR-CG-4's trigger. A real user message, in the transcript, because that is
+    what it is: the person accepted an offer that said it would set them up.
+    """
+    controller._settings.set("concierge.opt_in", config.OPT_IN_ACCEPTED)
+    controller._setup_owed = True
+    place_model(controller.worker)
+    controller.worker.machine.to(state_mod.STOPPED)
+    sends = emitted(controller, "send_requested")
+
+    controller._on_download_finished(True, "", False)
+
+    assert sends == [(worker_mod.SETUP_KICKOFF,)]
+    assert controller._setup_owed is False
+    assert ("append_user", worker_mod.SETUP_KICKOFF) in controller._panel.calls
+
+
+def test_the_guided_setup_runs_once_and_not_on_every_later_download(controller):
+    controller._settings.set("concierge.opt_in", config.OPT_IN_ACCEPTED)
+    place_model(controller.worker)
+    controller.worker.machine.to(state_mod.STOPPED)
+    sends = emitted(controller, "send_requested")
+
+    controller._on_download_finished(True, "", False)
+
+    assert sends == [], "nobody accepted a card in this run"
+
+
+def test_a_refused_download_reaches_the_panel_as_a_latch(controller):
+    controller._on_download_finished(False, "digest abc, not the pinned def", True)
+    assert controller._panel.view.download_refusal.startswith("digest abc")
+    assert controller._panel.view.can_download() is False
+
+
+def test_a_paused_download_says_nothing_at_all(controller):
+    """The user paused it; narrating their own click back at them is noise."""
+    controller._on_download_finished(False, fetch.Download.CANCELLED, False)
+    assert controller._panel.named("notify") == []
+    assert controller._panel.view.download_refusal == ""
+
+
+def test_a_broken_transfer_is_reported_and_does_not_latch(controller):
+    controller._on_download_finished(False, "the connection dropped", False)
+    assert controller._panel.named("notify")
+    assert controller._panel.view.download_refusal == ""
+
+
+def test_the_residency_slider_writes_through_the_validated_path(controller):
+    applied = emitted(controller, "settings_applied")
+    controller._panel.residency_requested.emit(12)
+    assert controller._settings.get("concierge.idle_unload_minutes") == 12
+    assert ("concierge.idle_unload_minutes",) in applied
+
+
+def test_a_residency_the_field_rejects_is_reported_and_not_written(controller):
+    """
+    FR-CG-11's rule is the object's, not the caller's: the slider cannot produce
+    31, but the write path is the same one the Concierge uses and it must reject
+    rather than accept and revert.
+    """
+    before = controller._settings.get("concierge.idle_unload_minutes")
+    controller._panel.residency_requested.emit(31)
+    assert controller._settings.get("concierge.idle_unload_minutes") == before
+    assert controller._panel.named("notify")
+
+
+def test_closing_a_panel_that_never_started_a_thread_emits_nothing(controller):
+    """
+    A queued call to a worker with no event loop is delivered when one appears,
+    which for a user who declined is never -- and a stop request sitting in a
+    queue is a stop request that fires at the wrong moment if anything ever does
+    start that thread.
+    """
+    controller._settings.set("concierge.idle_unload_minutes", 0)
+    stops = emitted(controller, "stop_requested")
+    controller.close()
+    assert stops == []
+
+
+def test_switching_the_concierge_off_stops_the_runtime_and_keeps_the_weights(controller):
+    """
+    FR-CG-6. The reason somebody reaches for this control is that they want the
+    VRAM back, so "off, but still holding 9.4 GB until the residency timer
+    expires" is not off -- and the 6.87 GB they waited for is not deleted by a
+    switch, which is a separate confirmed action on the same page.
+    """
+    place_model(controller.worker)
+    controller.thread.running = True
+    stops = emitted(controller, "stop_requested")
+
+    controller._panel.enabled_requested.emit(False)
+
+    assert controller._settings.get("concierge.enabled") is False
+    assert stops and "switched off" in stops[0][0]
+    assert os.path.exists(controller.worker.model_path())
+    assert controller._panel.view.gate() == panel_mod.GATE_OFF
+
+
+def test_switching_it_back_on_reopens_without_a_second_opt_in(controller):
+    controller._settings.set("concierge.enabled", False)
+    controller._panel.enabled_requested.emit(True)
+    assert controller._settings.get("concierge.enabled") is True
+    assert controller._settings.get("concierge.opt_in") == config.OPT_IN_ACCEPTED
+
+
+def test_the_off_card_reaches_the_same_place_from_either_reason(controller):
+    """
+    Declined and switched-off share a card, and its one button has to fix
+    whichever of the two is true -- so it writes both keys.
+    """
+    for opt_in, enabled in ((config.OPT_IN_DECLINED, True),
+                            (config.OPT_IN_ACCEPTED, False)):
+        controller._settings.set("concierge.opt_in", opt_in)
+        controller._settings.set("concierge.enabled", enabled)
+        controller._publish_opt_in()
+        assert controller._panel.view.gate() == panel_mod.GATE_OFF
+        controller._panel.opt_in_requested.emit(True)
+        assert controller._panel.view.gate() != panel_mod.GATE_OFF
+
+
+# -- V-CG-133: the first-run offer (FR-CG-6, handoff 8.1 as amended) ----------
+
+def test_the_offer_is_made_only_for_an_unanswered_install():
+    for opt_in in config.OPT_IN_STATES:
+        expected = opt_in == config.OPT_IN_UNSET
+        assert window_mod.should_offer_concierge(False, opt_in) is expected
+
+
+def test_the_offer_is_made_at_most_once_per_run():
+    assert window_mod.should_offer_concierge(True, config.OPT_IN_UNSET) is False

@@ -306,8 +306,19 @@ class QtApp:
         self._window.apply(self.ui)
 
     def _open_settings(self):
+        """
+        Show the window, and make the first-run Concierge offer if it is owed.
+
+        The offer is deliberately not made at launch: see
+        `SettingsWindow.offer_concierge_once`. Here rather than inside that
+        method because expanding the panel has to reach the controller too, and
+        the window knows nothing about the controller by design.
+        """
         self._popover.hide()
         self._window.show_and_raise()
+        if self._window.offer_concierge_once(
+                self._settings.get("concierge.opt_in")):
+            log_debug("Concierge: making the first-run offer; opt_in is unset.")
 
     # -- run ----------------------------------------------------------------
 

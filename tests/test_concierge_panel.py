@@ -501,3 +501,225 @@ def test_a_missing_session_file_is_not_an_error(tmp_path):
     assert store.list() == () and store.load("x") is None
     saved, reason = store.save("first", ROWS)
     assert saved is not None and reason is None
+
+
+# -- V-CG-125: the gate -- what the panel is for right now (session 4) --------
+#
+# Five things, one of which is a chat. The precedence between them is the whole
+# of `gate_for`, and every step of it is a decision somebody could reasonably
+# have made the other way -- which is exactly the kind of rule that needs a test
+# rather than a comment.
+
+def gate(state=state_mod.READY, opt_in=config.OPT_IN_ACCEPTED, enabled=True):
+    return panel_mod.gate_for(state, opt_in, enabled)
+
+
+def test_no_cuda_device_beats_everything_including_the_opt_in_card():
+    """
+    FR-CG-12. Asking somebody to opt in to a runtime that cannot start on their
+    machine is worse than not asking, and offering them a 6.87 GB download for
+    it is worse still. `opt_in` stays `unset` on such a machine, truthfully.
+    """
+    for opt_in in config.OPT_IN_STATES:
+        for enabled in (True, False):
+            assert gate(state_mod.DISABLED, opt_in, enabled) == panel_mod.GATE_DISABLED
+
+
+def test_an_unanswered_panel_shows_the_card_and_not_a_download_button():
+    """Q26's `unset`: a Download button is not a question."""
+    assert gate(state_mod.NOT_DOWNLOADED, config.OPT_IN_UNSET) == panel_mod.GATE_OPT_IN
+
+
+def test_declined_and_switched_off_are_the_same_page_and_different_keys():
+    assert gate(opt_in=config.OPT_IN_DECLINED) == panel_mod.GATE_OFF
+    assert gate(opt_in=config.OPT_IN_ACCEPTED, enabled=False) == panel_mod.GATE_OFF
+    assert gate(opt_in=config.OPT_IN_ACCEPTED, enabled=True) == panel_mod.GATE_CHAT
+
+
+def test_the_two_states_with_no_weights_show_the_download_card():
+    for state in (state_mod.NOT_DOWNLOADED, state_mod.DOWNLOADING):
+        assert gate(state) == panel_mod.GATE_DOWNLOAD
+
+
+def test_every_other_state_is_a_chat():
+    for state in state_mod.STATES:
+        if state in (state_mod.DISABLED, state_mod.NOT_DOWNLOADED,
+                     state_mod.DOWNLOADING):
+            continue
+        assert gate(state) == panel_mod.GATE_CHAT
+
+
+def test_the_runtime_gate_and_the_panel_gate_read_one_rule():
+    """
+    The panel says "off" exactly when the adapter refuses to launch, because
+    both call `config.concierge_switched_on`. A second copy of that pair is how
+    a panel comes to show a chat over a runtime that was never started.
+    """
+    for opt_in in config.OPT_IN_STATES:
+        for enabled in (True, False):
+            runnable = config.concierge_switched_on(opt_in, enabled)
+            shown = panel_mod.gate_for(state_mod.READY, opt_in, enabled)
+            assert runnable == (shown == panel_mod.GATE_CHAT)
+
+
+def test_unset_does_not_run_anything():
+    """
+    The download is the reason this matters. `unset` reads as "on" to a naive
+    implementation -- nobody has said no -- and the consequence is 6.87 GB
+    fetched on behalf of a user who was never asked.
+    """
+    assert config.concierge_switched_on(config.OPT_IN_UNSET, True) is False
+
+
+def test_every_gate_has_a_page_and_no_page_is_orphaned():
+    assert set(panel_mod.GATE_PAGES) == set(panel_mod.GATES)
+    assert set(panel_mod.GATE_PAGES.values()) <= set(panel_mod.PAGES)
+    for user_page in panel_mod.USER_PAGES:
+        assert user_page not in panel_mod.GATE_PAGES.values()
+
+
+# -- V-CG-126: the download card ---------------------------------------------
+
+def test_a_resumable_partial_is_offered_as_a_continuation(view):
+    """
+    Criterion v3-5's visible half. "Download" over a 3 GB partial file tells the
+    user nothing about whether relaunching resumed or restarted.
+    """
+    view.set_state(state_mod.NOT_DOWNLOADED)
+    view.download_partial = 3 * 1024 ** 3
+    assert "3.00 GB is already downloaded" in view.download_caption()
+    assert view.download_button_text() == "Continue the download"
+
+
+def test_a_fresh_panel_offers_a_plain_download(view):
+    view.set_state(state_mod.NOT_DOWNLOADED)
+    assert view.download_button_text() == "Download"
+    assert "never leave" in view.download_caption()
+
+
+def test_a_running_download_reports_both_the_fraction_and_the_figures(view):
+    view.set_state(state_mod.DOWNLOADING)
+    view.set_download(1024 ** 3, 4 * 1024 ** 3)
+    assert view.download_caption() == "1.00 GB of 4.00 GB · 25%"
+    assert view.download_button_text() == "Pause"
+
+
+def test_a_refused_download_states_the_mismatch_and_offers_nothing(view):
+    """
+    **FR-CG-7, Q26 -- the control the user cannot click past.** A refusal is a
+    re-qualification event: the file published under that name is not the file
+    this build was scored against, and no button here can change that. So the
+    card carries no button at all rather than one that is offered and fails.
+    """
+    view.set_state(state_mod.NOT_DOWNLOADED)
+    view.download_refusal = "digest abc, not the pinned def"
+    assert view.download_caption() == "digest abc, not the pinned def"
+    assert view.download_button_text() == ""
+    assert view.can_download() is False
+
+
+def test_a_refusal_survives_a_partial_file_and_a_state_change(view):
+    """The latch is not conditional on anything the user can change."""
+    view.download_refusal = "not the pinned digest"
+    view.download_partial = 2 * 1024 ** 3
+    for state in state_mod.STATES:
+        view.set_state(state)
+        assert view.can_download() is False
+        assert view.download_button_text() == ""
+
+
+def test_a_download_can_only_be_started_from_not_downloaded(view):
+    for state in state_mod.STATES:
+        view.set_state(state)
+        assert view.can_download() == (state == state_mod.NOT_DOWNLOADED)
+
+
+def test_the_bar_opens_where_the_last_run_left_it(view):
+    """
+    A card offering `Continue the download` with the bar at zero would be the
+    panel contradicting its own sentence.
+    """
+    view.model_gigabytes = 4.0
+    view.download_partial = 2 * 1024 ** 3
+    assert panel_mod.percent_downloaded(view) == 50
+    view.set_download(3 * 1024 ** 3, 4 * 1024 ** 3)
+    assert panel_mod.percent_downloaded(view) == 75
+
+
+def test_a_download_in_progress_gets_no_second_indeterminate_bar():
+    """
+    `downloading` is busy and knows how far along it is; every other busy state
+    does not. An indeterminate stripe over a bar reading 41 % claims less than
+    the panel already knows.
+    """
+    assert panel_mod.is_busy(state_mod.DOWNLOADING) is True
+    assert panel_mod.shows_busy_bar(state_mod.DOWNLOADING) is False
+    for state in (state_mod.LOADING, state_mod.GENERATING, state_mod.UNLOADING):
+        assert panel_mod.shows_busy_bar(state) is True
+
+
+# -- V-CG-127: the card that stands in for the chat --------------------------
+
+def test_the_no_cuda_card_names_the_fact_the_consequence_and_the_tab():
+    """Criterion v2-7's pattern, which is a shape and not a wording."""
+    heading, body, button = panel_mod.blocked_card(panel_mod.GATE_DISABLED)
+    assert "No CUDA device" in body
+    assert "Dictation is unaffected" in body
+    assert "Diagnostics" in body
+    assert button == "", "a card that cannot offer anything offers nothing"
+    assert heading
+
+
+def test_the_machines_own_reason_is_added_to_the_card_not_substituted():
+    _, body, _ = panel_mod.blocked_card(panel_mod.GATE_DISABLED,
+                                        "the driver reported no device")
+    assert "the driver reported no device" in body
+    assert "Diagnostics" in body
+
+
+def test_the_off_card_has_a_way_back_in():
+    _, body, button = panel_mod.blocked_card(panel_mod.GATE_OFF)
+    assert button
+    assert "6.87 GB" in body
+
+
+# -- V-CG-128: the residency slider (FR-CG-8) --------------------------------
+
+def test_the_sliders_bounds_are_the_fields_own():
+    """
+    A slider offering 45 would be a control whose right-hand end `Settings.set`
+    rejects. Read off `FIELDS` rather than written twice.
+    """
+    rule = config.FIELDS["concierge.idle_unload_minutes"]
+    assert (panel_mod.RESIDENCY_MIN, panel_mod.RESIDENCY_MAX) == (0, 30)
+    assert (panel_mod.RESIDENCY_MIN, panel_mod.RESIDENCY_MAX) == (rule.minimum,
+                                                                  rule.maximum)
+    assert rule.default == 5
+
+
+def test_zero_says_it_unloads_on_close_and_not_immediately():
+    """
+    FR-CG-8's one special value. `Server.start_idle_timer` treats 0 as "never,
+    on my account" precisely because the event is the panel closing, and a
+    slider reading "unloads after 0 minutes" would describe something else
+    entirely.
+    """
+    assert "closed" in panel_mod.residency_text(0)
+    assert "0 minute" not in panel_mod.residency_text(0)
+
+
+def test_every_slider_position_says_what_it_means():
+    for minutes in range(panel_mod.RESIDENCY_MIN, panel_mod.RESIDENCY_MAX + 1):
+        text = panel_mod.residency_text(minutes)
+        assert text
+        if minutes:
+            assert f"{minutes} minute" in text
+    assert "1 minute after" in panel_mod.residency_text(1)
+    assert "2 minutes after" in panel_mod.residency_text(2)
+
+
+def test_the_status_bar_segment_and_the_slider_agree_about_zero():
+    """Two sentences about one setting, and they may not disagree."""
+    segment = panel_mod.status_segment(state_mod.READY, "Gemma 4 12B", 0)
+    assert "unloads on close" in segment
+    assert "closed" in panel_mod.residency_text(0)

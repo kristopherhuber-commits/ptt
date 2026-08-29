@@ -1,6 +1,6 @@
 # Develop — Claude Code prompts, PTT Dictation v3.0 Concierge
 
-**READY — sessions 0–3 and gate 2.5 are complete; session 4 is next.** In the project's
+**READY — sessions 0–4 and gate 2.5 are complete; session 5 is next.** In the project's
 document architecture this is the Develop document: the complete instruction set for
 construction, consequent to `concierge_requirements.md` and `concierge_design.md`. Design
 §10's decision log is fully resolved — **Q1–Q7 from the design discussion and the spike,
@@ -13,8 +13,8 @@ empirically.
 all seven thresholds PASS. Qwen 3.5 9B and gpt-oss-20b were both disqualified for making
 an unsafe write under the jailbreak scenario. Frozen artifacts: harness `3.0.0-s2`, prompt
 `fa2a83eb2f54`, pack `129c5a31d17f` — **the pack was changed and re-scored in
-session 3** (`76a281c8a388`; same 106/123, see `model_qualification.md`). Sessions
-3–5 may run.
+session 3** (`76a281c8a388`; same 106/123, see `model_qualification.md`), and session 4
+left it untouched (`concierge_verification.md` §3.2). Session 5 may run.
 
 **Session 0 changed the session-1 scope materially.** Three items that were not in the
 original prompt are now load-bearing: a validated write path in `config.py` (D-CG-13,
@@ -301,7 +301,35 @@ fast.
 
 ---
 
-## Session 4 — download, first run, lifecycle states (Opus · Extra)
+## Session 4 — download, first run, lifecycle states (Opus · Extra) — **RUN 2026-08-29, CLOSED**
+
+Built: `fetch.py` wired into the panel through `ConciergeWorker.on_download` (throttled
+progress on two channels, cancellable, resumable); five gate pages in `qt_concierge.py`
+(opt-in card, download card, the no-CUDA and switched-off cards, and the Concierge's own
+settings page); the residency slider and a `Switch the Concierge off` control, neither of
+which had any control before; `config.concierge_switched_on` as the one place the
+`opt_in`/`enabled` pair is interpreted; and the first-run offer in `qt_window.py`.
+`V-CG-125`…`V-CG-133`; **837 tests green.**
+
+Four things a later session should not have to rediscover:
+
+- **`unset` is off.** The tri-state's middle value reads as "not a no", and a gate written
+  that way starts a 6.87 GB download for somebody who has never been asked. The opt-in
+  card stays reachable because `gate_for` tests `unset` *before* it asks whether the
+  runtime may start — ordering, not permission (`development_history.md` #42).
+- **The opt-in card is shown in a window the user opened**, not at app launch. `install.
+  ps1` writes a Startup-folder shortcut, so "first app launch" is "login". Handoff §8.1 is
+  amended there, with the argument.
+- **`Delete model` clears `auto_download`.** Handoff §8.2's "or first later open" and
+  Q25's delete collide, and a 6.87 GB file that comes back by itself is not a file the
+  user deleted (#45).
+- **`Signal(object, object)` for the byte counts.** A declared `int` marshals as C++
+  32-bit and the total would arrive negative at 78 % of 7 381 382 944 bytes; every L1
+  test would still pass, because the fake body is three megabytes (#43).
+
+Left open for session 5: everything in `concierge_verification.md` §3.2's "not
+established" list — above all that no transfer of the real 6.87 GB file, and no `oid`
+mismatch outside a fake transport, has ever been run.
 
 Paste exactly this:
 

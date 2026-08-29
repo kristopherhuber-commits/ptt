@@ -399,3 +399,136 @@ def test_no_module_under_app_calls_the_bundler():
             if "bundle_llama_runtime(" in text and not path.endswith("fetch.py"):
                 callers.append(path)
     assert callers == []
+
+
+# -- V-CG-131: cancellation, and the figures the panel reports (session 4) ----
+
+def cancel_after(calls):
+    """A `should_cancel` that answers False `calls` times and True after."""
+    seen = []
+    def should_cancel():
+        seen.append(1)
+        return len(seen) > calls
+    return should_cancel
+
+
+def test_a_cancelled_download_stops_and_keeps_what_it_had(tmp_path):
+    """
+    The application exits during a 6.87 GB transfer far more often than it
+    finishes one. A transfer that cannot be interrupted holds the shutdown path
+    open for as long as the rest of the file takes -- and `thread.wait` gives up
+    on it, which is the one exit path FR-CG-9's job object was meant to be a
+    backstop for rather than the plan.
+    """
+    body = b"c" * (4 * fetch.Download.CHUNK)
+    dl, transport = download(tmp_path, body)
+    dl.should_cancel = cancel_after(2)
+
+    ok, reason = dl.run()
+
+    assert (ok, reason) == (False, fetch.Download.CANCELLED)
+    assert 0 < os.path.getsize(dl.partial_path) < len(body)
+    assert not os.path.exists(dl.path)
+
+
+def test_a_cancel_before_the_first_byte_opens_no_connection(tmp_path):
+    body = b"c" * fetch.Download.CHUNK
+    dl, transport = download(tmp_path, body)
+    dl.should_cancel = lambda: True
+
+    assert dl.run() == (False, fetch.Download.CANCELLED)
+    assert not any(kind == "get" for kind, *_rest in transport.requests)
+    assert not os.path.exists(dl.partial_path)
+
+
+def test_a_cancelled_transfer_is_resumed_by_the_next_run(tmp_path):
+    """Criterion v3-5, through the cancel path rather than through a failure."""
+    body = b"r" * (4 * fetch.Download.CHUNK)
+    dl, _ = download(tmp_path, body)
+    dl.should_cancel = cancel_after(2)
+    dl.run()
+    stopped_at = dl.partial_bytes()
+
+    resumed, transport = download(tmp_path, body)
+    assert resumed.run() == (True, None)
+    assert ("get", resumed.spec.download_url(), stopped_at) in transport.requests
+    assert open(resumed.path, "rb").read() == body
+
+
+def test_partial_bytes_is_zero_rather_than_an_error_when_there_is_none(tmp_path):
+    dl, _ = download(tmp_path, b"x")
+    assert dl.partial_bytes() == 0
+
+
+def test_a_refusal_is_flagged_as_one_and_a_failure_is_not(tmp_path):
+    """
+    The caller has to tell a substituted file from a dropped connection: one is
+    a re-qualification event and the other is worth retrying (FR-CG-7, Q26).
+    """
+    body = b"x" * fetch.Download.CHUNK
+    refused, _ = download(tmp_path, body, listing=[
+        {"path": "test.gguf", "lfs": {"oid": "0" * 64, "size": len(body)}}])
+    ok, _reason = refused.run()
+    assert ok is False and refused.refused is True
+
+    broken, _ = download(tmp_path, body, fail_after=0)
+    ok, _reason = broken.run()
+    assert ok is False and broken.refused is False
+
+
+def test_the_progress_hook_fires_once_before_the_first_chunk(tmp_path):
+    """
+    So a resumed download paints its bar at the resumed position immediately
+    rather than a megabyte later -- which is the difference between a bar that
+    opens at 41 % and one that appears to start again from zero.
+    """
+    body = b"p" * (2 * fetch.Download.CHUNK)
+    first, _ = download(tmp_path, body, fail_after=fetch.Download.CHUNK)
+    first.run()
+
+    resumed, _ = download(tmp_path, body)
+    seen = []
+    resumed.on_progress = lambda done, total: seen.append(done)
+    resumed.run()
+    assert seen[0] == fetch.Download.CHUNK
+
+
+# -- the figures themselves ---------------------------------------------------
+
+def test_the_pinned_size_reads_as_the_figure_every_document_uses():
+    """
+    6.87 GB is in `concierge_handoff.md` 1, in the narrative half of the
+    knowledge pack, on the panel's `Delete model` control and in the opt-in
+    card. One formatter, so they cannot disagree by a rounding rule.
+    """
+    spec = fetch.MODELS["gemma-4-12b-q4_k_m"]
+    assert fetch.human_bytes(spec.size_bytes) == "6.87 GB"
+    assert f"{spec.gigabytes:.2f}" == "6.87"
+
+
+def test_human_bytes_picks_a_unit_and_never_raises():
+    assert fetch.human_bytes(0) == "0 B"
+    assert fetch.human_bytes(512) == "512 B"
+    assert fetch.human_bytes(1024) == "1 KB"
+    assert fetch.human_bytes(5 * 1024 ** 2) == "5 MB"
+    assert fetch.human_bytes(2 * 1024 ** 3) == "2.00 GB"
+    assert fetch.human_bytes(None) == "?"
+
+
+def test_percent_is_clamped_and_survives_an_unknown_total():
+    assert fetch.percent_of(0, 100) == 0
+    assert fetch.percent_of(50, 100) == 50
+    assert fetch.percent_of(100, 100) == 100
+    assert fetch.percent_of(200, 100) == 100
+    assert fetch.percent_of(-5, 100) == 0
+    assert fetch.percent_of(5, 0) == 0
+    assert fetch.percent_of(5, None) == 0
+
+
+def test_progress_text_carries_the_fraction_and_the_absolute_figures():
+    """
+    A percentage alone tells somebody watching 6.87 GB nothing about how long is
+    left, and the absolute pair is what makes a resume legible as a resume.
+    """
+    text = fetch.progress_text(2 * 1024 ** 3, 8 * 1024 ** 3)
+    assert text == "2.00 GB of 8.00 GB · 25%"

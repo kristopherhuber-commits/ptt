@@ -33,6 +33,26 @@ the JSON decision envelope, so the live bubble shows JSON until the turn
 settles. Either way `close_turn()` replaces the bubble with `Turn.reply`, which
 is the authoritative text; the stream is a progress indicator that happens to be
 readable, never the transcript of record.
+
+The five things this panel can be showing (session 4)
+-----------------------------------------------------
+
+A chat is only one of them, and the other four are not modes the user chooses.
+`gate_for` decides, from the state machine plus the two opt-in keys, which of
+them the panel is *for* right now -- and it is a pure function for the same
+reason `state_caption` is: "why is there no chat here" is exactly the question a
+screenshot cannot answer and a unit test can.
+
+    disabled   no CUDA device, so nothing will ever run here (FR-CG-12)
+    opt in     nobody has been asked yet (FR-CG-6, Q26's `unset`)
+    off        asked and declined, or accepted and since switched off
+    download   opted in, weights absent or arriving (FR-CG-7, handoff 8)
+    chat       the panel section 7 describes
+
+The user's own pages -- the memory note, a saved transcript, the Concierge's
+settings -- sit on top of whichever of those is current and are left alone by a
+state change, because a download finishing must not close the note somebody is
+part-way through editing.
 """
 
 import json
@@ -41,11 +61,12 @@ from typing import NamedTuple
 from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtWidgets import (
     QFrame, QHBoxLayout, QLabel, QLineEdit, QMenu, QMessageBox, QPlainTextEdit,
-    QProgressBar, QPushButton, QScrollArea, QSizePolicy, QStackedWidget,
-    QVBoxLayout, QWidget,
+    QProgressBar, QPushButton, QScrollArea, QSizePolicy, QSlider,
+    QStackedWidget, QVBoxLayout, QWidget,
 )
 
-from ptt.concierge import state as state_mod
+from ptt import config
+from ptt.concierge import fetch, state as state_mod
 from ptt.ui.qt_marks import RegistrationMarks
 
 # -- row kinds ----------------------------------------------------------------
@@ -77,6 +98,20 @@ MAX_WIDTH = 520
 #: How many lines the input grows to before it scrolls.
 INPUT_MAX_LINES = 4
 
+#: The residency slider's bounds (FR-CG-8). Read off `config.FIELDS` rather than
+#: written here, because the field is validated against its own minimum and
+#: maximum on every write and a slider that offered 45 would be a control whose
+#: right-hand end is rejected.
+#:
+#: A `Field`'s bounds are optional, and `QAbstractSlider.setRange` takes two
+#: ints, so the fallback is FR-CG-8's own numbers rather than `None` -- a field
+#: that lost its bounds should leave the slider well-formed and let the write
+#: path do the refusing. `V-CG-128` asserts the two agree, so the fallback can
+#: never be silently in force.
+_RESIDENCY_RULE = config.FIELDS["concierge.idle_unload_minutes"]
+RESIDENCY_MIN = 0 if _RESIDENCY_RULE.minimum is None else int(_RESIDENCY_RULE.minimum)
+RESIDENCY_MAX = 30 if _RESIDENCY_RULE.maximum is None else int(_RESIDENCY_RULE.maximum)
+
 #: How much of the panel's width one bubble may take. Not 100 %, because a
 #: transcript where both speakers use the full width stops looking like a
 #: conversation and starts looking like a log.
@@ -93,6 +128,81 @@ BUSY_STATES = (state_mod.LOADING, state_mod.DOWNLOADING, state_mod.GENERATING,
 def is_busy(state):
     """Whether the panel should show that it is working. See `BUSY_STATES`."""
     return state in BUSY_STATES
+
+
+def shows_busy_bar(state):
+    """
+    Whether the header's *indeterminate* bar is the right indicator.
+
+    `downloading` is busy and does not get one: it is the only state that knows
+    how far along it is, and the download card carries a determinate bar with
+    the figures beside it. An indeterminate stripe above a bar reading 41 %
+    claims less than the panel already knows.
+    """
+    return is_busy(state) and state != state_mod.DOWNLOADING
+
+
+# -- what the panel is for right now ------------------------------------------
+
+GATE_DISABLED = "disabled"
+GATE_OPT_IN = "opt_in"
+GATE_OFF = "off"
+GATE_DOWNLOAD = "download"
+GATE_CHAT = "chat"
+
+#: Declaration order is precedence order, and the order is the argument.
+GATES = (GATE_DISABLED, GATE_OPT_IN, GATE_OFF, GATE_DOWNLOAD, GATE_CHAT)
+
+#: Indices into the panel's `QStackedWidget`, in the order they are added.
+PAGE_CHAT, PAGE_MEMORY, PAGE_ARCHIVE, PAGE_SETTINGS = 0, 1, 2, 3
+PAGE_OPT_IN, PAGE_DOWNLOAD, PAGE_BLOCKED = 4, 5, 6
+PAGES = (PAGE_CHAT, PAGE_MEMORY, PAGE_ARCHIVE, PAGE_SETTINGS,
+         PAGE_OPT_IN, PAGE_DOWNLOAD, PAGE_BLOCKED)
+
+#: The three the *user* opens, which a state change may not close under them.
+USER_PAGES = (PAGE_MEMORY, PAGE_ARCHIVE, PAGE_SETTINGS)
+
+#: One gate, one page. Two gates share `PAGE_BLOCKED`; `blocked_card` is what
+#: makes them different, and it is a function of the gate rather than of the
+#: page for exactly that reason.
+GATE_PAGES = {
+    GATE_DISABLED: PAGE_BLOCKED,
+    GATE_OPT_IN: PAGE_OPT_IN,
+    GATE_OFF: PAGE_BLOCKED,
+    GATE_DOWNLOAD: PAGE_DOWNLOAD,
+    GATE_CHAT: PAGE_CHAT,
+}
+
+
+def gate_for(state, opt_in, enabled):
+    """
+    Which of the five things the panel is showing. Pure; see the module docstring.
+
+    The precedence is the whole content of this function and each step of it is
+    a decision:
+
+    1. **No CUDA device wins outright** (FR-CG-12). Offering to download 6.87 GB
+       for a runtime that cannot start would be the worst possible order, and
+       asking somebody to opt in to it is barely better -- so a machine with no
+       GPU is never asked, and `opt_in` stays `unset` on it, truthfully.
+    2. **The opt-in card comes before the download** (Q26). `unset` means nobody
+       has been asked; a Download button is not a question.
+    3. **Declined or switched off** is a card, not a chat. `config.
+       concierge_switched_on` owns that pair so the thread adapter, which
+       refuses to launch the runtime, and this, which explains why, cannot
+       disagree.
+    4. **No weights, or weights arriving**, is the download card.
+    5. Everything else is the chat.
+    """
+    if state == state_mod.DISABLED:
+        return GATE_DISABLED
+    if opt_in == config.OPT_IN_UNSET:
+        return GATE_OPT_IN
+    if not config.concierge_switched_on(opt_in, enabled):
+        return GATE_OFF
+    if state in (state_mod.NOT_DOWNLOADED, state_mod.DOWNLOADING):
+        return GATE_DOWNLOAD
+    return GATE_CHAT
 
 
 class Row(NamedTuple):
@@ -293,6 +403,71 @@ def status_segment(state, model_label, idle_minutes):
     return ""
 
 
+# -- the download card (FR-CG-7, handoff 8) -----------------------------------
+
+def download_caption(state, done, total, partial, refusal):
+    """
+    The line under the download card's heading. One sentence, four cases.
+
+    A refusal is stated in full and is the only one of the four that does not
+    end in an offer, because there is nothing to offer: the file published under
+    that name is not the file this build was qualified against, and no button
+    here can change that.
+    """
+    if refusal:
+        return refusal
+    if state == state_mod.DOWNLOADING:
+        return fetch.progress_text(done, total)
+    if partial:
+        return (f"{fetch.human_bytes(partial)} is already downloaded. "
+                f"Continuing picks up where it stopped.")
+    return ("The Concierge runs a language model on this machine. The weights "
+            "are downloaded once and never leave it.")
+
+
+def download_button_text(state, partial, refusal):
+    """
+    What the card's one button says, or `""` when it should not be there.
+
+    `""` is the refusal and nothing else: the button is then hidden *and*
+    disabled, because a control the user is deliberately not able to click past
+    must not still be clickable from a keyboard or from code.
+    """
+    if refusal:
+        return ""
+    if state == state_mod.DOWNLOADING:
+        return "Pause"
+    return "Continue the download" if partial else "Download"
+
+
+def percent_downloaded(view):
+    """
+    The bar's position, `0`-`100`.
+
+    Falls back to the partial file's share of the whole before a transfer
+    starts, so a card offering `Continue the download` opens with the bar
+    already where the last run left it rather than at zero.
+    """
+    if view.download_total and view.download_done:
+        return fetch.percent_of(view.download_done, view.download_total)
+    if view.download_partial and view.model_gigabytes:
+        return fetch.percent_of(view.download_partial,
+                                view.model_gigabytes * (1024 ** 3))
+    return 0
+
+
+def can_download(state, refusal):
+    """
+    Whether the download may be *started* right now.
+
+    A refusal is latched by the harness and reported here as a control that is
+    not offered at all rather than one that is offered and fails: FR-CG-7 calls
+    a digest mismatch a re-qualification event, and a Retry button would invite
+    the user to click past exactly the thing the check exists to stop (Q26).
+    """
+    return (not refusal) and state == state_mod.NOT_DOWNLOADED
+
+
 def can_send(state):
     """
     Whether the input accepts a message.
@@ -314,6 +489,66 @@ def can_send(state):
     """
     return (state_mod.can_serve(state)
             or state in (state_mod.GENERATING, state_mod.STOPPED))
+
+
+# -- the card that says why there is no chat ----------------------------------
+
+#: FR-CG-12, in the Model tab's own words. Criterion v2-7's pattern is not a
+#: layout, it is this: name the hardware fact, say what the consequence is, and
+#: point at the tab that has the detail. Copied in shape, not in wording, because
+#: the consequence is a different one -- the Model tab degrades to the CPU and
+#: this does not run at all.
+NO_CUDA_TEXT = (
+    "No CUDA device was found, so the Concierge cannot run on this machine. It "
+    "needs a GPU to hold a 12-billion-parameter model; there is no CPU fallback, "
+    "because one would answer a question in several minutes.\n\n"
+    "Dictation is unaffected — it falls back to the CPU on its own. See the "
+    "Diagnostics tab.")
+
+OFF_TEXT = (
+    "The Concierge is switched off. Nothing about dictation changes while it is: "
+    "no model is downloaded, no process runs, and no VRAM is held.\n\n"
+    "Turning it on downloads a 6.87 GB model once, and you can switch it off "
+    "again from this panel at any time.")
+
+
+def blocked_card(gate, detail=""):
+    """
+    `(heading, body, button)` for the card that stands in for the chat.
+
+    One page rather than two, because the two differ only in their words and in
+    whether there is a way out: the no-CUDA case has no button, and a page that
+    renders a disabled button beside "cannot run on this machine" would be
+    offering something.
+    """
+    if gate == GATE_DISABLED:
+        # The machine's detail is appended rather than substituted. It is one
+        # short clause and the card is the only place the consequence and the
+        # pointer to Diagnostics are stated, so replacing the paragraph with the
+        # clause would trade the explanation for the reason.
+        return ("THE CONCIERGE IS UNAVAILABLE",
+                f"{NO_CUDA_TEXT}\n\n{detail}" if detail else NO_CUDA_TEXT,
+                "")
+    return ("THE CONCIERGE IS OFF", OFF_TEXT, "Turn the Concierge on")
+
+
+def residency_text(minutes):
+    """
+    What the residency slider's value means, in a sentence (FR-CG-8).
+
+    `0` is not "unload immediately" and the slider must not let anybody read it
+    that way: it is the one value whose meaning is a different event entirely --
+    the panel closing rather than a timer expiring -- and the harness's idle
+    timer explicitly declines to own it (`Server.start_idle_timer`).
+    """
+    try:
+        minutes = int(minutes)
+    except (TypeError, ValueError):
+        minutes = 0
+    if minutes <= 0:
+        return "Unloads as soon as this panel is closed."
+    return (f"Unloads {minutes} minute{'s' if minutes != 1 else ''} after the "
+            f"last message, or when the application exits.")
 
 
 def placeholder(state, detail=""):
@@ -357,12 +592,27 @@ class ConciergeView:
     """
 
     def __init__(self, state=state_mod.NOT_DOWNLOADED, detail="",
-                 model_label="", idle_minutes=5, session_name=""):
+                 model_label="", idle_minutes=5, session_name="",
+                 opt_in=config.OPT_IN_ACCEPTED, enabled=True):
         self.state = state
         self.detail = detail
         self.model_label = model_label
+        self.model_gigabytes = 0.0
         self.idle_minutes = idle_minutes
         self.session_name = session_name
+        #: Q26's tri-state and the switch beside it. Held here rather than read
+        #: from `Settings` because this object is the panel's whole truth and a
+        #: widget that reached past it for one value would be the split this
+        #: class exists to make.
+        self.opt_in = opt_in
+        self.enabled = bool(enabled)
+        #: The download's two numbers, the resumable remainder on disk, and the
+        #: latched refusal. `download_refusal` is never cleared here: the
+        #: harness latches it and the panel renders the latch (FR-CG-7, Q26).
+        self.download_done = 0
+        self.download_total = 0
+        self.download_partial = 0
+        self.download_refusal = ""
         self.rows = []
         self.memory_text = ""
         self.memory_has_previous = False
@@ -393,6 +643,34 @@ class ConciergeView:
 
     def placeholder(self):
         return placeholder(self.state, self.detail)
+
+    # -- the gate (session 4) -----------------------------------------------
+
+    def gate(self):
+        """Which of the five things this panel is for. See `gate_for`."""
+        return gate_for(self.state, self.opt_in, self.enabled)
+
+    def set_download(self, done, total):
+        self.download_done = int(done or 0)
+        self.download_total = int(total or 0)
+
+    def download_caption(self):
+        return download_caption(self.state, self.download_done,
+                                self.download_total, self.download_partial,
+                                self.download_refusal)
+
+    def download_button_text(self):
+        return download_button_text(self.state, self.download_partial,
+                                    self.download_refusal)
+
+    def can_download(self):
+        return can_download(self.state, self.download_refusal)
+
+    def blocked_card(self):
+        return blocked_card(self.gate(), self.detail)
+
+    def residency_text(self):
+        return residency_text(self.idle_minutes)
 
     # -- rows ---------------------------------------------------------------
 
@@ -847,6 +1125,18 @@ class ConciergePanel(RegistrationMarks, QWidget):
     memory_restore_requested = Signal()
     delete_model_requested = Signal()
     close_requested = Signal()
+    #: session 4. `opt_in_requested(True)` is the accept, `(False)` the decline
+    #: -- one signal rather than two, because the card asks one question and the
+    #: controller writes one key (Q26).
+    opt_in_requested = Signal(bool)
+    #: `concierge.enabled`, which had no control anywhere before session 4 --
+    #: the same gap the residency slider had, and the reason the off card can
+    #: honestly say "you can switch it off again from this panel".
+    enabled_requested = Signal(bool)
+    download_requested = Signal()
+    pause_download_requested = Signal()
+    residency_requested = Signal(int)
+    setup_requested = Signal()
 
     #: A transient one-line note for the window's status bar, exactly as
     #: `InstantApplyPanel.message` is. Paired with a notice row rather than
@@ -863,19 +1153,38 @@ class ConciergePanel(RegistrationMarks, QWidget):
 
         self.view = ConciergeView(model_label=model_label)
         self._saved = ()
+        #: Guards the residency slider while it is being written *from* the
+        #: settings object, so a programmatic set is not read back as a drag and
+        #: written straight to disk -- `ModelPanel._syncing`'s argument, one
+        #: control down.
+        self._syncing = False
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
         outer.addWidget(self._build_header())
 
+        # Added in `PAGES` order, which is what makes the constants above
+        # indices rather than a second list to keep in step.
         self._pages = QStackedWidget()
-        self._pages.addWidget(self._build_chat_page())
-        self._pages.addWidget(self._build_memory_page())
-        self._pages.addWidget(self._build_archive_page())
+        builders = {
+            PAGE_CHAT: self._build_chat_page,
+            PAGE_MEMORY: self._build_memory_page,
+            PAGE_ARCHIVE: self._build_archive_page,
+            PAGE_SETTINGS: self._build_settings_page,
+            PAGE_OPT_IN: self._build_opt_in_page,
+            PAGE_DOWNLOAD: self._build_download_page,
+            PAGE_BLOCKED: self._build_blocked_page,
+        }
+        for index in PAGES:
+            self._pages.addWidget(builders[index]())
         outer.addWidget(self._pages, 1)
 
         self._render_header()
+        # The cards too, not just the page choice: a panel built and never
+        # handed a controller -- which is every path in `qt_window.py` -- would
+        # otherwise show three blank cards.
+        self._render_cards()
 
     # -- construction -------------------------------------------------------
 
@@ -916,7 +1225,11 @@ class ConciergePanel(RegistrationMarks, QWidget):
         self._state_tag = QLabel("")
         self._state_tag.setObjectName("conciergeStateTag")
         bottom.addWidget(self._name, 1)
-        bottom.addWidget(self._state_tag, 0)
+        # Right-aligned explicitly, because the name field is hidden on the
+        # gate pages (there is no session to name on an opt-in card) and a tag
+        # that jumped to the left margin whenever it did would read as a
+        # different control.
+        bottom.addWidget(self._state_tag, 0, Qt.AlignmentFlag.AlignRight)
         box.addLayout(bottom)
 
         self._caption = _wrapping_label("", "conciergeCaption")
@@ -964,7 +1277,10 @@ class ConciergePanel(RegistrationMarks, QWidget):
         self._saved_menu = menu.addMenu("Saved sessions")
         self._saved_menu.setEnabled(False)
         menu.addSeparator()
+        self._setup_action = menu.addAction("Guided setup", self._on_setup)
         menu.addAction("Memory note…", self._on_open_memory)
+        menu.addAction("Concierge settings…",
+                       lambda: self._show_page(PAGE_SETTINGS))
         menu.addSeparator()
         self._delete_action = menu.addAction("Delete model…", self._on_delete_model)
         self._menu = menu
@@ -1041,7 +1357,7 @@ class ConciergePanel(RegistrationMarks, QWidget):
         buttons = QHBoxLayout()
         buttons.setSpacing(8)
         back = QPushButton("Back")
-        back.clicked.connect(lambda _checked=False: self._show_page(0))
+        back.clicked.connect(lambda _checked=False: self._show_base_page())
         self._memory_restore = QPushButton("Restore previous")
         self._memory_restore.clicked.connect(
             lambda _checked=False: self.memory_restore_requested.emit())
@@ -1072,7 +1388,7 @@ class ConciergePanel(RegistrationMarks, QWidget):
         self._archive_title = QLabel("")
         self._archive_title.setObjectName("conciergeSectionTitle")
         back = QPushButton("Back")
-        back.clicked.connect(lambda _checked=False: self._show_page(0))
+        back.clicked.connect(lambda _checked=False: self._show_base_page())
         head_row.addWidget(self._archive_title, 1)
         head_row.addWidget(back, 0)
         box.addWidget(head)
@@ -1081,10 +1397,281 @@ class ConciergePanel(RegistrationMarks, QWidget):
         box.addWidget(self._archive, 1)
         return page
 
+    # -- the four session-4 pages -------------------------------------------
+
+    def _card_page(self, object_name):
+        """
+        The shell the three cards share: heading, body, buttons, centred.
+
+        A card rather than a dialog, and inside the panel rather than over the
+        window, because `gui_handoff.md` section 6 spends this window's entire
+        modal budget on two destructive confirmations. "Would you like the
+        Concierge?" is not one of them, and a modal at first run would be the
+        one thing every v2.0 user sees before anything they asked for.
+        """
+        page = QWidget()
+        page.setObjectName(object_name)
+        box = QVBoxLayout(page)
+        box.setContentsMargins(18, 18, 18, 18)
+        box.setSpacing(10)
+        box.addStretch(1)
+        title = QLabel("")
+        title.setObjectName("conciergeSectionTitle")
+        title.setWordWrap(True)
+        body = _wrapping_label("", "conciergeCardBody")
+        # Selectable, for the refusal above all: a digest mismatch is evidence
+        # somebody has to be able to copy into a bug report, and the panel is
+        # where they are looking when it happens.
+        body.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        box.addWidget(title)
+        box.addWidget(body)
+        return page, box, title, body
+
+    def _build_opt_in_page(self):
+        """
+        The first-run card (FR-CG-6, handoff 8.1). Asked once, answered once.
+
+        Both answers are final in the sense Q26 means: `accepted` and `declined`
+        are both written to `concierge.opt_in`, and neither leaves the card able
+        to come back. Declining is **not** a dead end -- the Concierge entries
+        stay in the tray menu and the tab strip, and opening the panel then
+        shows the off card with a way back in -- but nothing asks again.
+        """
+        page, box, title, body = self._card_page("conciergeOptInPage")
+        title.setText("MEET THE CONCIERGE")
+        body.setText(
+            "PTT Dictation 3.0 can run a local assistant beside these settings. "
+            "Ask it what a setting does and it explains; tell it to change one "
+            "and it does, with an Undo beside every change.\n\n"
+            "It runs on this machine: no account, no subscription, and nothing "
+            "you type or dictate leaves the computer. Saying yes downloads a "
+            "6.87 GB model once, in the background, while dictation carries on "
+            "as normal.")
+        self._opt_in_note = _wrapping_label("", "conciergeSectionNote")
+        box.addWidget(self._opt_in_note)
+
+        buttons = QHBoxLayout()
+        buttons.setSpacing(8)
+        decline = QPushButton("No thanks")
+        decline.clicked.connect(
+            lambda _checked=False: self.opt_in_requested.emit(False))
+        accept = QPushButton("Yes — set it up")
+        accept.setObjectName("conciergeSend")
+        accept.clicked.connect(
+            lambda _checked=False: self.opt_in_requested.emit(True))
+        buttons.addStretch(1)
+        buttons.addWidget(decline)
+        buttons.addWidget(accept)
+        box.addLayout(buttons)
+        box.addWidget(_wrapping_label(
+            "You are asked this once. Either way, the Concierge stays in the "
+            "tray menu and at the end of the tab strip, so you can change your "
+            "mind later.", "conciergeSectionNote"))
+        box.addStretch(2)
+        return page
+
+    def _build_download_page(self):
+        """
+        The download card (FR-CG-7, handoff 8.2, mockup 5b).
+
+        A **determinate** bar, because the total is known before the first byte:
+        the pinned spec carries the exact size, so a resumed transfer opens at
+        41 % rather than at 0 % and the user can see it resumed.
+        """
+        page, box, title, body = self._card_page("conciergeDownloadPage")
+        self._download_title = title
+        self._download_body = body
+        title.setText("THE CONCIERGE MODEL")
+
+        self._download_bar = QProgressBar()
+        self._download_bar.setObjectName("conciergeDownloadBar")
+        self._download_bar.setRange(0, 100)
+        self._download_bar.setTextVisible(False)
+        self._download_bar.setFixedHeight(4)
+        box.addWidget(self._download_bar)
+
+        self._download_note = _wrapping_label(
+            "Dictation is unaffected while this runs, and the download picks up "
+            "where it left off if the application is closed part-way.",
+            "conciergeSectionNote")
+        box.addWidget(self._download_note)
+
+        buttons = QHBoxLayout()
+        buttons.setSpacing(8)
+        self._download_button = QPushButton("Download")
+        self._download_button.setObjectName("conciergeSend")
+        self._download_button.clicked.connect(self._on_download_clicked)
+        buttons.addStretch(1)
+        buttons.addWidget(self._download_button)
+        box.addLayout(buttons)
+        box.addStretch(2)
+        return page
+
+    def _build_blocked_page(self):
+        """The no-CUDA card and the switched-off card. See `blocked_card`."""
+        page, box, title, body = self._card_page("conciergeBlockedPage")
+        self._blocked_title = title
+        self._blocked_body = body
+
+        buttons = QHBoxLayout()
+        buttons.setSpacing(8)
+        self._blocked_button = QPushButton("")
+        self._blocked_button.setObjectName("conciergeSend")
+        self._blocked_button.clicked.connect(
+            lambda _checked=False: self.opt_in_requested.emit(True))
+        buttons.addStretch(1)
+        buttons.addWidget(self._blocked_button)
+        box.addLayout(buttons)
+        box.addStretch(2)
+        return page
+
+    def _build_settings_page(self):
+        """
+        The Concierge's own controls (FR-CG-8, Q25).
+
+        On this panel and nowhere else, which is what the shipped knowledge pack
+        already tells the user -- `concierge_narrative.md` lists the residency
+        slider, `Delete model`, Undo, the memory note and sessions as "its
+        controls, all on this panel". Putting the slider on the Advanced tab
+        would have made the Concierge's own answer about itself wrong, and would
+        have broken that tab's never-writes invariant (`V-UI-12`) besides.
+        """
+        page = QWidget()
+        page.setObjectName("conciergeSettingsPage")
+        box = QVBoxLayout(page)
+        box.setContentsMargins(12, 12, 12, 12)
+        box.setSpacing(8)
+
+        title = QLabel("CONCIERGE SETTINGS")
+        title.setObjectName("conciergeSectionTitle")
+        box.addWidget(title)
+
+        box.addSpacing(4)
+        residency = QLabel("VRAM RESIDENCY")
+        residency.setObjectName("caption")
+        box.addWidget(residency)
+        box.addWidget(_wrapping_label(
+            "How long the language model stays in video memory after the last "
+            "message. Resident and idle it costs dictation nothing measurable; "
+            "while it is answering, a dictation takes about 1.5 times as long.",
+            "conciergeSectionNote"))
+
+        row = QHBoxLayout()
+        row.setSpacing(10)
+        self._residency = QSlider(Qt.Orientation.Horizontal)
+        self._residency.setObjectName("conciergeResidency")
+        self._residency.setRange(RESIDENCY_MIN, RESIDENCY_MAX)
+        self._residency.setPageStep(5)
+        self._residency.setTickPosition(QSlider.TickPosition.NoTicks)
+        self._residency.valueChanged.connect(self._on_residency_changed)
+        self._residency.sliderReleased.connect(self._on_residency_settled)
+        self._residency_value = QLabel("")
+        self._residency_value.setObjectName("conciergeResidencyValue")
+        self._residency_value.setMinimumWidth(58)
+        self._residency_value.setAlignment(Qt.AlignmentFlag.AlignRight
+                                           | Qt.AlignmentFlag.AlignVCenter)
+        row.addWidget(self._residency, 1)
+        row.addWidget(self._residency_value, 0)
+        box.addLayout(row)
+
+        self._residency_note = _wrapping_label("", "conciergeSectionNote")
+        box.addWidget(self._residency_note)
+
+        box.addSpacing(12)
+        model = QLabel("MODEL")
+        model.setObjectName("caption")
+        box.addWidget(model)
+        self._settings_model = _wrapping_label("", "conciergeSectionNote")
+        box.addWidget(self._settings_model)
+
+        box.addSpacing(12)
+        switch = QLabel("THE CONCIERGE ITSELF")
+        switch.setObjectName("caption")
+        box.addWidget(switch)
+        box.addWidget(_wrapping_label(
+            "Switching it off stops the runtime and leaves every other part of "
+            "the application exactly as it is. The downloaded model stays on "
+            "disk; delete it below to reclaim the space as well.",
+            "conciergeSectionNote"))
+        self._settings_off = QPushButton("Switch the Concierge off")
+        self._settings_off.clicked.connect(
+            lambda _checked=False: self.enabled_requested.emit(False))
+        off_row = QHBoxLayout()
+        off_row.addWidget(self._settings_off)
+        off_row.addStretch(1)
+        box.addLayout(off_row)
+
+        box.addStretch(1)
+        buttons = QHBoxLayout()
+        buttons.setSpacing(8)
+        back = QPushButton("Back")
+        back.clicked.connect(lambda _checked=False: self._show_base_page())
+        self._settings_delete = QPushButton("Delete model")
+        self._settings_delete.clicked.connect(
+            lambda _checked=False: self._on_delete_model())
+        buttons.addWidget(back)
+        buttons.addStretch(1)
+        buttons.addWidget(self._settings_delete)
+        box.addLayout(buttons)
+        return page
+
     # -- handlers -----------------------------------------------------------
 
     def _show_page(self, index):
         self._pages.setCurrentIndex(index)
+
+    def _base_page(self):
+        """The page the current gate asks for. See `gate_for`."""
+        return GATE_PAGES[self.view.gate()]
+
+    def _show_base_page(self):
+        self._show_page(self._base_page())
+
+    def _sync_page(self):
+        """
+        Put the right page up, without closing one the user opened.
+
+        A download that finishes while somebody is reading the memory note must
+        not throw them out of it; the note's own `Back` is what returns them,
+        and by then it returns them to the chat.
+        """
+        if self._pages.currentIndex() in USER_PAGES:
+            return
+        self._show_base_page()
+
+    def _on_download_clicked(self):
+        if self.view.state == state_mod.DOWNLOADING:
+            self.pause_download_requested.emit()
+        elif self.view.can_download():
+            self.download_requested.emit()
+
+    def _on_setup(self):
+        """`Guided setup` from the menu (FR-CG-4)."""
+        if self.view.can_send():
+            self.setup_requested.emit()
+        else:
+            self.notify("The Concierge has to be running before it can walk "
+                        "you through setup.")
+
+    def _on_residency_changed(self, value):
+        """
+        Live label on every tick; a write only when the drag has settled.
+
+        `config.json` is rewritten and broadcast on every accepted write, and a
+        slider dragged from 0 to 30 emits thirty-one of them. The label follows
+        the thumb because a slider whose readout lags is a slider nobody trusts;
+        the write waits for `sliderReleased`, or happens immediately when the
+        value moved by keyboard, where there is no drag to end.
+        """
+        self._residency_value.setText(f"{int(value)} min" if value else "on close")
+        self._residency_note.setText(residency_text(value))
+        if self._syncing or self._residency.isSliderDown():
+            return
+        self.residency_requested.emit(int(value))
+
+    def _on_residency_settled(self):
+        if not self._syncing:
+            self.residency_requested.emit(int(self._residency.value()))
 
     def _on_submit(self):
         text = self._input.toPlainText().strip()
@@ -1098,7 +1685,7 @@ class ConciergePanel(RegistrationMarks, QWidget):
 
     def _on_open_memory(self):
         self.memory_open_requested.emit()
-        self._show_page(1)
+        self._show_page(PAGE_MEMORY)
 
     def _confirm(self, title, text):
         """
@@ -1160,12 +1747,12 @@ class ConciergePanel(RegistrationMarks, QWidget):
             style = self._state_tag.style()
             style.unpolish(self._state_tag)
             style.polish(self._state_tag)
-        busy = is_busy(self.view.state)
-        self._busy.setVisible(busy)
+        self._busy.setVisible(shows_busy_bar(self.view.state))
         self._caption.setText(self.view.caption())
         self._input.setPlaceholderText(self.view.placeholder())
         self._input.setEnabled(self.view.can_send())
         self._send.setEnabled(self.view.can_send())
+        self._setup_action.setEnabled(self.view.can_send())
         # Disabled when there is nothing to put back, with a tooltip that says
         # so: a greyed control that does not explain its greying is the failure
         # `gui_handoff.md` section 6 names for a disabled button, and Qt does
@@ -1178,26 +1765,132 @@ class ConciergePanel(RegistrationMarks, QWidget):
             f"this session" if pending
             else "Nothing to put back: the Concierge has not changed anything "
                  "this session")
+        # The two session controls are hidden, not disabled, on the gate pages.
+        # There is no session on an opt-in card and there never was one, so a
+        # greyed control would be claiming something is temporarily unavailable
+        # that has never applied here.
+        chatting = self.view.gate() == GATE_CHAT
+        self._name.setVisible(chatting)
+        self._restore.setVisible(chatting)
+
+    def _render_cards(self):
+        """
+        The three gate pages, repainted from the view. Cheap and unconditional.
+
+        Three labels and a progress bar; running it on every state change costs
+        nothing and removes the whole class of bug where a card is correct
+        except on the path that forgot to refresh it.
+        """
+        gate = self.view.gate()
+        heading, body, button = self.view.blocked_card()
+        self._blocked_title.setText(heading)
+        self._blocked_body.setText(body)
+        self._blocked_button.setText(button)
+        self._blocked_button.setVisible(bool(button))
+
+        self._download_body.setText(self.view.download_caption())
+        # Hidden **and** disabled when there is nothing to offer. Qt delivers
+        # `click()` to a hidden-but-enabled button, so hiding alone would leave
+        # the one control FR-CG-7 says the user must not be able to click past
+        # reachable from code and from a keyboard shortcut.
+        label = self.view.download_button_text()
+        self._download_button.setText(label or "Download")
+        self._download_button.setVisible(bool(label))
+        self._download_button.setEnabled(bool(label))
+        self._download_note.setVisible(not self.view.download_refusal)
+        downloading = self.view.state == state_mod.DOWNLOADING
+        self._download_bar.setVisible(downloading or bool(self.view.download_partial))
+        self._download_bar.setValue(percent_downloaded(self.view))
+
+        size = (f"about {self.view.model_gigabytes:.2f} GB"
+                if self.view.model_gigabytes else "about 6.9 GB")
+        self._download_title.setText(
+            f"THE CONCIERGE MODEL · {self.view.model_label or 'local'}")
+        self._opt_in_note.setText(
+            f"Download size {size}. It is fetched once and kept on this machine.")
+
+        self._settings_model.setText(
+            f"{self.view.model_label or 'The Concierge model'} — {size}, "
+            f"currently {self.view.state.replace('_', ' ')}.")
+        self._settings_delete.setEnabled(
+            self.view.state not in (state_mod.NOT_DOWNLOADED,
+                                    state_mod.DOWNLOADING,
+                                    state_mod.DISABLED))
+        self._settings_off.setEnabled(self.view.enabled
+                                      and self.view.state != state_mod.DISABLED)
+        self._sync_page()
+        return gate
 
     def _render(self):
         self._transcript.sync(self.view.rows)
         self._render_header()
+        self._render_cards()
 
     # -- what the controller calls, all of it on the GUI thread -------------
 
     def set_model_label(self, label, size_gb=None):
         self.view.model_label = label
         if size_gb:
+            self.view.model_gigabytes = float(size_gb)
             self._delete_action.setText(f"Delete model ({size_gb:.2f} GB)…")
+            self._settings_delete.setText(f"Delete model ({size_gb:.2f} GB)")
         self._render_header()
+        self._render_cards()
 
     def set_idle_minutes(self, minutes):
+        """
+        The residency setting, from `config.json`. Writes the slider, guarded.
+
+        `_syncing` is what stops this becoming a write of its own: the slider's
+        `valueChanged` fires on a programmatic set exactly as it does on a drag,
+        and without the guard the broadcast that follows a Concierge-made write
+        would bounce straight back through `Settings.set` (FR-CG-2's hop is a
+        loop unless somebody breaks it).
+        """
         self.view.idle_minutes = minutes
+        self._syncing = True
+        try:
+            value = int(minutes)
+        except (TypeError, ValueError):
+            value = 0
+        try:
+            self._residency.setValue(max(RESIDENCY_MIN, min(RESIDENCY_MAX, value)))
+            self._on_residency_changed(self._residency.value())
+        finally:
+            self._syncing = False
         self._render_header()
+
+    def set_opt_in(self, opt_in, enabled=True):
+        """The two keys that decide whether there is a chat here at all (Q26)."""
+        self.view.opt_in = opt_in
+        self.view.enabled = bool(enabled)
+        self._render_header()
+        self._render_cards()
+
+    def set_download_progress(self, done, total):
+        self.view.set_download(done, total)
+        self._render_cards()
+
+    def set_download_partial(self, partial):
+        """How much of a resumable transfer is on disk (criterion v3-5)."""
+        self.view.download_partial = int(partial or 0)
+        self._render_cards()
+
+    def set_download_refusal(self, reason):
+        """
+        A pinned-digest mismatch, latched (FR-CG-7, Q26).
+
+        The card loses its button rather than gaining a disabled one: there is
+        nothing to retry, and this is the one thing in the panel the user is
+        deliberately not able to click past.
+        """
+        self.view.download_refusal = reason or ""
+        self._render_cards()
 
     def set_state(self, state, detail=""):
         self.view.set_state(state, detail)
         self._render_header()
+        self._render_cards()
 
     def append_token(self, text):
         self.view.add_token(text)
@@ -1240,7 +1933,7 @@ class ConciergePanel(RegistrationMarks, QWidget):
         self.view.clear()
         self._name.clear()
         self.view.session_name = ""
-        self._show_page(0)
+        self._show_base_page()
         self._render()
 
     def set_memory(self, text, has_previous):
@@ -1253,7 +1946,7 @@ class ConciergePanel(RegistrationMarks, QWidget):
         """
         self.view.memory_text = text
         self.view.memory_has_previous = bool(has_previous)
-        if self._pages.currentIndex() != 1 or not self._memory_edit.hasFocus():
+        if self._pages.currentIndex() != PAGE_MEMORY or not self._memory_edit.hasFocus():
             self._memory_edit.setPlainText(text)
         self._memory_restore.setEnabled(bool(has_previous))
         self._memory_status.setText(
@@ -1287,7 +1980,7 @@ class ConciergePanel(RegistrationMarks, QWidget):
             return
         self._archive_title.setText(f"{saved.name} · {saved.saved_at}")
         self._archive.sync([Row.from_dict(raw) for raw in saved.rows])
-        self._show_page(2)
+        self._show_page(PAGE_ARCHIVE)
 
     def session_name(self):
         return self._name.text().strip()

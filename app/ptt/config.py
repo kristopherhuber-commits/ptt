@@ -240,6 +240,28 @@ def _parse_vocabulary(raw, note="config.json", strict=False):
 #: `unset` rather than silently opted in (`concierge_design.md` 10, Q26).
 OPT_IN_STATES = ("unset", "accepted", "declined")
 
+#: The three values, named, so nothing spells one of them as a literal.
+OPT_IN_UNSET, OPT_IN_ACCEPTED, OPT_IN_DECLINED = OPT_IN_STATES
+
+
+def concierge_switched_on(opt_in, enabled):
+    """
+    Whether the Concierge runtime may start, given the two keys that decide it.
+
+    Here rather than in the UI because three surfaces ask it and they must not
+    disagree: the thread adapter, which refuses to launch `llama-server`; the
+    controller, which refuses to start a 6.87 GB download; and the panel, which
+    renders the card that explains why. Q26 keeps the keys separate -- declined
+    is an answer to a question, `enabled: false` is a switch -- and this is the
+    one place that says what the pair means together.
+
+    **`unset` is off.** Nobody has been asked, so nothing runs: not the runtime,
+    and above all not the download. The opt-in card is the thing that asks, and
+    the panel reaches it by testing `unset` *before* it asks this -- so a card
+    that has to be reachable is never gated behind the switch it exists to set.
+    """
+    return opt_in == OPT_IN_ACCEPTED and bool(enabled)
+
 #: How the Concierge asks the model for a decision. `grammar` constrains the
 #: sampler with a generated JSON schema; `native` sends an OpenAI-style tools
 #: array and trusts the model's own chat template. Both are generated from one

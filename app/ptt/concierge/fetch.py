@@ -167,6 +167,49 @@ class HttpsTransport:
         return response.status, total, response
 
 
+# -- what the progress bar says -----------------------------------------------
+#
+# Pure, and here rather than in the panel, because the same two numbers are
+# rendered in three places -- the panel's caption, the state machine's `detail`
+# and the status bar -- and three copies of "divide by 1024 three times" is how
+# the three come to disagree about whether 6.87 GB is 6.87 or 6.9.
+
+def human_bytes(count):
+    """`7381382944` -> `"6.87 GB"`. Binary units, matching handoff section 1."""
+    try:
+        count = float(count)
+    except (TypeError, ValueError):
+        return "?"
+    for unit, size, places in (("GB", 1024 ** 3, 2), ("MB", 1024 ** 2, 0),
+                               ("KB", 1024, 0)):
+        if count >= size:
+            return f"{count / size:.{places}f} {unit}"
+    return f"{int(count)} B"
+
+
+def percent_of(done, total):
+    """`0`-`100`, clamped, and `0` rather than a crash when the total is unknown."""
+    try:
+        done, total = float(done), float(total)
+    except (TypeError, ValueError):
+        return 0
+    if total <= 0:
+        return 0
+    return max(0, min(100, int(done * 100 // total)))
+
+
+def progress_text(done, total):
+    """
+    The one sentence the download reports itself with.
+
+    It carries both the fraction and the absolute figures on purpose: a
+    percentage alone tells somebody watching a 6.87 GB transfer nothing about
+    how long is left, and the absolute pair is what makes a resumed download
+    legible as a resume rather than as a restart.
+    """
+    return f"{human_bytes(done)} of {human_bytes(total)} · {percent_of(done, total)}%"
+
+
 # -- the download -------------------------------------------------------------
 
 class Download:
@@ -181,11 +224,27 @@ class Download:
 
     CHUNK = 1024 * 1024
 
-    def __init__(self, spec, directory, transport=None, on_progress=None):
+    #: `run()`'s reason when `should_cancel` asked it to stop. A sentinel rather
+    #: than a sentence because the caller has to tell "the user quit" apart from
+    #: "the transfer broke" -- one of those is worth reporting and the other is
+    #: what the user just asked for.
+    CANCELLED = "cancelled"
+
+    def __init__(self, spec, directory, transport=None, on_progress=None,
+                 should_cancel=None):
         self.spec = spec
         self.directory = directory
         self.transport = transport or HttpsTransport()
         self.on_progress = on_progress or (lambda _done, _total: None)
+        #: Polled once per chunk. The application exits while a 6.87 GB transfer
+        #: is in flight far more often than it finishes one, and a download that
+        #: cannot be interrupted holds the shutdown path open for as long as the
+        #: rest of the file takes.
+        self.should_cancel = should_cancel or (lambda: False)
+        #: Set by `run()` when the published `oid` disagreed with the pin. The
+        #: caller latches on this: a refusal is a re-qualification event and not
+        #: a retryable failure (FR-CG-7, Q26).
+        self.refused = False
 
     @property
     def path(self):
@@ -198,6 +257,20 @@ class Download:
     def already_have(self):
         """Whether the verified file is already on disk."""
         return os.path.exists(self.path) and os.path.getsize(self.path) == self.spec.size_bytes
+
+    def partial_bytes(self):
+        """
+        How much of a resumable transfer is already on disk, or 0.
+
+        The panel reads it before a download starts, so the card can offer
+        "Resume" over a figure rather than "Download" over nothing -- which is
+        the visible half of criterion v3-5, and the only way a user can tell
+        that relaunching resumed rather than started again.
+        """
+        try:
+            return os.path.getsize(self.partial_path)
+        except OSError:
+            return 0
 
     # -- the pre-download cross-check (Q26) ---------------------------------
 
@@ -242,11 +315,20 @@ class Download:
                       f"{self.spec.filename}; the pinned digest still applies.")
             return True, None
         if oid != self.spec.sha256.lower():
+            # Short digests in the sentence, full ones in the log. The sentence
+            # is rendered in a 360 px panel and a 64-character hex string has no
+            # break opportunity in it, so a full digest is a line that runs off
+            # the edge -- and this is the one message in the application the
+            # user is deliberately not able to click past, so it has to be
+            # readable. `debug_log.txt` is where an investigator looks anyway.
             reason = (
-                f"the file published as {self.spec.filename} has digest {oid}, "
-                f"not the pinned {self.spec.sha256}. This is not the model this "
-                f"build was qualified against, so it will not be downloaded.")
-            log_debug(f"Concierge: REFUSED the download -- {reason}")
+                f"the file published as {self.spec.filename} has digest "
+                f"{oid[:12]}…, not the pinned {self.spec.sha256[:12]}…. This is "
+                f"not the model this build was qualified against, so it will "
+                f"not be downloaded. Both digests in full are in "
+                f"debug_log.txt.")
+            log_debug(f"Concierge: REFUSED the download of {self.spec.filename} "
+                      f"-- published oid {oid}, pinned {self.spec.sha256}.")
             return False, reason
         log_debug(f"Concierge: the published oid matches the pin for {self.spec.filename}.")
         return True, None
@@ -261,13 +343,20 @@ class Download:
         compare with the pin, then rename into place. The rename is last so a
         file at the final path is always a verified file -- a half-written GGUF
         that looks complete is a model load failure with no explanation.
+
+        A cancellation is **not** a failure and does not discard anything: the
+        `.part` file it leaves is exactly what the next launch resumes from.
         """
+        self.refused = False
         if self.already_have():
             return True, None
 
         ok, reason = self.verify_remote()
         if not ok:
+            self.refused = True
             return False, reason
+        if self.should_cancel():
+            return False, self.CANCELLED
 
         os.makedirs(self.directory, exist_ok=True)
         start = os.path.getsize(self.partial_path) if os.path.exists(self.partial_path) else 0
@@ -295,9 +384,14 @@ class Download:
 
         total = total or self.spec.size_bytes
         done = start
+        cancelled = False
         try:
             with open(self.partial_path, mode) as f:
+                self.on_progress(done, total)
                 while True:
+                    if self.should_cancel():
+                        cancelled = True
+                        break
                     block = reader.read(self.CHUNK)
                     if not block:
                         break
@@ -311,6 +405,11 @@ class Download:
                 reader.close()
             except Exception:
                 pass
+
+        if cancelled:
+            log_debug(f"Concierge: the download was cancelled at {done} bytes; "
+                      f"the partial file is kept for the next launch.")
+            return False, self.CANCELLED
 
         digest = sha256_of(self.partial_path)
         if digest != self.spec.sha256.lower():

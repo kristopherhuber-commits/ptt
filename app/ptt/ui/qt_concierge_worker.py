@@ -72,7 +72,7 @@ import time
 
 from PySide6.QtCore import QObject, Qt, QThread, Signal, Slot
 
-from ptt import paths, transcribe
+from ptt import config, paths, transcribe
 from ptt.concierge import (
     agent as agent_mod, fetch, llm, sessions as sessions_mod,
     server as server_mod, state as state_mod, tools as tools_mod,
@@ -108,6 +108,38 @@ LOAD_WAIT_TIMEOUT_SEC = 90.0
 #: application that takes ten seconds to quit is a settings application the user
 #: kills in Task Manager -- which is the very case FR-CG-9's job object covers.
 SHUTDOWN_GRACE_SEC = 5.0
+
+#: How often the download reports itself, in seconds. `fetch.Download` calls its
+#: progress hook once per 1 MiB chunk, which over 6.87 GB is about 7 000 calls;
+#: at roughly 30 MB/s that is 30 signals a second into the GUI thread's queue
+#: for a bar that cannot show more than 360 distinct positions. Throttling is
+#: here rather than in `fetch.py` because it is a property of having a screen on
+#: the other end, and `fetch.py` does not know there is one.
+PROGRESS_INTERVAL_SEC = 0.4
+
+#: The message that opens the guided setup (FR-CG-4).
+#:
+#: A real user message, in the transcript, because that is what it is: the
+#: person accepted an offer that said "it will walk you through setup". The
+#: system prompt runs the four steps **only when the person asks to be set up or
+#: says they are new**, so a kickoff phrased any other way -- an instruction to
+#: the model, a hidden system turn -- would either be ignored or would put words
+#: in the transcript that nobody said.
+SETUP_KICKOFF = "I'm new to PTT Dictation. Please set me up."
+
+
+# -- the two keys that decide whether anything runs at all --------------------
+
+def switched_on(settings):
+    """
+    FR-CG-6 and Q26's pair, read off a `Settings`. The rule is `config`'s.
+
+    A thin adapter rather than a second opinion: `config.concierge_switched_on`
+    is where "declined, or switched off" is decided, because the panel asks the
+    same question of two plain values and the two answers have to agree.
+    """
+    return config.concierge_switched_on(
+        settings.get("concierge.opt_in"), settings.get("concierge.enabled"))
 
 
 # -- the state seam (Q26) -----------------------------------------------------
@@ -275,12 +307,20 @@ class ConciergeWorker(QObject):
     undo_finished = Signal(int, bool, str)
     memory_changed = Signal(str, bool)
     runtime_output = Signal(str)
+    #: `(done, total)` in bytes. **`object`, not `int`**: the file is
+    #: 7 381 382 944 bytes and PySide6 marshals a declared `int` as a C++ 32-bit
+    #: `int`, so the total would arrive negative at 78 % of the way through.
+    download_progress = Signal(object, object)
+    #: `(ok, reason, refused)`. `refused` is the digest mismatch and nothing
+    #: else: the panel latches on it, because FR-CG-7's refusal is a
+    #: re-qualification event and not a retryable failure (Q26).
+    download_finished = Signal(bool, str, bool)
 
     def __init__(self, settings, *, state_provider, devices=None,
                  benchmark=None, cuda_supported=True, exe_path=None,
                  model_dir=None, pack_path=None, prompt_path=None,
                  memory=None, server_factory=None, client_factory=None,
-                 audit=None, parent=None):
+                 download_factory=None, audit=None, parent=None):
         super().__init__(parent)
         self._settings = settings
         self._state_provider = state_provider
@@ -293,7 +333,10 @@ class ConciergeWorker(QObject):
         self._prompt_path = prompt_path or paths.concierge_prompt_path()
         self._make_server = server_factory or server_mod.Server
         self._make_client = client_factory or llm.Client
+        self._make_download = download_factory or fetch.Download
         self._audit = audit or SignalAudit()
+        #: When the last progress signal went out. See `PROGRESS_INTERVAL_SEC`.
+        self._progress_at = 0.0
 
         self.memory = memory or tools_mod.MemoryNote(
             paths.memory_note_path(), paths.previous_memory_note_path())
@@ -303,11 +346,24 @@ class ConciergeWorker(QObject):
                                          on_change=self._on_journal_change)
         #: Polled once per SSE chunk by `llm.Client`. Set from the GUI thread.
         self.cancel = threading.Event()
+        #: Polled once per megabyte by `fetch.Download`. Separate from `cancel`,
+        #: which a *send* sets to interrupt a generation: interrupting a
+        #: generation must not abandon a 6.87 GB transfer, and the two are set
+        #: by different gestures.
+        self.cancel_download = threading.Event()
 
         self.registry = None
         self.context = None
         self.agent = None
         self.server = None
+        #: Set when the tree API's `oid` disagreed with the pin, and never
+        #: cleared: a retry would fetch the same substituted file and refuse it
+        #: again, so offering one would be a button that exists to fail.
+        self.download_refusal = ""
+        #: Whether a `not_downloaded` panel may start the transfer without being
+        #: asked (handoff 8.2). Cleared by `Delete model`, because a delete that
+        #: the next panel open silently undoes is not a delete.
+        self.auto_download = True
 
     # -- state --------------------------------------------------------------
 
@@ -316,6 +372,27 @@ class ConciergeWorker(QObject):
         if spec is None:
             return ""
         return os.path.join(self._model_dir, spec.filename)
+
+    def download(self):
+        """
+        A `fetch.Download` for the configured tier, wired to this thread's seams.
+
+        Built fresh per call rather than held, because `concierge.model` is a
+        setting and a held object would keep downloading the tier that was
+        configured when the panel opened.
+        """
+        spec = fetch.spec_for(self._settings.get("concierge.model"))
+        if spec is None:
+            return None
+        return self._make_download(
+            spec, self._model_dir,
+            on_progress=self._on_download_progress,
+            should_cancel=self.cancel_download.is_set)
+
+    def partial_bytes(self):
+        """How much of a resumable transfer is on disk. See `Download`."""
+        download = self.download()
+        return download.partial_bytes() if download is not None else 0
 
     def _initial_state(self):
         """
@@ -426,6 +503,14 @@ class ConciergeWorker(QObject):
     def on_start(self):
         self._audit.check("on_start", expect_gui=False)
         if self.machine.state == state_mod.DISABLED:
+            return
+        if not switched_on(self._settings):
+            # FR-CG-6: declined, or accepted and since switched off. Neither is
+            # a state -- design 8's `disabled` is the no-CUDA case and has no
+            # exit -- so nothing moves and the panel shows the card that
+            # explains it. What matters here is that no runtime starts.
+            log_debug("Concierge: not starting the runtime; it is switched off "
+                      "or was declined.")
             return
         if self.server is not None and self.server.process is not None:
             return
@@ -640,6 +725,103 @@ class ConciergeWorker(QObject):
                    else f"The note could not be restored: {reason}")
         self.on_memory_open()
 
+    # -- the download (FR-CG-7) ---------------------------------------------
+
+    def _on_download_progress(self, done, total):
+        """
+        `fetch.Download`'s per-megabyte hook, throttled onto two channels.
+
+        The state machine's `detail` is one of them, because design 8 makes the
+        percentage a re-entry into `downloading` rather than eight more states,
+        and the caption and the status bar both read it. The signal is the
+        other, because a determinate bar needs the numbers and not the sentence.
+
+        The last chunk is never throttled away: a bar that stops at 99 % because
+        the final call landed inside the interval is the one position on it that
+        anybody looks at.
+        """
+        now = time.monotonic()
+        if done < total and (now - self._progress_at) < PROGRESS_INTERVAL_SEC:
+            return
+        self._progress_at = now
+        self.machine.to(state_mod.DOWNLOADING, fetch.progress_text(done, total))
+        self._emit(self.download_progress, "download_progress", done, total)
+
+    @Slot()
+    def on_download(self):
+        """
+        Fetch the weights, resuming a partial transfer (FR-CG-7, handoff 8.2).
+
+        Blocks this thread for as long as 6.87 GB takes and blocks nothing else:
+        the engine, the hotkey and the audio stream are all on their own threads,
+        which is what "dictation is unaffected" means in code rather than in a
+        sentence. The GUI thread sees a percentage arrive every 0.4 s.
+
+        A refusal and a failure are different outcomes and are reported as
+        different outcomes. The refusal latches (`download_refusal`); a failed
+        transfer does not, because a dropped connection is worth retrying and a
+        substituted file is not.
+        """
+        self._audit.check("on_download", expect_gui=False)
+        if self.machine.state in (state_mod.DISABLED, state_mod.DOWNLOADING):
+            return
+        if not switched_on(self._settings):
+            # The same gate `on_start` has, on the more expensive of the two
+            # actions. The controller already refuses to ask, and the card that
+            # carries the button is not on screen in this state -- but 6.87 GB
+            # is the wrong thing to protect with a UI state alone (#42).
+            log_debug("Concierge: not downloading; it is switched off or has "
+                      "not been opted into.")
+            return
+        if self.download_refusal:
+            self._emit(self.download_finished, "download_finished",
+                       False, self.download_refusal, True)
+            return
+        download = self.download()
+        if download is None:
+            reason = (f"{self._settings.get('concierge.model')!r} is not a "
+                      f"model this build knows how to download")
+            self._emit(self.download_finished, "download_finished",
+                       False, reason, False)
+            return
+        if download.already_have():
+            self.machine.to(state_mod.STOPPED, "the model is already downloaded")
+            self._emit(self.download_finished, "download_finished", True, "", False)
+            return
+
+        self.cancel_download.clear()
+        self._progress_at = 0.0
+        resuming = download.partial_bytes()
+        self.machine.to(state_mod.DOWNLOADING,
+                        f"resuming at {fetch.human_bytes(resuming)}" if resuming
+                        else "checking the published digest against the pin")
+        log_debug(f"Concierge: starting the model download "
+                  f"({'resuming' if resuming else 'from the beginning'}).")
+
+        ok, reason = download.run()
+        if ok:
+            self.machine.to(state_mod.STOPPED, "the model is ready to load")
+            self._emit(self.download_finished, "download_finished", True, "", False)
+            return
+
+        if reason == fetch.Download.CANCELLED:
+            # Not a failure and not reported as one. The `.part` file is on
+            # disk and the next launch resumes from it.
+            self.machine.to(state_mod.NOT_DOWNLOADED,
+                            f"paused at {fetch.human_bytes(download.partial_bytes())}")
+            self._emit(self.download_finished, "download_finished",
+                       False, reason, False)
+            return
+
+        if download.refused:
+            self.download_refusal = reason
+            self.auto_download = False
+        self.machine.to(state_mod.NOT_DOWNLOADED,
+                        "the download was refused" if download.refused
+                        else "the download did not finish")
+        self._emit(self.download_finished, "download_finished",
+                   False, reason, bool(download.refused))
+
     # -- the model file -----------------------------------------------------
 
     @Slot()
@@ -650,8 +832,16 @@ class ConciergeWorker(QObject):
         The runtime is stopped first, because the file is open while it runs and
         Windows will not delete an open file -- and a failure here has to say so
         rather than leaving the state machine claiming a model that is gone.
+
+        It also **switches the automatic download off for the rest of the run**.
+        Handoff 8.2 starts the transfer when an opted-in panel opens with no
+        model on disk, and that is right for a first run and wrong immediately
+        after a delete: a 6.87 GB file that comes back by itself the next time
+        the panel is opened is not a file the user deleted.
         """
         self._audit.check("on_delete_model", expect_gui=False)
+        self.cancel_download.set()
+        self.auto_download = False
         self.on_stop("the model is being deleted")
         path = self.model_path()
         removed = []
@@ -703,6 +893,7 @@ class ConciergeController(QObject):
     memory_save_requested = Signal(str)
     memory_restore_requested = Signal()
     delete_model_requested = Signal()
+    download_requested = Signal()
 
     #: controller -> app. The FR-CG-2 broadcast, already on the GUI thread.
     settings_applied = Signal(str)
@@ -723,6 +914,12 @@ class ConciergeController(QObject):
         #: A `RELOAD_KEYS` write that landed mid-turn, waiting for the turn to
         #: end. See `_on_settings_applied`.
         self._reload_pending = False
+        #: FR-CG-4 is owed to the person who accepted the card *in this run*,
+        #: and to nobody else. Session-scoped on purpose: `opt_in` is persisted
+        #: the instant the card is answered, so a relaunch finds `accepted` and
+        #: does not re-run a setup the user has already been through. The menu's
+        #: `Guided setup` is how anybody asks for it again.
+        self._setup_owed = False
         self.store = store or sessions_mod.SessionStore(
             paths.concierge_sessions_path(),
             limit_provider=lambda: settings.get("concierge.history_limit"))
@@ -753,6 +950,8 @@ class ConciergeController(QObject):
         self._panel.set_model_label(spec.label if spec else "",
                                     spec.gigabytes if spec else None)
         self._panel.set_idle_minutes(settings.get("concierge.idle_unload_minutes"))
+        self._panel.set_download_partial(self.worker.partial_bytes())
+        self._publish_opt_in()
         self._panel.set_state(self.worker.machine.state,
                               self.worker.machine.detail)
         self._panel.set_sessions(self.store.list())
@@ -813,6 +1012,7 @@ class ConciergeController(QObject):
         self.memory_save_requested.connect(self.worker.on_memory_save, queued)
         self.memory_restore_requested.connect(self.worker.on_memory_restore, queued)
         self.delete_model_requested.connect(self.worker.on_delete_model, queued)
+        self.download_requested.connect(self.worker.on_download, queued)
 
     def _wire_from_worker(self):
         queued = Qt.ConnectionType.QueuedConnection
@@ -827,6 +1027,8 @@ class ConciergeController(QObject):
         self.worker.undo_finished.connect(self._on_undo_finished, queued)
         self.worker.memory_changed.connect(self._on_memory_changed, queued)
         self.worker.runtime_output.connect(self._on_runtime_output, queued)
+        self.worker.download_progress.connect(self._on_download_progress, queued)
+        self.worker.download_finished.connect(self._on_download_finished, queued)
 
     def _wire_panel(self):
         panel = self._panel
@@ -840,6 +1042,12 @@ class ConciergeController(QObject):
         panel.memory_save_requested.connect(self.memory_save_requested.emit)
         panel.memory_restore_requested.connect(self.memory_restore_requested.emit)
         panel.delete_model_requested.connect(self._on_panel_delete_model)
+        panel.opt_in_requested.connect(self._on_panel_opt_in)
+        panel.enabled_requested.connect(self._on_panel_enabled)
+        panel.download_requested.connect(self._on_panel_download)
+        panel.pause_download_requested.connect(self._on_panel_pause_download)
+        panel.residency_requested.connect(self._on_panel_residency)
+        panel.setup_requested.connect(self._on_panel_setup)
 
     # -- panel -> worker ----------------------------------------------------
 
@@ -874,7 +1082,110 @@ class ConciergeController(QObject):
 
     def _on_panel_delete_model(self):
         self._audit.check("delete_model (GUI emit)", expect_gui=True)
+        # Set here as well as inside the slot, and this is the copy that
+        # matters: with a download in flight the worker thread is inside
+        # `on_download` for as long as the rest of 6.87 GB takes, so a queued
+        # `on_delete_model` cannot run until something stops it -- and the thing
+        # that stops it is this event, exactly as `_on_panel_send` sets `cancel`
+        # from here rather than leaving it to a slot behind a running turn.
+        self.worker.cancel_download.set()
         self.delete_model_requested.emit()
+
+    def _on_panel_opt_in(self, accepted):
+        """
+        The first-run card's answer, written to `concierge.opt_in` (Q26).
+
+        Through `Settings.set` like every other write in the application, so the
+        tri-state's own `choices` rule validates it -- and so the broadcast that
+        follows repaints anything displaying it. Accepting also clears
+        `enabled`'s "off": the card's button says "set it up", and leaving the
+        switch off after it would be a yes that did nothing.
+        """
+        self._audit.check("opt_in (GUI emit)", expect_gui=True)
+        value = config.OPT_IN_ACCEPTED if accepted else config.OPT_IN_DECLINED
+        ok, reason = self._settings.set("concierge.opt_in", value)
+        if not ok:
+            self._panel.notify(f"That could not be saved: {reason}")
+            return
+        if accepted and not self._settings.get("concierge.enabled"):
+            self._settings.set("concierge.enabled", True)
+        #: The guided setup is owed once, to the person who just said yes
+        #: (FR-CG-4). Armed here rather than fired here: there is nothing to
+        #: talk to until the model is downloaded and the runtime is ready.
+        self._setup_owed = bool(accepted)
+        self._publish_opt_in()
+        self.settings_applied.emit("concierge.opt_in")
+        log_debug(f"Concierge: the first-run card was {value}.")
+        if accepted:
+            self.open()
+
+    def _on_panel_enabled(self, enabled):
+        """
+        `concierge.enabled`, from the panel's own settings page (FR-CG-6).
+
+        Switching it off stops the runtime immediately rather than waiting for
+        the residency timer: the reason somebody reaches for this control is
+        that they want the VRAM back, and "off, but still holding 9.4 GB until
+        five minutes of idleness have passed" is not off.
+
+        The weights are left alone. Deleting them is a separate, confirmed
+        action on the same page, because they are 6.87 GB somebody waited for
+        and a switch is not a confirmation.
+        """
+        self._audit.check("enabled (GUI emit)", expect_gui=True)
+        ok, reason = self._settings.set("concierge.enabled", bool(enabled))
+        if not ok:
+            self._panel.notify(f"That could not be saved: {reason}")
+            return
+        if not enabled and self.thread.isRunning():
+            self.stop_requested.emit("the Concierge was switched off")
+        self._publish_opt_in()
+        self.settings_applied.emit("concierge.enabled")
+        log_debug(f"Concierge: switched {'on' if enabled else 'off'} from the panel.")
+        if enabled:
+            self.open()
+
+    def _on_panel_download(self):
+        self._audit.check("download (GUI emit)", expect_gui=True)
+        if not self.thread.isRunning():
+            self.thread.start()
+        self.worker.cancel_download.clear()
+        self.download_requested.emit()
+
+    def _on_panel_pause_download(self):
+        """
+        `Pause`. Sets the event the transfer polls; the `.part` file stays.
+
+        Directly rather than through a queued slot, for `_on_panel_send`'s
+        reason: the worker thread is inside the transfer, so anything queued
+        behind it would be delivered when the download it is trying to stop had
+        already finished.
+        """
+        self._audit.check("pause_download (GUI emit)", expect_gui=True)
+        self.worker.cancel_download.set()
+
+    def _on_panel_residency(self, minutes):
+        """
+        The residency slider (FR-CG-8), through the same write path as the rest.
+
+        `Server.start_idle_timer` reads the value once per tick rather than
+        capturing it, so this takes effect on a running server without a
+        restart -- which is why there is no reload, no stop and no note here.
+        """
+        self._audit.check("residency (GUI emit)", expect_gui=True)
+        ok, reason = self._settings.set("concierge.idle_unload_minutes",
+                                        int(minutes))
+        if not ok:
+            self._panel.notify(f"That could not be saved: {reason}")
+            return
+        self.settings_applied.emit("concierge.idle_unload_minutes")
+        self.status_changed.emit(self._panel.status_segment())
+
+    def _on_panel_setup(self):
+        """`Guided setup`, from the menu or from the first-run arming."""
+        self._audit.check("setup (GUI emit)", expect_gui=True)
+        self._setup_owed = False
+        self._on_panel_send(SETUP_KICKOFF)
 
     # -- worker -> panel ----------------------------------------------------
 
@@ -915,7 +1226,10 @@ class ConciergeController(QObject):
             self._request_reload()
         self._panel.set_idle_minutes(
             self._settings.get("concierge.idle_unload_minutes"))
-        self.status_changed.emit(self._panel.status_segment())
+        # The Concierge can switch itself off -- `concierge.enabled` is in its
+        # write allowlist -- so the gate is re-read on every applied write
+        # rather than only when the card is answered.
+        self._publish_opt_in()
 
     def _take_pending_reload(self):
         """
@@ -967,6 +1281,48 @@ class ConciergeController(QObject):
     def _on_notice(self, text):
         self._audit.check("notice (GUI slot)", expect_gui=True)
         self._panel.append_notice(text)
+
+    def _on_download_progress(self, done, total):
+        self._audit.check("download_progress (GUI slot)", expect_gui=True)
+        self._panel.set_download_progress(done, total)
+
+    def _on_download_finished(self, ok, reason, refused):
+        """
+        The end of a transfer, in its four shapes.
+
+        Success is the only one that starts anything: the runtime launches, the
+        panel flips from the card to the chat, and -- if the user accepted the
+        first-run card in this session -- the guided setup runs as their first
+        message (FR-CG-4). A pause says nothing at all, because the user paused
+        it and telling them so would be the application narrating their own
+        click back at them.
+        """
+        self._audit.check("download_finished (GUI slot)", expect_gui=True)
+        self._panel.set_download_partial(self.worker.partial_bytes())
+        if ok:
+            self._panel.set_download_refusal("")
+            self.open()
+            if self._setup_owed:
+                self._setup_owed = False
+                # After `open()`, so the send lands behind the start on the
+                # worker's queue and the panel shows `loading` rather than
+                # refusing a message it cannot serve yet.
+                self._on_panel_send(SETUP_KICKOFF)
+            return
+        if reason == fetch.Download.CANCELLED:
+            return
+        if refused:
+            self._panel.set_download_refusal(reason)
+            self._panel.notify("The Concierge model was refused: see the panel.")
+            log_debug(f"Concierge: the download was refused -- {reason}")
+            return
+        self._panel.notify(f"The download did not finish: {reason}")
+
+    def _publish_opt_in(self):
+        """Push the two switch keys at the panel and repaint what they gate."""
+        self._panel.set_opt_in(self._settings.get("concierge.opt_in"),
+                               self._settings.get("concierge.enabled"))
+        self.status_changed.emit(self._panel.status_segment())
 
     def _on_turn_finished(self, reply, forced):
         self._audit.check("turn_finished (GUI slot)", expect_gui=True)
@@ -1029,9 +1385,44 @@ class ConciergeController(QObject):
     # -- lifecycle ----------------------------------------------------------
 
     def open(self):
-        """The panel was shown. Start the thread, then the runtime."""
+        """
+        The panel was shown. Start the thread, then the runtime -- or neither.
+
+        Three gates stand in front of the runtime and each of them is a
+        requirement rather than a precaution:
+
+        - **No CUDA device** (FR-CG-12): nothing starts, ever, and the machine
+          is never asked to opt in to something that cannot run on it.
+        - **Unanswered, declined or switched off** (FR-CG-6, Q26): nothing
+          starts. `unset` is off here for the reason
+          `config.concierge_switched_on` gives -- a download nobody has been
+          asked about is the one thing this gate exists to prevent.
+        - **No weights on disk** (FR-CG-7): the download runs instead of the
+          runtime. It starts by itself for an accepted user, because handoff 8.2
+          says accepting is what starts it and hunting for a Download button is
+          not a first run -- but `auto_download` is cleared by `Delete model`
+          and by a refusal, so neither of those is undone by reopening a panel.
+        """
+        if self.worker.machine.state == state_mod.DISABLED:
+            self._publish_opt_in()
+            return
+        if not switched_on(self._settings):
+            self._publish_opt_in()
+            return
         if not self.thread.isRunning():
             self.thread.start()
+        if self.worker.machine.state == state_mod.DOWNLOADING:
+            # Closing and reopening the panel mid-transfer. A `start_requested`
+            # here would queue behind the download and, if it failed, arrive
+            # afterwards to overwrite the failure's detail with "the model has
+            # not been downloaded yet". The download starts the runtime itself
+            # when it succeeds.
+            return
+        if self.worker.machine.state == state_mod.NOT_DOWNLOADED:
+            self._panel.set_download_partial(self.worker.partial_bytes())
+            if self.worker.auto_download and not self.worker.download_refusal:
+                self._on_panel_download()
+            return
         self.start_requested.emit()
 
     def close(self):
@@ -1042,7 +1433,15 @@ class ConciergeController(QObject):
         `Server.start_idle_timer` explicitly leaves to the panel: the timer
         treats 0 as "never, on my account" precisely so this decision lives
         where the panel is.
+
+        Nothing is emitted at all if the thread never started: a queued call to
+        a worker with no event loop is delivered when one appears, which for a
+        user who declined the Concierge is never -- and a stop request sitting
+        in a queue forever is a stop request that fires at the wrong moment if
+        anything ever does start that thread.
         """
+        if not self.thread.isRunning():
+            return
         try:
             minutes = int(self._settings.get("concierge.idle_unload_minutes"))
         except (TypeError, ValueError):
@@ -1064,8 +1463,16 @@ class ConciergeController(QObject):
         of a launch: quitting during a model load would otherwise block the GUI
         thread for up to the 60 s ready timeout. If the grace period runs out
         the job object does it, which is exactly the case FR-CG-9 built it for.
+
+        `cancel_download` is set for the same reason and it is not the same
+        event. A 6.87 GB transfer takes minutes: without it the worker thread
+        would still be writing `.part` while the process was torn down around
+        it, and `thread.wait` would time out on every exit that happened during
+        a download. Setting it costs at most one megabyte, and the partial file
+        it leaves is what the next launch resumes from (criterion v3-5).
         """
         self.worker.cancel.set()
+        self.worker.cancel_download.set()
         if not self.thread.isRunning():
             return
         stopper = threading.Thread(

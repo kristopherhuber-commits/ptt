@@ -287,6 +287,42 @@ When packaging using PyInstaller (`--onedir` mode):
 * **Fix:** nothing in the harness could have caught it — the tool genuinely was not called. What was missing was any sign that the conversation had grown: §5.0 rule 5 writes every context trim to the log and **nothing put one on screen**, so the double degradation a trim causes (a worse answer *and* a slower next turn, since the KV cache is invalidated from the trim point) looked like the model having a bad day. A trimmed turn now says so in the chat and names the action: start a new session, the memory note carries over.
 * **Note:** honest limits on this one. The trim notice is the right thing to add and **it is not established that trimming caused these two failures** — I have no trim record from that session. What is established is that a fresh session succeeds where a long one failed, twice, on requests that are one tool call each.
 
+### 42. The Middle Value That Read As Yes (Concierge, session 4)
+* **Symptom:** caught in review before it shipped, and it is the most expensive mistake this session could have made. The first cut of `config.concierge_switched_on` was `opt_in != "declined" and enabled`, written so the opt-in card would still be reachable — the card is the thing that sets the key, so gating it behind the key looked circular.
+* **Cause:** with `unset` reading as on, `ConciergeController.open()` passed its gate on a machine where **nobody had been asked anything**, saw `not_downloaded`, and started a 6.87 GB transfer. Q26 gives `unset` a name precisely so "never asked" is distinguishable from "said no"; treating them as different values and then bucketing them the same way loses the distinction at the one moment it is worth having.
+* **Fix:** `unset` is **off** — `opt_in == "accepted" and enabled`. The card stays reachable because `gate_for` tests `unset` *before* it asks this question, so the ordering does the work the disjunction was doing, and does it without permitting anything.
+* **Note:** the tell is that the two questions are not the same question. "May the runtime start?" and "should the off card be showing?" differ on exactly one of the three values, and one function answering both is one function that must be wrong about `unset` in one of its callers.
+
+### 43. Four Signals, One Of Them Would Have Run Backwards (Concierge, session 4)
+* **Symptom:** none observed — the file the fake transport carries in L1 is three megabytes, and every real path was reasoned about rather than run.
+* **Cause:** `download_progress` reports `(done, total)` in **bytes**, and the pinned GGUF is 7 381 382 944 of them. A PySide6 `Signal(int, int)` marshals through a C++ 32-bit `int`, so the total arrives as `-1 202 551 648` and `done` wraps at 2 147 483 648 — a bar that fills, empties and fills again somewhere past 29 %. Every L1 test would have passed, because a three-megabyte fixture never reaches the boundary.
+* **Fix:** `Signal(object, object)`, which is what `tool_activity` already uses for its two free-form arguments, plus a test that pushes 7 000 000 000 through the signal and reads it back.
+* **Note:** the bound is not in the code and cannot be inferred from it. It is in the pinned spec, four modules away, and the only reason to go and look is knowing that Qt's `int` is not Python's.
+
+### 44. The Refusal That Ran Off The Edge Of The Panel (Concierge, session 4)
+* **Symptom:** the digest-mismatch card, rendered offscreen to a PNG, showed two 64-character hex strings clipped mid-digest at the panel's right edge — no wrap, no scroll, no way to read the end of the sentence.
+* **Cause:** `QLabel.setWordWrap(True)` breaks between words, and a SHA-256 in hex is one word 64 characters long. The panel is 360 px. This is the **one message in the application the user is deliberately not able to click past** (FR-CG-7, Q26), so a message they cannot finish reading is the specific failure that requirement is written against.
+* **Fix:** the sentence carries the first twelve characters of each digest and says both are in `debug_log.txt` in full; the log line carries them whole. The card body is also selectable, because a mismatch is evidence somebody has to be able to copy into a report.
+* **Note:** found by rendering the four new pages to PNGs and looking at them, which took about a minute and is the only way this class of defect surfaces before a hand test. No assertion about the string would have caught it — the text was correct, the layout was not.
+
+### 45. The Delete That The Next Panel Open Undid (Concierge, session 4)
+* **Symptom:** `Delete model` removed 6.87 GB, returned the machine to `not_downloaded`, and then reopening the panel began downloading it again.
+* **Cause:** two decisions that are each right and collide. Handoff §8.2 says accepting the card **or the first later open** starts the download, so that a first run does not require hunting for a button. Q25 puts `Delete model` on this panel. An opted-in user with no weights on disk is indistinguishable, at panel-open time, from an opted-in user who has just deleted them.
+* **Fix:** `ConciergeWorker.auto_download`, set at construction and cleared by `on_delete_model` and by a refusal. The card still offers its button; what is switched off is the transfer that starts by itself. Session-scoped deliberately — a relaunch after a delete offers the download rather than performing it, which is the same distinction one level up.
+* **Note:** "or the first later open" is one clause in one sentence of the handoff and it is the whole of the collision. A requirement that says *when* something happens by itself needs a companion clause saying when it stops, and this one did not have one.
+
+### 46. A Hidden Button Still Takes A Click (Concierge, session 4)
+* **Symptom:** with the download refused, `_download_button.click()` still emitted its signal. In the shipped application nothing calls that — but the button was also still keyboard-reachable, and a `QPushButton` with a default shortcut is one Return key from being pressed.
+* **Cause:** the refusal was rendered by hiding the button. `QWidget.setVisible(False)` removes it from the screen and from the tab order; it does **not** disable it, and `QAbstractButton::click()` is delivered regardless.
+* **Fix:** hidden **and** disabled, from one expression: `download_button_text` returns `""` for a refusal and that empty string drives both. One source, so the two cannot come apart.
+* **Note:** the smoke script found this by clicking a control that was not on screen, which is a thing worth doing on purpose whenever "the user cannot" is the requirement. "Cannot see it" and "cannot press it" are different claims and only the second one was asked for.
+
+### 47. The Slider That Wrote Back What It Had Just Been Told (Concierge, session 4)
+* **Symptom:** anticipated rather than observed, because the guard went in with the control. Left unguarded, moving the residency slider writes `concierge.idle_unload_minutes`, which emits the FR-CG-2 broadcast, which calls `set_idle_minutes` to keep the panel current, which calls `QSlider.setValue`, which emits `valueChanged` — which is the same signal a drag emits.
+* **Cause:** FR-CG-2's hop is a *loop* by construction. Every other control in this window is written by the user and read by the panels; this is the first one the Concierge can also write, so the panel is both a writer and a reader of the same key.
+* **Fix:** `ModelPanel._syncing`'s pattern, one control down — a flag set while the widget is written from the settings object. Plus the write itself waits for `sliderReleased` rather than firing on every tick, because dragging 0 → 30 is thirty-one writes of `config.json` and thirty-one broadcasts.
+* **Note:** the panels have had this problem since v2.0 and solved it the same way; what is new is that the *other* writer is a worker thread rather than the user, so the loop closes without anybody touching the control.
+
 ## 🛠️ Maintenance & Execution Protocols
 
 ### Native Terminal Execution
