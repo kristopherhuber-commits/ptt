@@ -184,6 +184,32 @@ def test_the_same_signal_from_a_second_thread_logs_again():
         {threading.current_thread().name, "concierge-idle"}
 
 
+def test_a_renamed_thread_is_still_the_same_thread():
+    """
+    **`V-CG-138`, and it is `development_history.md` #48.** The bound was keyed
+    on `threading.current_thread().name`, which is stable for a Python thread
+    and is *not* stable for a `QThread`: PySide6 enters the interpreter afresh
+    for each queued slot invocation, so one worker thread reports `Dummy-1`,
+    `Dummy-2`, `Dummy-3` in turn and no key is ever a repeat.
+
+    L1 has no Qt in it (CON-CG-6), so the condition is reproduced the way it
+    actually presents -- one thread whose name changes underneath the audit --
+    rather than by importing the thing that causes it. Six emissions, one
+    thread, one line.
+    """
+    lines = []
+    audit = SignalAudit(log=lambda where, expect_gui: lines.append(where))
+    current = threading.current_thread()
+    original = current.name
+    try:
+        for index in range(6):
+            current.name = f"Dummy-{index + 1}"
+            audit.check("token", expect_gui=False)
+    finally:
+        current.name = original
+    assert lines == ["Concierge token"]
+
+
 def test_a_signal_that_never_fires_never_logs():
     lines = []
     SignalAudit(log=lambda where, expect_gui: lines.append(where))

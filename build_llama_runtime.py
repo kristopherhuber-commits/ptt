@@ -67,13 +67,25 @@ def main():
               f"against the pinned one; a different build is a "
               f"re-qualification, not an upgrade.")
 
-    print(f"Bundling llama.cpp {tag} ({fetch.LLAMA_CUDA_VARIANT}) into {args.to} ...")
-    fetch.bundle_llama_runtime(args.to, build_time=fetch.BUILD_TIME_ONLY,
-                               build_tag=tag)
-
     exe = os.path.join(args.to, "llama-server.exe")
     if os.path.exists(exe):
+        # Idempotent: the two archives are 640 MB and the licence is 1 KB, so a
+        # re-run on a tree that already has the runtime fetches only what is
+        # actually missing. Session 5 added the licence to an existing unpack
+        # and this is the path that did it.
+        print(f"{exe} is already there; checking the licence only.")
+        fetch.fetch_llama_licence(args.to, build_time=fetch.BUILD_TIME_ONLY,
+                                  build_tag=tag)
+    else:
+        print(f"Bundling llama.cpp {tag} ({fetch.LLAMA_CUDA_VARIANT}) into "
+              f"{args.to} ...")
+        fetch.bundle_llama_runtime(args.to, build_time=fetch.BUILD_TIME_ONLY,
+                                   build_tag=tag)
+
+    licence = os.path.join(args.to, fetch.LLAMA_LICENSE_NAME)
+    if os.path.exists(exe) and os.path.exists(licence):
         print(f"Done: {exe}")
+        print(f"      {licence}")
         return 0
     print(f"ERROR: {exe} is not there after unpacking. The archive layout may "
           f"have changed; check {args.to}.")

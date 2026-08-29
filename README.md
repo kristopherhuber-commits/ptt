@@ -61,11 +61,17 @@ For developers, or if you pull the repository onto a new computer and want to re
 
 #### Build the distributable
 
-1. Ensure any running executable is closed (right-click the tray icon and select **Exit**).
-2. Run the build script using your local Python installation:
+1. Ensure any running executable is closed (right-click the tray icon and select **Exit**),
+   and anything else running out of `.venv`.
+2. Run the build script **with the interpreter inside `.venv`**:
    ```powershell
-   python build_portable.py
+   .venv\Scripts\python.exe build_portable.py
    ```
+   Not the base Python: the knowledge-pack step imports the application's own
+   modules, which need the packages `requirements.txt` installs into `.venv`.
+   The script verifies the six interpreter files it copies rather than skipping
+   a locked one silently, and stops if the copy in `.venv` differs from the base
+   install.
 
 This script will automatically:
 * Create a virtual environment (`.venv`) if it does not exist.

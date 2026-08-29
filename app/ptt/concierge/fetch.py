@@ -453,6 +453,22 @@ LLAMA_ASSETS = (
     f"cudart-llama-bin-win-{LLAMA_CUDA_VARIANT}-x64.zip",
 )
 
+#: llama.cpp's own MIT licence, which **neither archive contains**. The binaries
+#: zip carries `LICENSE-LLVM-OpenMP` for the one vendored dependency and nothing
+#: for llama.cpp itself, so a distribution assembled from the two zips alone
+#: ships the MIT-licensed component without the notice MIT requires.
+#:
+#: Fetched from the pinned tag rather than from `master`: the licence that
+#: travels with a binary is the licence of the source it was built from, and
+#: `b10621` is what the pin names.
+LLAMA_LICENSE_URL = (
+    f"https://raw.githubusercontent.com/ggml-org/llama.cpp/{LLAMA_BUILD_TAG}/LICENSE"
+)
+
+#: What it is called on disk. `LICENSE` alone would sit in `app/llama/` next to
+#: `LICENSE-LLVM-OpenMP` and read as though it covered both.
+LLAMA_LICENSE_NAME = "LICENSE-llama.cpp"
+
 #: The explicit token a build script passes. A flag rather than a comment
 #: because "never runs in the shipped app" is a property somebody has to be able
 #: to check, and `grep` for this constant is that check.
@@ -524,4 +540,43 @@ def bundle_llama_runtime(destination, build_time=None, transport=None,
         print(f"  unpacking {name} ...")
         with zipfile.ZipFile(archive) as zf:
             zf.extractall(destination)
+
+    fetch_llama_licence(destination, build_time=build_time, build_tag=build_tag)
     return destination
+
+
+def fetch_llama_licence(destination, build_time=None,
+                        build_tag=LLAMA_BUILD_TAG):
+    """
+    Put llama.cpp's MIT licence beside the binaries. **Build time only.**
+
+    Its own function, and idempotent, because the two archives are 640 MB and
+    the licence is 1 KB: a build machine that already has the runtime unpacked
+    must be able to acquire the notice without re-fetching the binaries it is a
+    notice for.
+    """
+    if build_time != BUILD_TIME_ONLY:
+        raise RuntimeError(
+            "fetch_llama_licence is a build step and never runs in the shipped "
+            "app (FR-CG-10). Call it from build_llama_runtime.py with "
+            "build_time=fetch.BUILD_TIME_ONLY.")
+
+    import urllib.request
+
+    licence = os.path.join(destination, LLAMA_LICENSE_NAME)
+    if os.path.exists(licence):
+        return licence
+    url = LLAMA_LICENSE_URL.replace(LLAMA_BUILD_TAG, build_tag)
+    print(f"  downloading {LLAMA_LICENSE_NAME} ...")
+    with urllib.request.urlopen(url, timeout=60) as response:
+        text = response.read()
+    if b"MIT License" not in text:
+        raise RuntimeError(
+            f"{url} does not look like llama.cpp's MIT licence "
+            f"({len(text)} bytes). CON-CG-2 bundles an MIT component and the "
+            f"notice has to travel with it; check the tag by hand rather than "
+            f"shipping whatever came back.")
+    os.makedirs(destination, exist_ok=True)
+    with open(licence, "wb") as f:
+        f.write(text)
+    return licence

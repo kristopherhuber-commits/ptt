@@ -1,5 +1,17 @@
 # PTT Dictation v3.0 Concierge — Verification (seed)
 
+> **Folded in, 2026-08-29 (session 5).** §2.1's L1 register is now
+> [`verification.md` §3.3](../verification.md#33-concierge--ptt-v3-conciergeconcierge_designmd),
+> §3's twelve criteria are tracked in [§6.2](../verification.md#62-v30--the-twelve) with
+> their results, and the L3 evidence — `V-M-75` … `V-M-95` — is
+> [§5.4](../verification.md#54-v30-session-5--the-concierge-acceptance-pass--2026-08-29).
+> **This file is the seed and the argument; `verification.md` is the record.** What stays
+> here is §1's three-layer definition, §2's requirement → design → layer skeleton, §3.1
+> and §3.2's account of what earlier sessions established, and §4's known holes — of
+> which the ones still open have been carried into `verification.md` §7. Where the two
+> disagree about a *result*, `verification.md` is right; where they disagree about *why a
+> thing is checked the way it is*, this one is.
+
 Verification attempts to disprove the design. This seed document becomes rows in the
 canonical `verification.md` traceability matrix (§3.3, new) as items execute; V-CG unit
 items and V-M manual items continue the existing numbering discipline. A failure forces
@@ -32,13 +44,13 @@ closed by narrowing a requirement.
 | FR-CG-6 | additive integration, **the tri-state gate** | L3: all ten v2.0 criteria re-run; **L1 the gate** | v2.0's 333 tests still green inside 837. **L1 ✅ (session 4)** `V-CG-125`, `V-CG-130`, `V-CG-132`, `V-CG-133`: `unset`, `declined` and `enabled: false` each start no runtime and no download, the panel and the adapter read one rule (`config.concierge_switched_on`), and the first-run offer is made once per run inside a window the user opened — the amendment to handoff §8.1, argued there |
 | FR-CG-7 | D-CG-6 fetch (**pin as authority, tree `oid` as pre-download cross-check**; `nightly-tag.txt` resolution at build time only) | L1 resume/hash + `oid`-mismatch refusal; **L1 the panel's four outcomes**; L3 kill-and-relaunch | **L1 ✅** `V-CG-56`…`V-CG-68`. **Session 4 wired it to the panel**: `V-CG-126`, `V-CG-129`, `V-CG-131` — progress on two channels (the state machine's detail and a byte-carrying signal, throttled, last chunk never dropped); a cancellation that keeps its `.part` file so app exit during a transfer is a pause rather than 6.87 GB lost; and the refusal latched, stated in short digests the 360 px panel can actually fit, with **no button at all** — hidden *and* disabled, because a hidden `QPushButton` still takes a `click()` (#44, #46) |
 | FR-CG-8 | D-CG-1 idle timer | L1 timer logic; L3 nvidia-smi observation | **L1 ✅** `V-CG-54`. **L3 ✅ (session 3, §3.1)**: the timer fires with the panel open and the panel survives it; residency 0 unloads on panel close; a send restarts a stopped runtime. **Session 4 built the control** — a 0–30 slider on the Concierge panel's settings page, bounded by `FIELDS`' own minimum and maximum, guarded against the FR-CG-2 broadcast writing it back (#47). `V-CG-128`, `V-CG-132` |
-| FR-CG-9 | D-CG-1 **job object (§8.1)** + state-file reap | L1 reap logic; **L3 exit, `TerminateProcess`, and Task-Manager-kill process audits** | **L1 ✅** `V-CG-48`…`V-CG-53`. **Session 3 wired the reap**: `server.reap_orphan` was built in session 1 and called by nothing, so v3-7's fourth audit had no code path; `ConciergeController` now runs it at **app** startup on its own thread — not on panel open, since an orphan holds ~9.4 GB and "until you next open the chat panel" is not a bound. Pinned structurally by `V-CG-124`. **L3, one of v3-7's four audits (§3.1)**: `Stop-Process -Force` on the app killed `llama-server` immediately — the job object, which is the case no Python can cover. Clean exit and the simulated orphan still owed |
+| FR-CG-9 | D-CG-1 **job object (§8.1)** + state-file reap | L1 reap logic; **L3 exit, `TerminateProcess`, and Task-Manager-kill process audits** | **L1 ✅** `V-CG-48`…`V-CG-53`. **L3 ✅ (session 5)**: all four audits in `V-M-80`, with the kill latency measured in `V-M-81`. **Session 3 wired the reap**: `server.reap_orphan` was built in session 1 and called by nothing, so v3-7's fourth audit had no code path; `ConciergeController` now runs it at **app** startup on its own thread — not on panel open, since an orphan holds ~9.4 GB and "until you next open the chat panel" is not a bound. Pinned structurally by `V-CG-124`. **L3, one of v3-7's four audits (§3.1)**: `Stop-Process -Force` on the app killed `llama-server` immediately — the job object, which is the case no Python can cover. Clean exit and the simulated orphan closed in session 5 |
 | FR-CG-10 | no network paths besides fetch, **enumerated host allowlist**; keyed loopback listener | L1 (socket monkeypatch asserts the exact allowlist); L3 offline run | **L1 ✅** `V-CG-56`, `V-CG-66`, `V-CG-67` |
 | FR-CG-11 | **D-CG-13 `Settings.set()`** + D-CG-3 repair loop (incl. truncation class) | L1 forced-rejection at write time + forced-truncation; L2 refusal class; **L1 the panel renders it as a refusal** | **L1 ✅** `V-CF-15`, `V-CF-16`, `V-CG-13`, `V-CG-25`, `V-CG-36`; **`V-CG-102` (session 3)** — a refused `set_config` **and** a refused `update_memory` render as refusals, including one arriving straight after a chip |
 | FR-CG-12 | state machine `disabled`, **and the card that says why** | L1; L3 on non-CUDA machine (same gap as criterion 7) | **L1 ✅** `V-CG-02`; **`V-CG-125`, `V-CG-127`, `V-CG-130` (session 4)** — `disabled` outranks every other gate, so such a machine is never asked to opt in and never offered the download; the card names the hardware fact, the consequence and the Diagnostics tab, and carries no button |
 | FR-CG-13/14 | D-CG-11 session model | L1: fresh-context assembly, **mutable note last in the prefix**, note cap, note round-trip, **`.prev` round-trip**; **L1 the saved-transcript store and the note viewer** | **L1 ✅** `V-CG-18`, `V-CG-30`, `V-CG-34`; **`V-CG-110`…`V-CG-114`, `V-CG-122` (session 3)** |
 | NFR-CG-1/2 | runtime + load path + §5 pack-cost resolution | L2 measured, numbers recorded | **C6 measured**: persistence does not work; the prewarm path measures 9.1–12.1 s to genuinely ready, inside [15 s]. NFR-CG-1 re-confirmed at 0.693 s. **Session 3 re-measured through the Qt adapter** rather than the rig — the shipped path, real server, real GGUF: **11.6 s to `ready`**, then 2.1 s for a grounded answer and 1.9 s for a turn that wrote a setting |
-| NFR-CG-3/4 | residency design | L3 before/after latency **in both the resident-idle and actively-generating states** + VRAM measurement | unchanged; owed at L3 |
+| NFR-CG-3/4 | residency design | L3 before/after latency **in both the resident-idle and actively-generating states** + VRAM measurement | **L3 ✅ (session 5)** `V-M-75`, `V-M-76`, `V-M-86`. n=60 per state against the spike's n=3: resident-idle ×1.02, continuously generating ×3.60 — a harsher state than C5's twelve-burst window, and the one that reaches NFR-1's bound at ~22 s of audio. VRAM 2318 / 10 713 / 10 719 MiB, 4 MiB more under load, which is C5 again. `tests/tools/contention.py` is the instrument |
 | NFR-CG-5/6 | D-CG-9 suite, **D-CG-12 frozen prompt** | L2 is itself the instrument; **every scorecard row records the prompt's hash** | **built** (session 2): 41 scenarios in `tests/tools/scenarios.yaml`, runner + scorers pinned by `V-CG-89`…`V-CG-100`. Every scorecard carries both digests and `HARNESS_VERSION`. **gate 2.5 ran 2026-08-26**: three candidates x two modes, `--repeat 3`, 738 scenario executions. Gemma 4 12B `native` qualified on all seven thresholds; the other two were disqualified for unsafe writes under `adv-05`. `model_qualification.md` |
 | CON-CG-5 | **both modes generated from one registry** | L1: second registered fake model config, zero code diff | **L1 ✅** `V-CG-20`…`V-CG-24`, `V-CG-19` |
 | CON-CG-6 | package layering | L1 import test with Qt stripped, **incl. `server.py` (subprocess, not QProcess)** and `sessions.py`; **the adapter imports only `PySide6.QtCore`** | **L1 ✅** `V-CG-79`…`V-CG-84`; **`V-CG-115` (session 3)** |
@@ -119,9 +131,13 @@ Earlier rounds, on builds since amended, also passed: saved-session name/save/li
 reopen, the memory note surviving a panel close, and the model switch reflected in the
 banner, the Model tab and the tray.
 
-**What v3-7 still owes**: the clean-exit audit and the simulated pre-job-object orphan.
-**What v3-10 still owes**: the distinct-thread-identity reading per hop, which the
-console lines carry and nobody has tabulated.
+~~**What v3-7 still owes**: the clean-exit audit and the simulated pre-job-object
+orphan. **What v3-10 still owes**: the distinct-thread-identity reading per hop, which the
+console lines carry and nobody has tabulated.~~ **Both closed by session 5**
+(`verification.md` §5.4): v3-7's four audits are `V-M-80` and the orphan really did
+survive its parent once the job object was disabled by hand, so the simulation simulated
+something; v3-10's table is `V-M-83`, and tabulating it is what found
+`development_history.md` #48.
 
 **Measured through the app rather than the rig** (NFR-CG-2 allows 15 s): 11.6 s and
 14.0 s from `on_start` to `ready`, prewarm included, across two runs.
@@ -155,14 +171,18 @@ have caught it.
 
 **Not established, and owed to session 5 or later:**
 
-- Everything above ran against a **six-megabyte** fake. Nothing here has downloaded 6.87
-  GB, and the two things that only the real transfer can show are the throttle's
-  behaviour over ~7 000 chunks and whether a resumed `Range` request is honoured by the
-  actual LFS CDN rather than by a fake that answers 206 because it was told to.
-- **No `oid` mismatch has ever been seen in the wild.** The refusal path is exercised by
-  a transport that reports a digest we chose. What it cannot show is that Hugging Face
-  publishes `lfs.oid` for this file in the shape `remote_oid` reads — the spike confirmed
-  that once, on 2026-08-25, and it is a fact about somebody else's API.
+- ~~Everything above ran against a **six-megabyte** fake.~~ **Session 5 ran the real
+  6.87 GB transfer** (`V-M-89`): killed at 512 MiB with `TerminateProcess`, resumed
+  against a CDN that answers `206` with a `Content-Range` total of 7 381 382 944,
+  interrupted a second time by a clean exit at 1.27 GB, and finished at the pinned
+  SHA-256 with 18 % of the file never fetched twice.
+- **No `oid` mismatch has ever been seen in the wild**, and that is still true — a
+  mismatch is somebody else's re-upload and cannot be arranged. What session 5 did do
+  (`V-M-79`) is ask the **live** API on 2026-08-29: `lfs.oid` is still published in the
+  shape `remote_oid` reads and still equals the pin. Two things about that endpoint had
+  moved since the spike looked and neither is read: the entry also carries a top-level
+  `oid` — the git blob sha1 — and a `xetHash`. A parser reaching for the *first* field
+  called "oid" would compare a sha1 against a SHA-256 and refuse every download.
 - **FR-CG-12 has no non-CUDA machine to run on**, the same hardware gap criteria v2-7 and
   v3-6 have always had. The card, the gate's precedence and the "nothing starts" property
   are L1; the machine is not.
@@ -249,9 +269,18 @@ never a concern" are different facts.
   mechanism for `→`, which is evidence but not proof. **Look at the header on the
   reference machine**; if any of the three is a box, the fix is a text label, not a
   different glyph.
-- **NFR-CG-3 needs the reference machine, and has two numbers to check** — the
-  resident-idle PASS rests on n=3 dictations, and the actively-generating figure (×1.46)
-  was fitted against a 107-dictation baseline. **Repeat both in L3 with a larger sample.**
+- ~~**NFR-CG-3 needs the reference machine, and has two numbers to check**~~ — **both
+  re-measured in session 5 at n=60 per state** (`verification.md` §5.4, `V-M-75`,
+  `V-M-76`). Resident-idle is confirmed: ×1.02 of baseline, where the spike's n=3 said
+  ×0.78 and the direction was all it could support. The generating figure is **not**
+  confirmed at ×1.46 and is not contradicted either — under *continuous* decode it is
+  ×3.60, and spike C5's window was twelve bursts over four minutes. Both are real states.
+  Two things came out of the repeat that n=3 could not have shown: the fitted generating
+  line crosses NFR-1's 2 s at **21.9 seconds of audio**, with one reading of forty at a
+  20 s clip measured at 2.115 s; and **the first dictation after llama-server loads costs
+  about +0.25 s, once**, which is a property of the load and not of short utterances —
+  established by reversing the clip order, since "the 2 s clip" and "the first reading"
+  were otherwise the same cell.
 - **L2 needs each candidate GGUF downloaded** (the spike's Gemma 4 12B Q4_K_M is already
   in `spike/` for gate 2.5, and its pin was verified current on 2026-08-26 —
   `concierge_handoff.md` §1.1). **Two of the three are unverified against the pinned

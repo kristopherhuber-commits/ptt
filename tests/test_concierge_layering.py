@@ -247,17 +247,159 @@ def test_the_knowledge_pack_does_ship():
         "app", os.path.join("app", "assets"), "concierge_kb.md") is None
 
 
+def build_module():
+    """`build_portable.py` as a module. It is a script at the repository root,
+    not a package, so importing it needs the path put back."""
+    sys.path.insert(0, REPO)
+    import build_portable
+    return build_portable
+
+
+# -- the bundled llama.cpp runtime (V-CG-134 ... V-CG-137, session 5) ---------
+
+LLAMA = os.path.join("app", "llama")
+
+
+def test_only_llama_servers_dependency_closure_ships():
+    """
+    **`V-CG-134`.** `app/llama/` is the one directory in the distribution whose
+    contents somebody else decides: `build_llama_runtime.py` unpacks whatever
+    the pinned nightly publishes, which for `b10621` is 55 files and 1.10 GB.
+    Eight of them are `llama-server.exe` and the DLLs it imports; the rest are
+    other people's command-line tools, including a quantiser, a benchmark
+    harness and `ggml-rpc-server.exe`, which is a *network listener*.
+
+    An allowlist rather than a blocklist, because a blocklist ships the tool the
+    next build adds.
+    """
+    build = build_module()
+
+    for name in ("llama-server.exe", "llama-server-impl.dll", "llama.dll",
+                 "llama-common.dll", "ggml.dll", "ggml-base.dll",
+                 "libomp.dll", "mtmd.dll", "ggml-cuda.dll"):
+        assert build.should_skip("app", LLAMA, name) is None, name
+
+    for name in ("llama-bench.exe", "llama-cli.exe", "llama-quantize.exe",
+                 "ggml-rpc-server.exe", "ggml-rpc.dll", "llama-tts.exe",
+                 "llama-imatrix.exe", "llama.exe", "llama-mtmd-cli.exe"):
+        assert build.should_skip("app", LLAMA, name), name
+
+
+def test_the_cuda_runtime_dlls_ship_and_the_archives_they_came_in_do_not():
+    """
+    **`V-CG-135`.** Two halves of one mistake.
+
+    The `cudart-*` archive is separate from the binaries archive, and a build
+    that ships only the second produces an executable that will not start on a
+    machine with no CUDA toolkit -- which is every target PC.
+
+    And `fetch.bundle_llama_runtime` leaves both downloaded zips **inside the
+    destination directory**, which is `app/llama/`. Without a rule they are
+    640 MB of installer packed into the installer.
+    """
+    build = build_module()
+
+    for name in ("cudart64_12.dll", "cublas64_12.dll", "cublasLt64_12.dll"):
+        assert build.should_skip("app", LLAMA, name) is None, name
+
+    for name in ("llama-b10621-bin-win-cuda-12.4-x64.zip",
+                 "cudart-llama-bin-win-cuda-12.4-x64.zip"):
+        assert build.should_skip("app", LLAMA, name), name
+
+
+def test_every_cpu_backend_ships():
+    """
+    **`V-CG-136`.** `ggml-base` probes each `ggml-cpu-*.dll` at startup and
+    keeps the best the CPU admits to. Shipping only the one this machine chose
+    would tie the distribution to the build machine's instruction set; all
+    fourteen cost 17 MB, which is the whole argument.
+    """
+    build = build_module()
+
+    for arch in ("alderlake", "haswell", "icelake", "sandybridge", "sse42",
+                 "x64", "zen4", "piledriver", "skylakex", "sapphirerapids"):
+        name = f"ggml-cpu-{arch}.dll"
+        assert build.should_skip("app", LLAMA, name) is None, name
+
+
+def test_the_licence_of_a_bundled_component_travels_with_it():
+    """
+    **`V-CG-137`, and it is the OFL precedent (`V-M-64`) applied to CON-CG-2.**
+
+    llama.cpp is MIT and neither published archive contains its licence: the
+    binaries zip carries `LICENSE-LLVM-OpenMP` for its one vendored dependency
+    and nothing for llama.cpp itself. So the notice has to be fetched, and a
+    build without it is a build that must not run -- which is why the name is in
+    `LLAMA_REQUIRED` and not merely in the allowlist.
+    """
+    build = build_module()
+
+    assert build.should_skip("app", LLAMA, "LICENSE-llama.cpp") is None
+    assert build.should_skip("app", LLAMA, "LICENSE-LLVM-OpenMP") is None
+    assert "LICENSE-llama.cpp" in build.LLAMA_REQUIRED
+    assert set(build.LLAMA_REQUIRED) <= build.LLAMA_RUNTIME_FILES
+
+
+def test_the_build_refuses_to_ship_without_the_runtime(tmp_path):
+    """
+    **`V-CG-137`.** The failure this prevents surfaces on the user's machine and
+    nowhere on the build machine: a distribution whose `app/llama/` is empty
+    installs, runs and dictates, and then reports that the Concierge could not
+    start. On the build machine the developer's own runtime is one directory
+    away, so nothing looks wrong.
+    """
+    build = build_module()
+
+    assert build.check_llama_runtime(str(tmp_path / "absent"))
+    empty = tmp_path / "llama"
+    empty.mkdir()
+    assert len(build.check_llama_runtime(str(empty))) == len(build.LLAMA_REQUIRED)
+
+    for name in build.LLAMA_REQUIRED:
+        (empty / name).write_text("x", encoding="utf-8")
+    assert build.check_llama_runtime(str(empty)) == []
+
+    (empty / "LICENSE-llama.cpp").unlink()
+    assert build.check_llama_runtime(str(empty)) == [
+        os.path.join(str(empty), "LICENSE-llama.cpp") + " is missing"]
+
+
+def test_the_licence_fetch_refuses_to_run_in_the_shipped_app():
+    """
+    **`V-CG-137`.** `fetch_llama_licence` reaches raw.githubusercontent.com,
+    which is outside FR-CG-10's allowlist, so it carries the same explicit
+    build-time token `bundle_llama_runtime` does. The guard is an argument the
+    caller has to pass on purpose.
+    """
+    from ptt.concierge import fetch
+
+    with pytest.raises(RuntimeError, match="never runs in the shipped app"):
+        fetch.fetch_llama_licence("anywhere")
+    with pytest.raises(RuntimeError, match="never runs in the shipped app"):
+        fetch.fetch_llama_licence("anywhere", build_time="yes please")
+
+
 def installer_text():
     return open(os.path.join(REPO, "install.ps1"), encoding="utf-8").read()
 
 
-def preserved_files():
-    """The `$PreservedFiles` list, read out of `install.ps1`."""
+def ps_list(name):
+    """One `$Name = @( ... )` array, read out of `install.ps1`."""
     text = installer_text()
-    body = text[text.index("$PreservedFiles = @("):]
+    body = text[text.index(f"${name} = @("):]
     body = body[: body.index(")")]
     return {line.strip().strip('",') for line in body.splitlines()[1:]
             if line.strip()}
+
+
+def preserved_files():
+    """The `$PreservedFiles` list, read out of `install.ps1`."""
+    return ps_list("PreservedFiles")
+
+
+def disposable_files():
+    """The `$DisposableFiles` list, read out of `install.ps1`."""
+    return ps_list("DisposableFiles")
 
 
 def test_the_installer_preserves_models_and_settings():
@@ -301,14 +443,42 @@ def test_the_installer_preserves_every_durable_artifact():
     #: are replaced at the next start (`OBS-4`), and the state file and key
     #: describe one launch of one process -- keeping them would carry a stale
     #: pid and a dead API key into a new installation.
-    disposable = {"debug_log.txt", "debug_log.prev.txt",
-                  "concierge_state.json", "concierge_key"}
+    #:
+    #: **Read from the installer, not repeated here (session 5).** It used to be
+    #: a literal in this test, which made "disposable" a claim the test made
+    #: about the installer rather than a thing the installer did -- and the
+    #: installer did not do it: `Copy-Item` takes the whole of `app`, so
+    #: installing from a directory the application had been run in carried that
+    #: run's key, log and state file into the installation (`V-M-93`).
+    disposable = disposable_files()
 
     kept = preserved_files()
     assert kept | disposable == set(build.RUNTIME_ARTIFACTS), (
         "a per-machine artifact is neither preserved nor declared disposable: "
         f"{set(build.RUNTIME_ARTIFACTS) - kept - disposable}")
     assert not (kept & disposable)
+
+
+def test_the_installer_discards_every_per_launch_file_it_may_have_copied():
+    """
+    **`V-CG-139`, and it is `V-M-93`.** `build_portable.py` keeps per-launch
+    artifacts out of the *archive*; it cannot keep them out of a *source
+    directory*, and `Copy-Item -Recurse` takes the whole of `app`. Extract the
+    run the application once, then install: without this the installation
+    receives that run's `concierge_key`, its `debug_log.txt` and a
+    `concierge_state.json` naming a pid that has already exited.
+
+    Removed **after** the copy and **after** the preserved files are restored,
+    so the ordering cannot discard something the user owns.
+    """
+    text = installer_text()
+    assert "$DisposableFiles" in text
+    assert disposable_files() == {"debug_log.txt", "debug_log.prev.txt",
+                                  "concierge_state.json", "concierge_key"}
+    assert text.index("Copy-Item -Path \"$SourceDir\\app\"") < \
+        text.index("foreach ($Name in $DisposableFiles)")
+    assert text.index("foreach ($Name in $PreservedNames)") < \
+        text.index("foreach ($Name in $DisposableFiles)")
 
 
 def test_every_preserved_file_is_put_back_after_the_copy():

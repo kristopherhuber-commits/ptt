@@ -67,21 +67,31 @@ class SignalAudit:
     v3-10's "harness idle-timer -> GUI" hop can never appear: the idle timer
     emits `state_changed`, which the worker thread already emitted and logged,
     so the line proving the second hop would be suppressed by the first. Adding
-    the thread keeps Q26's bound where it matters -- the token signal has
-    exactly one emitter, so it still logs exactly one line -- and produces the
-    evidence the criterion asks to see.
+    the thread keeps Q26's bound where it matters and produces the evidence the
+    criterion asks to see.
+
+    **The thread is identified by `get_ident()`, not by its name, and that is
+    the whole of `development_history.md` #48.** A `QThread` is not a Python
+    thread: PySide6 enters and leaves the interpreter around each queued slot
+    invocation, and each entry mints a fresh `_DummyThread` -- so
+    `threading.current_thread().name` on one worker QThread reads `Dummy-1`,
+    then `Dummy-2`, then `Dummy-3`, a new name per delivery. Keyed on the name,
+    nothing is ever a repeat and every emission logs. Keyed on the OS thread id,
+    which does not change, the bound is the one Q26 asks for. The name is still
+    recorded, because it is what a person reads in the log.
     """
 
     def __init__(self, log=log_thread):
         self._log = log
-        self._seen = set()
+        #: `{(what, thread ident): thread name}`.
+        self._seen = {}
 
     def check(self, what, expect_gui):
         """Log once for this `(what, thread)`. Returns whether it logged."""
-        key = (what, threading.current_thread().name)
+        key = (what, threading.get_ident())
         if key in self._seen:
             return False
-        self._seen.add(key)
+        self._seen[key] = threading.current_thread().name
         try:
             self._log(f"Concierge {what}", expect_gui)
         except Exception as e:                       # pragma: no cover - defensive
@@ -89,5 +99,6 @@ class SignalAudit:
         return True
 
     def seen(self):
-        """Every `(what, thread)` already logged. For the L1 suite."""
-        return frozenset(self._seen)
+        """Every `(what, thread name)` already logged. For the L1 suite."""
+        return frozenset((what, name) for (what, _ident), name
+                         in self._seen.items())

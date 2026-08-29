@@ -1,6 +1,6 @@
 # Develop — Claude Code prompts, PTT Dictation v3.0 Concierge
 
-**READY — sessions 0–4 and gate 2.5 are complete; session 5 is next.** In the project's
+**COMPLETE — sessions 0–5 and gate 2.5 have all run.** In the project's
 document architecture this is the Develop document: the complete instruction set for
 construction, consequent to `concierge_requirements.md` and `concierge_design.md`. Design
 §10's decision log is fully resolved — **Q1–Q7 from the design discussion and the spike,
@@ -13,8 +13,10 @@ empirically.
 all seven thresholds PASS. Qwen 3.5 9B and gpt-oss-20b were both disqualified for making
 an unsafe write under the jailbreak scenario. Frozen artifacts: harness `3.0.0-s2`, prompt
 `fa2a83eb2f54`, pack `129c5a31d17f` — **the pack was changed and re-scored in
-session 3** (`76a281c8a388`; same 106/123, see `model_qualification.md`), and session 4
-left it untouched (`concierge_verification.md` §3.2). Session 5 may run.
+session 3** (`76a281c8a388`; same 106/123, see `model_qualification.md`), and sessions 4
+and 5 both left it untouched — session 5 edited a source, watched the digest test fail
+and named the file, and regenerated back to the same `76a281c8a388` byte for byte
+(`verification.md` §5.4, `V-M-77`).
 
 **Session 0 changed the session-1 scope materially.** Three items that were not in the
 original prompt are now load-bearing: a validated write path in `config.py` (D-CG-13,
@@ -347,7 +349,41 @@ machine to not_downloaded.
 
 ---
 
-## Session 5 — acceptance pass and packaging (Opus · Max)
+## Session 5 — acceptance pass and packaging (Opus · Max) — **RUN 2026-08-29, CLOSED**
+
+Executed `concierge_verification.md` §3's twelve criteria with `V-M-75` … `V-M-95`, folded
+the seed into `verification.md` (§3.3 the L1 register, §5.4 the L3 evidence, §6.2 the
+criteria, §7 the holes), added the llama.cpp runtime to the packaging allowlist, and built,
+extracted and installed the distribution. **Ten of the twelve pass; v3-6 needs a machine
+without CUDA (the same gap as v2-7); v3-11 passes with v2-10's residual — this is the
+machine that built it.** Suite 838 → 846.
+
+Five things a later session should not have to rediscover:
+
+- **NFR-CG-3's generating figure is ×3.60, not the spike's ×1.46**, and both are right:
+  C5 measured a real conversation (twelve bursts over four minutes) and session 5 measured
+  continuous decode. The fitted line crosses NFR-1's 2 s at **21.9 seconds of audio** and
+  one reading of forty at a 20 s clip was 2.115 s. Resident-idle is settled at ×1.02 on
+  n=60. Also new: **the first dictation after llama-server loads costs +0.25 s, once** —
+  a property of the load, established by reversing the clip order, because "the 2 s clip"
+  and "the first reading" were otherwise the same cell.
+- **`app/llama/` had no packaging rule at all**, so the build packed all 55 files and
+  1.10 GB of it, `ggml-rpc-server.exe` included, plus the two 640 MB archives
+  `bundle_llama_runtime` leaves in the destination. It is an **allowlist** now, computed
+  from PE import tables. The saving is 5.1 MB of 1104.7 MB — the point is not size (#49).
+- **The build cannot be run the way README said.** Only `.venv`'s interpreter can run the
+  knowledge-pack step, and it locks five of the six files it must overwrite. A lock is now
+  a hash comparison rather than a warning (#53).
+- **`install.ps1` copies the source `app/` wholesale**, so installing from a folder the
+  application has been run in carried that run's key, log and state file. The L1 test that
+  should have caught it held the disposable list as a literal of its own (#54).
+- **Seven of the eight instrumented harnesses had a defect before the application did.**
+  Every one first read as a failure of the thing under test. `verification.md` §5.4 ends
+  with the tally, because the ratio is the useful number.
+
+The size delta, which nothing had ever stated: **+628.3 MB compressed**, 1462.0 MB →
+2090.4 MB, of which 628.2 MB is the llama.cpp runtime and 0.11 MB is everything else the
+Concierge added. `CON-3` recorded PySide6 at +76.9 MB, which is the comparison.
 
 Paste exactly this:
 

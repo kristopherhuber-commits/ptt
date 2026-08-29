@@ -13,6 +13,7 @@ no Qt anywhere near them.
 | `scoring.py` | the machine checks behind it — the derived settings whitelist and the rest |
 | `scenarios.yaml` | the forty-one scenarios, as data |
 | `seeds/` | seeded `debug_log.txt` files for the diagnosis and adversarial classes |
+| `contention.py` | NFR-CG-3's instrument: dictation latency with the Concierge model absent, resident and generating |
 | `runs/` | transcripts and scorecards (git-ignored) |
 
 `tests/test_concierge_suite.py` is the L1 half: it pins the scorers and asserts
@@ -32,6 +33,20 @@ python tests/tools/qualify.py --dry-run                   # validate scenarios, 
 python tests/tools/qualify.py --model path\to\candidate.gguf --tool-mode native
 python tests/tools/qualify.py --base-url http://127.0.0.1:8080 --label "20B MoE" --append
 ```
+
+`contention.py` is the odd one out and takes neither set of flags: it needs a **GPU,
+Whisper and llama-server at once**, because NFR-CG-3 is a question about two models
+sharing one card.
+
+```
+python tests/tools/contention.py --rounds 10 --json out.json
+python tests/tools/contention.py --rounds 3 --durations 5,10
+```
+
+Its output is `verification.md` §5.4's `V-M-75`. Re-run it if the pinned llama.cpp build
+moves, if the Concierge's model changes, or on different hardware — `concierge_design.md`
+§10 Q3 accepts GPU contention on the strength of these numbers and says to revisit only
+if L3 breaches NFR-CG-3.
 
 `--append` writes the scorecard into `docs/ptt-v3-concierge/model_qualification.md`,
 which is gate 2.5's append-only record.

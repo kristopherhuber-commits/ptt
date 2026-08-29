@@ -323,6 +323,50 @@ When packaging using PyInstaller (`--onedir` mode):
 * **Fix:** `ModelPanel._syncing`'s pattern, one control down — a flag set while the widget is written from the settings object. Plus the write itself waits for `sliderReleased` rather than firing on every tick, because dragging 0 → 30 is thirty-one writes of `config.json` and thirty-one broadcasts.
 * **Note:** the panels have had this problem since v2.0 and solved it the same way; what is new is that the *other* writer is a worker thread rather than the user, so the loop closes without anybody touching the control.
 
+### 48. The Thread Whose Name Changed Between Deliveries (Concierge, session 5)
+* **Symptom:** found by reading v3-10's own evidence table rather than by anything failing. One worker QThread — the same `qt_thread` pointer on every line — reported `Dummy-1`, `Dummy-2`, `Dummy-3` and `Dummy-8` on successive hops, and `state_changed` logged a THREAD-CHECK line three times in a session where Q26 asks for one.
+* **Cause:** `SignalAudit` keyed its once-per-session bound on `(signal, threading.current_thread().name)`. A `QThread` is not a Python thread: PySide6 enters the interpreter afresh around each queued slot invocation, and each entry mints a new `_DummyThread` with a new name. Keyed on the name, no key is ever a repeat, so **every emission logs**. Reproduced away from Qt with six queued calls on one QThread and six distinct names; and directly, by mutating one thread's `name` between six `check()` calls and watching six lines appear.
+* **Fix:** key on `threading.get_ident()`, which is the OS thread id and does not change; keep the name as the recorded value, because it is what a person reads in the log. `V-CG-138`.
+* **Note:** the L1 suite passed throughout and was right to. Its threads are Python threads created by `threading.Thread`, whose names are stable — CON-CG-6 keeps Qt out of the harness, so the one condition that breaks the key is the one condition L1 cannot construct. The regression test therefore reproduces the *condition* (a thread whose name changes underneath the audit) rather than its cause. What made this visible at all is that v3-10 asks for the thread identities to be **tabulated**, and a table shows you the column you were not checking.
+
+### 49. The Directory That Shipped Whatever Somebody Else Put In It (Concierge, session 5)
+* **Symptom:** `build_portable.py` had no rule for `app/llama/` at all, so `os.walk` packed every one of the 55 files the pinned nightly unpacks there — 1.10 GB — into every distribution. Among them `ggml-rpc-server.exe`, a network listener, plus a quantiser, a perplexity tool and nine other command-line programs nobody had asked for.
+* **Cause:** `app/llama/` did not exist when the packaging rules were written. Q27 had already found the same shape once — `should_skip`'s runtime-artifact test fires only at the top level of `app/` and `os.walk` packs everything nested below unconditionally — and the fix then was an exclusion for `app/models/`. This directory needed the opposite rule and nothing prompted anyone to write it, because the symptom only appears in a build, and no build had been run since the runtime was unpacked on 2026-08-26. **`bundle_llama_runtime` also leaves both source archives inside the destination**, so the distribution would have carried a further 640 MB of the installer it was installed from.
+* **Fix:** an **allowlist**, `LLAMA_RUNTIME_FILES` plus `ggml-cpu-*.dll`, computed from `llama-server.exe`'s PE import tables rather than guessed (`V-M-90`), and a `LLAMA_REQUIRED` set the build refuses to proceed without. Allowlist and not blocklist because this is the one directory in the distribution whose contents somebody else decides: a rule of the form "skip the tools we know about" ships the tool the next nightly adds.
+* **Note:** the saving is 5.1 MB of 1104.7 MB, so this is not a size fix — the mass is three CUDA DLLs the server genuinely needs. It is a "the distribution contains nothing nobody can account for" fix, and the 640 MB of archives is the part that would have been noticed.
+
+### 50. The Licence That Was In Neither Archive (Concierge, session 5)
+* **Symptom:** CON-CG-2 bundles llama.cpp, which is MIT, and no copy of the MIT notice existed anywhere in the tree or in either published archive.
+* **Cause:** the binaries zip carries `LICENSE-LLVM-OpenMP`, for the one dependency llama.cpp vendors, and **nothing for llama.cpp itself**. A licence file present in the archive is easy to mistake for *the* licence file, and `build_llama_runtime.py` unpacked what it was given.
+* **Fix:** `fetch.fetch_llama_licence` pulls `LICENSE` from the pinned tag — the licence that travels with a binary is the licence of the source it was built from — writes it as `LICENSE-llama.cpp` so it cannot be read as covering the OpenMP file beside it, and refuses anything that does not contain the words `MIT License`. It is in `LLAMA_REQUIRED`, so a build without it stops, and the finished archive is audited for it as well. `V-CG-137`.
+* **Note:** the precedent was already in the record. `V-M-64` checked that **both** `OFL.txt` files shipped with the Barlow faces; the same question about a second bundled component simply never got asked, because that one arrived as a zip with a licence file already in it.
+
+### 51. The Load Generator That Was Inside The Stopwatch (Concierge, session 5)
+* **Symptom:** the first NFR-CG-3 instrument put dictation latency under continuous LLM decode at 3.1–3.9× the baseline, and put the *resident-idle* 2-second clip at 2.1× while 5 s, 10 s and 20 s all sat at 1.00–1.02×.
+* **Cause:** two separate confounds, both in the instrument. The load generator ran as a **thread in the measuring process**, so it competed for the GIL with the code under the stopwatch — the measurement is meant to be about two things contending for a GPU, and it had a second contention in it. And "resident-idle" was measured immediately after a block that restarts llama-server, with a fixed sleep and no check, so the first reading was taken while 7 GB of weights were still settling.
+* **Fix:** the generator moved to a subprocess, which is also what a real installation looks like — llama-server's client is the app, not the model. And `wait_until_idle` polls `nvidia-smi` for utilisation and requires three consecutive quiet samples before the block starts, so the state is asserted rather than assumed.
+* **Note:** the fix did not move the numbers, which is the useful part: the re-run reproduced 3.2–4.0× and 1.9× to within noise, so both confounds were real and neither was the cause. The 2-second cell survived the fix and turned out not to be an artefact at all — see `concierge_verification.md` §3.3's `V-M-76`.
+
+### 52. Waiting On The Worker And Acting On The Panel (Concierge, session 5)
+* **Symptom:** the v3-3 harness typed "Switch me to the large turbo model" into the real panel and nothing happened at all — no user row, no `send (GUI emit)` line, an empty transcript. It read as the panel refusing input.
+* **Cause:** the harness waited for `controller.worker.machine.state == READY` and then submitted. The worker reaches `ready` **on its own thread**; the panel learns about it when the queued `state_changed` is delivered, and `_on_submit` tests `view.can_send()`, which reads the panel's copy. Between those two moments the input is correctly closed. The harness was racing the very hop the session exists to prove.
+* **Fix:** wait for **both** the worker's machine and `panel.view.state`. One line.
+* **Note:** this is `V-M-06`/`V-M-07`'s lesson in a new place — *a test step must state every precondition that changes the expected result* — with the twist that here the precondition is a thread hop the test itself was written to demonstrate. A harness for an asynchronous system must wait on the end it is about to touch, not on the end that goes first. The stub engine had the same shape of problem twice over: it started with four methods, and the FR-CG-2 broadcast walked into the Audio panel, which asks the engine which device is open, so a queued slot raised `AttributeError` inside the hop under test. Its surface is now enumerated from `grep -o '_engine\.[a-z_]*' app/ptt/ui/`.
+
+
+### 53. The Build Locked Its Own Interpreter (Concierge, session 5)
+* **Symptom:** every build this session printed `Warning: python.exe is currently in use/locked. Skipping copy since it already exists.` for five of the six interpreter files, with no application running at all.
+* **Cause:** two of them, and the second is the interesting one. A stray process of the session's own — an abandoned harness still holding `.venv\Scripts\python.exe` — was one. The other is structural: `build_portable.py` copies six files out of the base Python into `.venv\Scripts`, and the only interpreter that can *run* the build is the one inside `.venv`, because step 6 imports `build_knowledge_pack`, which imports `ptt.config`, which imports `ptt.hotkey`, which imports `keyboard` — a `requirements.txt` package that exists in `.venv` and nowhere else. So `python build_portable.py`, which is what README and the rebuild protocol both say, **cannot generate the knowledge pack**, and `.venv\Scripts\python.exe build_portable.py`, which can, locks five of the six files it is supposed to overwrite. `V-M-71` recorded the warning branch as "harmless *this time*"; what it did not have was a case where the build could not avoid it.
+* **Fix:** a lock is no longer a warning, it is a **verification**. If the file that could not be overwritten hashes identical to the one that would have been written, the build says so and continues; if it differs, the build stops. That makes `V-M-71`'s "close the application before building a release" a property the script checks rather than advice nobody can act on, and it is correct under both invocations. README and the rebuild protocol now say `.venv\Scripts\python.exe build_portable.py`, which is the only one that works.
+* **Note:** a first attempt at this refused to run when `sys.executable` was inside `.venv`. That was wrong, and wrong in an instructive way: it would have left **no** working invocation, because the alternative it pointed at fails four steps later on an import. A guard that names a remedy has to be checked against the remedy actually working.
+
+### 54. The Installer Shipped Whatever The Source Folder Was Carrying (Concierge, session 5)
+* **Symptom:** after `install.ps1` ran over an existing installation, `app/concierge_key` was in the installation — a per-launch API key that `build_portable.py` excludes from the archive by name, and that the archive audit had just confirmed was not in it.
+* **Cause:** the exclusion protects the **archive**; it cannot protect a **source directory**. `install.ps1` does `Copy-Item -Path "$SourceDir\app" -Recurse`, so a user who extracts the zip, runs the application once, and then runs `install.bat` installs that run's key, that run's `debug_log.txt`, and a `concierge_state.json` naming a pid that has already exited. Which is exactly what happened here, because `V-M-92` runs the extracted copy and `V-M-93` then installs from the same directory. The startup reap is defended against a stale state file three ways over (pid, create time, image name, and the `/props` alias), so nothing dangerous follows; the point is that "never ships" was true of one path and not of the other.
+* **Fix:** `$DisposableFiles` in `install.ps1` — the four names `RUNTIME_ARTIFACTS` holds that `$PreservedFiles` does not — removed from the target **after** the copy and **after** the preserved files are restored, so the ordering cannot discard something the user owns. `V-CG-139`.
+* **Note:** the L1 test that pairs these two sets already existed and already passed, because it held the disposable list as a **literal of its own**: it asserted that every per-machine artifact was either preserved by the installer or named here as disposable, which made "disposable" a claim the test made rather than a thing the installer did. The list now lives in `install.ps1` and the test reads it. A derived expectation is only derived if both halves come from the artifact.
+
+
 ## 🛠️ Maintenance & Execution Protocols
 
 ### Native Terminal Execution
@@ -337,8 +381,12 @@ When packaging using PyInstaller (`--onedir` mode):
 
 ### Clean Recompile & Rebuild
 ```powershell
-python build_portable.py
+.venv\Scripts\python.exe build_portable.py
 ```
+The interpreter inside `.venv` and not the base one: the knowledge-pack step
+imports `ptt.config`, which reaches `keyboard`, which only `.venv` has (#53).
+Close anything else running out of `.venv` first -- the build verifies the six
+interpreter copies rather than silently skipping them, and stops if one differs.
 
 ### Unit Tests
 See [verification.md](verification.md) section 1.

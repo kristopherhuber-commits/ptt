@@ -69,6 +69,26 @@ $PreservedFiles = @(
 )
 $PreservedNames = @()
 
+# The other half of RUNTIME_ARTIFACTS: per-launch files that are neither
+# preserved nor shipped, and which the copy above can nevertheless carry into a
+# fresh installation.
+#
+# build_portable.py keeps all of these out of the *archive*. It cannot keep them
+# out of the *source directory*, and Copy-Item takes app\ wholesale -- so a user
+# who extracts the zip, runs the application once and then runs install.bat
+# installs that run's API key, that run's log, and that run's
+# concierge_state.json, which names a pid and a port belonging to a process that
+# has already exited. The startup reap is defended against exactly that (pid +
+# create time + image name + /props alias, server.py), so the consequence is
+# contained; it is removed here because "never ships" should be true of both
+# paths and not only of the one that was checked.
+$DisposableFiles = @(
+    "debug_log.txt",
+    "debug_log.prev.txt",
+    "concierge_state.json",
+    "concierge_key"
+)
+
 if (Test-Path $TargetDir) {
     Write-Host "An existing installation was found. Attempting to close active instances..." -ForegroundColor Yellow
     # Try to close any running instances
@@ -136,6 +156,14 @@ foreach ($Name in $PreservedNames) {
     Move-Item -Path "$PreserveDir\$Name" -Destination "$TargetDir\app\$Name" -Force
 }
 if (Test-Path $PreserveDir) { Remove-Item -Path $PreserveDir -Recurse -Force -ErrorAction SilentlyContinue }
+
+# 4b. Drop anything per-launch the source directory happened to be carrying.
+foreach ($Name in $DisposableFiles) {
+    if (Test-Path "$TargetDir\app\$Name") {
+        Write-Host "Discarding $Name from the package (per-launch state)..." -ForegroundColor Gray
+        Remove-Item -Path "$TargetDir\app\$Name" -Force -ErrorAction SilentlyContinue
+    }
+}
 
 # Verify DLLs are in the Scripts directory of the target
 $TargetScripts = "$TargetDir\.venv\Scripts"
