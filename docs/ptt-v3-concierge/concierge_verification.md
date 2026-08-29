@@ -25,14 +25,14 @@ closed by narrowing a requirement.
 | Requirement | Design element | Verified by | Session 1 |
 |---|---|---|---|
 | FR-CG-1 | D-CG-4 (context), **§5.05 two-part pack** | L1 digest manifest + budget; L2 explanation class; L3 | **L1 ✅** `V-CG-69`…`V-CG-78`. **Pack amended and re-scored in session 3**: hand testing found the Concierge inventing a restart requirement for a model switch because nothing in the pack said that changing `model` *is* loading it. Two sentences in `config.FIELDS`; digest `129c5a31d17f` → `76a281c8a388`; the qualified configuration re-scored twice at **106/123**, the gate's own total (`model_qualification.md`) |
-| FR-CG-2 | D-CG-5 dispatch → **`Settings.set()`** → queued settings-changed → `refresh_panels()` | L1 dispatch + the worker→GUI hop; L2 write class; L3 | **L1 ✅** dispatch `V-CG-13`, `V-CF-16`; **the queued hop `V-CG-120` (session 3)** — emitted on a write, not on a refusal, and `apply_now` unreachable from the adapter. L3 owed |
+| FR-CG-2 | D-CG-5 dispatch → **`Settings.set()`** → queued settings-changed → `refresh_panels()` | L1 dispatch + the worker→GUI hop; L2 write class; L3 | **L1 ✅** dispatch `V-CG-13`, `V-CF-16`; **the queued hop `V-CG-120` (session 3)** — emitted on a write, not on a refusal, and `apply_now` unreachable from the adapter. **L3 ✅ (§3.1)**: a Concierge write reaches the banner, the Model tab and the tray menu without a restart |
 | FR-CG-3 | D-CG-5 undo journal, **incl. `update_memory` and reverse-order restore** | L1; L3 | **L1 ✅** `V-CG-40`…`V-CG-45`; **the chips and `↺ session` `V-CG-106`, `V-CG-121` (session 3)** — a refused undo stays pending, a restore touches only journalled keys |
 | FR-CG-4 | system prompt setup flow | L2 dialogue scenario; L3 | prompt drafted (`V-CG-38`); **L2 scenario written** (session 2) — `sel-11`, the only multi-turn scenario in the file, scored with `dialogue_tools` because "one at a time, waiting for an answer" is a shape no single turn can show. L3 still owed |
 | FR-CG-5 | `read_log` tool, **both files (Q21)** | L1 previous-log inclusion + shared budget; L2 log-diagnosis class (seeded fake logs) | **L1 ✅** `V-CG-17` |
 | FR-CG-6 | additive integration | L3: all ten v2.0 criteria re-run | v2.0's 333 tests still green inside 607 |
 | FR-CG-7 | D-CG-6 fetch (**pin as authority, tree `oid` as pre-download cross-check**; `nightly-tag.txt` resolution at build time only) | L1 resume/hash + `oid`-mismatch refusal; L3 kill-and-relaunch | **L1 ✅** `V-CG-56`…`V-CG-68` |
-| FR-CG-8 | D-CG-1 idle timer | L1 timer logic; L3 nvidia-smi observation | **L1 ✅** `V-CG-54` |
-| FR-CG-9 | D-CG-1 **job object (§8.1)** + state-file reap | L1 reap logic; **L3 exit, `TerminateProcess`, and Task-Manager-kill process audits** | **L1 ✅** `V-CG-48`…`V-CG-53`. **Session 3 wired the reap**: `server.reap_orphan` was built in session 1 and called by nothing, so v3-7's fourth audit had no code path; `ConciergeController` now runs it at **app** startup on its own thread — not on panel open, since an orphan holds ~9.4 GB and "until you next open the chat panel" is not a bound. Pinned structurally by `V-CG-124` |
+| FR-CG-8 | D-CG-1 idle timer | L1 timer logic; L3 nvidia-smi observation | **L1 ✅** `V-CG-54`. **L3 ✅ (session 3, §3.1)**: the timer fires with the panel open and the panel survives it; residency 0 unloads on panel close; a send restarts a stopped runtime |
+| FR-CG-9 | D-CG-1 **job object (§8.1)** + state-file reap | L1 reap logic; **L3 exit, `TerminateProcess`, and Task-Manager-kill process audits** | **L1 ✅** `V-CG-48`…`V-CG-53`. **Session 3 wired the reap**: `server.reap_orphan` was built in session 1 and called by nothing, so v3-7's fourth audit had no code path; `ConciergeController` now runs it at **app** startup on its own thread — not on panel open, since an orphan holds ~9.4 GB and "until you next open the chat panel" is not a bound. Pinned structurally by `V-CG-124`. **L3, one of v3-7's four audits (§3.1)**: `Stop-Process -Force` on the app killed `llama-server` immediately — the job object, which is the case no Python can cover. Clean exit and the simulated orphan still owed |
 | FR-CG-10 | no network paths besides fetch, **enumerated host allowlist**; keyed loopback listener | L1 (socket monkeypatch asserts the exact allowlist); L3 offline run | **L1 ✅** `V-CG-56`, `V-CG-66`, `V-CG-67` |
 | FR-CG-11 | **D-CG-13 `Settings.set()`** + D-CG-3 repair loop (incl. truncation class) | L1 forced-rejection at write time + forced-truncation; L2 refusal class; **L1 the panel renders it as a refusal** | **L1 ✅** `V-CF-15`, `V-CF-16`, `V-CG-13`, `V-CG-25`, `V-CG-36`; **`V-CG-102` (session 3)** — a refused `set_config` **and** a refused `update_memory` render as refusals, including one arriving straight after a chip |
 | FR-CG-12 | state machine `disabled` | L1; L3 on non-CUDA machine (same gap as criterion 7) | **L1 ✅** `V-CG-02` |
@@ -94,6 +94,35 @@ are ambiguous and have already cost one round of clarification.
 10. Thread audit: every new signal `QueuedConnection`; `THREAD-CHECK` logs **once per signal type per session** and shows distinct thread identities on **every** hop — worker→GUI (tokens, tool events, state), GUI→worker (send, cancel), harness idle-timer→GUI, server-reader→worker.
 11. **Packaging:** `build_portable.py` produces a zip containing `app/assets/concierge_kb.md` and **no `.gguf`**, no `concierge_state.json`, no `concierge_key`. Then `install.bat` over an existing installation preserves `app/models/` **and** `app/config.json`.
 12. **Pack currency:** edit a source document without regenerating, run the L1 suite → the digest test fails and names the file. Regenerate → green.
+
+### 3.1 L3 evidence from session 3's hand testing
+
+Session 5 executes §3's twelve criteria formally, with V-M numbers. This is what
+session 3's own hand testing established on the reference machine on the way
+there, recorded because the evidence exists and re-gathering it is not free.
+Everything below was run in the real app, elevated, against the real
+llama-server and the pinned GGUF.
+
+| What ran | Evidence for | Result |
+|---|---|---|
+| "Set your idle unload to 1 minute" | **FR-CG-2**, the queued hop end to end | Chip `concierge.idle_unload_minutes: 5 → 1`; banner, tabs and tray all followed |
+| Panel left open, no input, ~90 s | **FR-CG-8** idle timer, and **v3-10**'s harness-idle-timer → GUI hop | Amber `unloading`, then grey `stopped`, panel still usable |
+| `nvidia-smi` after that | **FR-CG-8** | No `llama-server.exe` |
+| A message sent to a `stopped` panel | session 3's wake-on-send | Amber `loading`, then an answer; no close-and-reopen |
+| Residency 0, then the panel closed | **FR-CG-8**'s "0 = unload when the chat panel closes" | No `llama-server.exe` |
+| `Stop-Process -Force` on the running app | **v3-7**, the `TerminateProcess` audit — one act covering both the Task-Manager and the `install.ps1` forms, which are the same mechanism | `llama-server.exe` present before, gone immediately after. The job object, doing the thing no Python can do |
+| The console, after all of it | **v3-10** | No `WRONG THREAD`, no `Traceback` |
+
+Earlier rounds, on builds since amended, also passed: saved-session name/save/list/
+reopen, the memory note surviving a panel close, and the model switch reflected in the
+banner, the Model tab and the tray.
+
+**What v3-7 still owes**: the clean-exit audit and the simulated pre-job-object orphan.
+**What v3-10 still owes**: the distinct-thread-identity reading per hop, which the
+console lines carry and nobody has tabulated.
+
+**Measured through the app rather than the rig** (NFR-CG-2 allows 15 s): 11.6 s and
+14.0 s from `on_start` to `ready`, prewarm included, across two runs.
 
 ## 4. Known holes
 

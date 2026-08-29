@@ -237,21 +237,37 @@ harness defect were already shaken out of it. **No further session until this is
 
 ---
 
-## Session 3 — panel UI and threading (Opus · Extra) — **RUN 2026-08-26, DONE**
+## Session 3 — panel UI and threading (Opus · Extra) — **RUN 2026-08-26/27, CLOSED**
 
 Built: `app/ptt/ui/qt_concierge.py` (view model + `ConciergePanel`),
 `app/ptt/ui/qt_concierge_worker.py` (`ConciergeWorker` + `ConciergeController`),
 `app/ptt/ui/qt_threadcheck.py` (`log_thread` moved out of `qt_tray`, plus `SignalAudit`),
 `app/ptt/concierge/sessions.py` (saved transcripts), the splitter and tab-strip button in
 `qt_window.py`, the tray's `Concierge…`, the FR-CG-2 hop in `qt_app.py`, and the
-stylesheet block. 84 new L1 items (`V-CG-101`…`V-CG-124`); 747 tests green.
+stylesheet block. `V-CG-101`…`V-CG-124`; **765 tests green**.
 
-Three things later sessions inherit: the thread adapter lives in `ptt.ui`, not
-`ptt.concierge` (design §2, rev. session 3 — a QThread adapter cannot pass CON-CG-6's
-import test); `THREAD-CHECK` is keyed by signal **and** emitting thread (§10 Q26 rider,
-without which v3-10's idle-timer hop can never be shown); and `install.ps1` preserves
-neither the memory note nor the saved transcripts across a reinstall
-(`concierge_verification.md` §4, still open — session 5 owns that file).
+**Nine commits, and eight of them are hand-test repairs** — the build was one commit and
+the defects it took to make it work were the rest. `development_history.md` #25–#41.
+The four that matter to a later session:
+
+- **The thread adapter lives in `ptt.ui`**, not `ptt.concierge`: a QThread adapter cannot
+  pass CON-CG-6's import test (design §2, rev. session 3).
+- **`THREAD-CHECK` is keyed by signal *and* emitting thread** (§10, Q26 rider), without
+  which v3-10's idle-timer hop can never be shown.
+- **A model reload is held while the model is generating and flushed inside a tool call.**
+  A CUDA allocation during decode trips the 30 s stall bound; a tool call is the one
+  moment it is safe. `run_benchmark` flushes it and waits, because a measurement labelled
+  with `settings.model` rather than with what is resident files the old model's time under
+  the new model's name (#39).
+- **The knowledge pack was amended and re-scored.** `config.FIELDS` never said that
+  changing `model` *is* loading it, so the model invented a restart requirement. Digest
+  `129c5a31d17f` → `76a281c8a388`; the qualified configuration re-scored twice at 106/123,
+  the gate's own total. `model_qualification.md`.
+
+L3 evidence gathered on the way, ahead of session 5: `concierge_verification.md` §3.1.
+Left open there: the residency slider has no control until session 4, `required facts
+covered` at 0.9 is finer than the suite resolves, the memory guard is defeated by
+paraphrase, and the panel's three fallback glyphs are unverified on a real screen.
 
 Paste exactly this:
 
