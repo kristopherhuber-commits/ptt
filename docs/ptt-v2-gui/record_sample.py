@@ -8,7 +8,7 @@ cached measurement in config.json.
 
 Run from the project root with the project's venv:
 
-    .venv\\Scripts\\python.exe docs\\gui_handoff\\record_sample.py
+    .venv\\Scripts\\python.exe docs\\ptt-v2-gui\\record_sample.py
 
 Writes app/assets/benchmark_sample.wav (16 kHz mono, 16-bit PCM), which is what
 faster-whisper wants and is small enough to commit (~940 KB for 30 s).

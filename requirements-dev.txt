@@ -14,11 +14,20 @@
 # set the modules under test import: faster-whisper, ctranslate2, pillow and the
 # nvidia-* wheels are absent on purpose, because transcribe.py defers those
 # imports into functions (see its module docstring) and no test loads a model.
+#
+# PyYAML is here and not in requirements.txt because it is read by the
+# *instruments*, never by the application: tests/tools/scenarios.yaml is the
+# qualification suite (concierge_design.md section 6), and tests/tools/qualify.py
+# is what reads it. CON-3 stands -- the only things v3.0 adds to a distribution
+# are a binary and a GGUF, and nothing under app/ imports yaml. The L1 test
+# tests/test_concierge_suite.py needs it too, because the scenario file is the
+# thing that test is about.
 
 pytest
 
 keyboard==0.13.5
 numpy==2.4.6
-pyperclip==1.11.0
 PySide6-Essentials==6.11.2
+pyperclip==1.11.0
+PyYAML==6.0.3
 sounddevice==0.5.5

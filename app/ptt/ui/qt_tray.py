@@ -21,7 +21,6 @@ behaviour-preserving:
   the conversion needs a live QApplication and there is no reason to repeat it.
 """
 
-import threading
 from typing import TYPE_CHECKING
 
 from PIL import Image, ImageDraw
@@ -31,6 +30,7 @@ from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 
 from ptt import hotkey as hotkey_mod
 from ptt.logging_setup import log_debug
+from ptt.ui.qt_threadcheck import log_thread
 
 if TYPE_CHECKING:                    # import for typing only; at runtime the
     from ptt.engine import Engine    # tray never needs the class itself
@@ -132,6 +132,14 @@ class QtTray(QObject):
     #: Double click, or the Settings... menu item.
     settings_requested = Signal()
 
+    #: Open Settings **with the Concierge panel expanded** (handoff section 1).
+    #: A separate signal rather than a flag on `settings_requested`, because the
+    #: two menu items mean different things and `QtApp` does different things
+    #: with them. It is present even when the Concierge has been declined: that
+    #: is what handoff section 1 means by "declining leaves a Concierge entry in
+    #: Settings and the tray menu" -- declining is not the same as hiding.
+    concierge_requested = Signal()
+
     def __init__(self, settings, cuda_supported, parent=None):
         super().__init__(parent)
         self._settings = settings
@@ -203,7 +211,7 @@ class QtTray(QObject):
 
         if not self._thread_checked:
             self._thread_checked = True
-            _log_thread("slot QtTray.on_state_changed", expect_gui=True)
+            log_thread("slot QtTray.on_state_changed", expect_gui=True)
 
         self._status = status_text if status_text else state.capitalize()
         self._tray.setIcon(self._icons.get(state, self._icons["idle"]))
@@ -240,6 +248,11 @@ class QtTray(QObject):
 
         self._menu.addSeparator()
 
+        self._act_concierge = self._menu.addAction("Concierge…")
+        self._act_concierge.triggered.connect(
+            lambda _checked=False: self.concierge_requested.emit()
+        )
+
         self._act_settings = self._menu.addAction("Settings…")
         # Swallow QAction.triggered's `checked` bool rather than forwarding it
         # into a zero-argument signal, which raises TypeError if emitted directly.
@@ -273,16 +286,14 @@ class QtTray(QObject):
     @Slot()
     def _set_device_gpu(self):
         if not self._settings.use_gpu:
-            self._settings.use_gpu = True
-            self._settings.save()
+            self._settings.set("use_gpu", True)
             self._engine.request_model_reload()
         self.refresh_menu()
 
     @Slot()
     def _set_device_cpu(self):
         if self._settings.use_gpu:
-            self._settings.use_gpu = False
-            self._settings.save()
+            self._settings.set("use_gpu", False)
             self._engine.request_model_reload()
         self.refresh_menu()
 
@@ -302,34 +313,3 @@ class QtTray(QObject):
         # happens to hover over it.
         self._tray.hide()
         QApplication.quit()
-
-
-def _log_thread(where, expect_gui):
-    """
-    Record which thread a bridge endpoint ran on. Writes one line; never raises.
-
-    Deliberately a log and not an `assert`. `Engine._emit` wraps the state
-    callback in `try/except Exception` and only logs, so an AssertionError raised
-    on the engine side is swallowed whole and leaves no visible symptom -- the
-    same shape of silent failure as retrospective issue #11. Asserts are also
-    stripped under -O.
-
-    The pair of lines this produces is the actual evidence: the callback side
-    must NOT be the GUI thread and the slot side must be, so the two recorded
-    thread ids must differ. Equal ids mean the queued hop is not happening.
-    """
-    try:
-        from PySide6.QtCore import QThread
-        app = QApplication.instance()
-        current = QThread.currentThread()
-        gui = app.thread() if app is not None else None
-        is_gui = current == gui
-        verdict = "OK" if is_gui == expect_gui else "WRONG THREAD"
-        log_debug(
-            f"THREAD-CHECK [{verdict}] {where}: "
-            f"qt_thread={current} gui_thread={gui} "
-            f"python_thread={threading.current_thread().name} "
-            f"(expected {'GUI' if expect_gui else 'non-GUI'})"
-        )
-    except Exception as e:
-        log_debug(f"THREAD-CHECK failed for {where}: {e}")

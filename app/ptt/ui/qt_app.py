@@ -37,6 +37,7 @@ explicit form cannot degrade.
 
 import sys
 import threading
+from datetime import datetime
 
 from PySide6.QtCore import QObject, Qt, QTimer, Signal
 from PySide6.QtWidgets import QApplication, QSystemTrayIcon
@@ -44,9 +45,11 @@ from PySide6.QtWidgets import QApplication, QSystemTrayIcon
 from ptt import hotkey as hotkey_mod
 from ptt.logging_setup import log_debug
 from ptt.ui import qt_theme
+from ptt.ui.qt_concierge_worker import ConciergeController
 from ptt.ui.qt_popover import Popover
 from ptt.ui.qt_statusview import UNKNOWN, UiState
-from ptt.ui.qt_tray import QtTray, _log_thread
+from ptt.ui.qt_threadcheck import log_thread
+from ptt.ui.qt_tray import QtTray
 from ptt.ui.qt_window import SettingsWindow
 
 #: Windows initialises the notification area asynchronously at login, and the
@@ -65,12 +68,13 @@ class EngineBridge(QObject):
     no formatting that could raise, no widget access, no blocking. The one
     exception is the one-shot thread check below, which fires exactly once per
     process (on the first "loading" emit, before the model load) and writes a
-    single line. That is the evidence that the hop is real; see `_log_thread`.
+    single line. That is the evidence that the hop is real; see
+    `qt_threadcheck.log_thread`.
     """
 
     state_changed = Signal(str, str)     # state, status_text
     text_ready = Signal(str)             # wired to the engine in session 2
-    benchmark_done = Signal(str, float)  # device, seconds -- see Engine.request_benchmark
+    benchmark_done = Signal(str, str, float)  # model, device, seconds
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -79,7 +83,7 @@ class EngineBridge(QObject):
     def on_state(self, state, status_text=None):
         if not self._thread_checked:
             self._thread_checked = True
-            _log_thread("callback EngineBridge.on_state", expect_gui=False)
+            log_thread("callback EngineBridge.on_state", expect_gui=False)
         self.state_changed.emit(state, status_text or "")
 
     def on_text(self, text):
@@ -90,10 +94,19 @@ class EngineBridge(QObject):
         A latency measurement, from the engine thread. Emits and nothing else,
         for exactly the reason `on_state` does -- the slot on the far side
         writes config.json and repaints a table, and both belong on the GUI
-        thread. The model name is dropped rather than carried: by the time this
-        fires it is `settings.model`, which the receiving panel already reads.
+        thread.
+
+        **The model name is carried (v3.0), where it used to be dropped.** The
+        reasoning for dropping it -- "by the time this fires it is
+        `settings.model`, which the receiving panel already reads" -- was true
+        while the Model tab was the only thing that could ask for a measurement.
+        The Concierge can write the setting and have the reload that follows it
+        deferred behind a turn, so the setting and the resident model disagree
+        for a few seconds, and a measurement filed under the setting is filed
+        under the wrong tier. `Engine.current_model` is the one that produced
+        the number.
         """
-        self.benchmark_done.emit(device, seconds)
+        self.benchmark_done.emit(model_name, device, seconds)
 
 
 class QtApp:
@@ -163,6 +176,24 @@ class QtApp:
             self._on_benchmark_done, Qt.ConnectionType.QueuedConnection
         )
 
+        # The Concierge (v3.0). Everything about the worker thread lives in the
+        # controller; what this class supplies is the three things only it has:
+        # the `UiState` the `get_state` tool is served from, the engine, and the
+        # settings-changed broadcast a worker-thread write has to arrive at.
+        self._concierge = ConciergeController(
+            settings, self._window.concierge,
+            ui_state=self.ui,
+            engine_provider=lambda: self._engine,
+            cuda_supported=cuda_supported,
+        )
+        self._concierge.settings_applied.connect(self._on_concierge_applied)
+        self._concierge.reload_requested.connect(self._on_concierge_reload)
+        self._concierge.status_changed.connect(
+            self._window.set_concierge_segment)
+        self._window.concierge_visible.connect(self._on_concierge_visible)
+        self._tray.concierge_requested.connect(self._open_concierge)
+        self._app.aboutToQuit.connect(self._concierge.shutdown)
+
         self._push_ui()
 
     def attach(self, engine):
@@ -211,9 +242,63 @@ class QtApp:
         self._window.refresh_panels()
         self._tray.refresh_menu()
 
-    def _on_benchmark_done(self, device, seconds):
-        """Hand a measurement to the Model panel, on the GUI thread."""
-        self._window.record_benchmark(self._settings.model, device, seconds)
+    def _on_benchmark_done(self, model, device, seconds):
+        """
+        Hand a measurement to the Model panel, on the GUI thread.
+
+        And to the Concierge, if it is the one that asked. `run_benchmark` is a
+        tool call blocked on a `threading.Event` over in the worker thread; this
+        is the hop that releases it. Delivering unconditionally is deliberate --
+        a measurement the user started from the Model tab is still the answer to
+        "how fast is this model", and the bridge ignores one nobody is waiting
+        for.
+        """
+        self._window.record_benchmark(model, device, seconds)
+        self._concierge.benchmark.deliver(model, device, seconds)
+
+    # -- the Concierge --------------------------------------------------------
+
+    def _on_concierge_applied(self, key):
+        """
+        **FR-CG-2.** A worker-thread write, arriving on the GUI thread at last.
+
+        The whole point of the hop: `set_config` ran on the Concierge's thread,
+        went through `Settings.set()` and could not touch a widget; this is
+        where the banner, the tabs, the status bar and the tray menu find out,
+        through the same broadcast a panel's own write uses. Without it the
+        change is on disk and in the settings object and nowhere on screen until
+        the engine's next state change happens to repaint things.
+        """
+        log_debug(f"Concierge applied {key or 'a restore'}; refreshing the UI.")
+        self._on_settings_changed()
+        self._window.flash_saved(datetime.now().strftime("%H:%M:%S"))
+
+    def _on_concierge_reload(self):
+        """
+        The Concierge changed a setting the engine only reads at model build.
+
+        `InstantApplyPanel.apply_now(reload_model=True)` is the path a panel
+        takes; a worker thread cannot take it, because that method is on a
+        QWidget. `request_model_reload` is thread-safe, but it is called from
+        here anyway so that the ordering is the one the panels already prove --
+        the write is persisted first, then the engine is told.
+        """
+        if self._engine is not None:
+            self._engine.request_model_reload()
+        else:
+            log_debug("WARNING: the Concierge changed a model setting before an "
+                      "engine was attached; it will apply at the next load.")
+
+    def _on_concierge_visible(self, visible):
+        if visible:
+            self._concierge.open()
+        else:
+            self._concierge.close()
+
+    def _open_concierge(self):
+        """The tray's `Concierge…`: Settings, with the panel already expanded."""
+        self._open_settings()
+        self._window.set_concierge_visible(True)
 
     def _push_ui(self):
         """One UiState, pushed to both displays, so they cannot drift apart."""
@@ -221,8 +306,19 @@ class QtApp:
         self._window.apply(self.ui)
 
     def _open_settings(self):
+        """
+        Show the window, and make the first-run Concierge offer if it is owed.
+
+        The offer is deliberately not made at launch: see
+        `SettingsWindow.offer_concierge_once`. Here rather than inside that
+        method because expanding the panel has to reach the controller too, and
+        the window knows nothing about the controller by design.
+        """
         self._popover.hide()
         self._window.show_and_raise()
+        if self._window.offer_concierge_once(
+                self._settings.get("concierge.opt_in")):
+            log_debug("Concierge: making the first-run offer; opt_in is unset.")
 
     # -- run ----------------------------------------------------------------
 

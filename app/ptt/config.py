@@ -9,12 +9,31 @@ Every field is validated and every fallback is logged with its reason (OBS-3).
 A configuration that silently reverts to a default is indistinguishable from one
 that was never applied, which is the class of failure the observability
 requirements exist to close.
+
+**`FIELDS` is the schema** (`concierge_design.md` section 4.6, D-CG-13). One
+declarative table -- type, choices, range, parse, and the prose that describes
+each setting -- with three consumers and no second copy of any rule:
+
+- `load()`, whose fallback-with-a-logged-reason path reads it field by field;
+- `Settings.set(key, value) -> (ok, reason)`, the validated **write** path
+  FR-CG-11 requires, which every writer goes through including the settings
+  panels, so the invariant belongs to this object rather than to its callers;
+- the Concierge's tool registry, which derives `set_config`'s key enum, each
+  tool's argument schema, and the knowledge pack's per-setting half from it.
+
+Before that table existed the rules lived inside `load()` and a write was a bare
+`setattr`, so a hallucinated value would have been accepted, saved, and reverted
+at the *next* start with a log line nobody was watching -- the "rejection
+reported as success" shape FR-CG-11 forbids. This is the `hotkey.KEYS` idiom
+(V-HK-01); issue #12 is the recorded case of what a private copy of a derived
+table costs.
 """
 
 import json
 import os
 import threading
 from dataclasses import dataclass, field
+from typing import Any, Callable, NamedTuple
 
 from ptt import hotkey as hotkey_mod
 from ptt import paths
@@ -31,11 +50,483 @@ CONFIG_VERSION = 1
 _KNOWN_KEYS = (
     "version", "use_gpu", "hotkey", "model", "benchmarks",
     "audio_device", "keep_stream_warm", "ignore_short_holds", "start_click",
-    "vocabulary",
+    "vocabulary", "concierge",
 )
 
 #: Serialises writers of config.json. See `Settings.save`.
 _save_lock = threading.Lock()
+
+
+# -- the declarative schema ---------------------------------------------------
+
+class Field(NamedTuple):
+    """
+    One setting's complete rule, stated once.
+
+    `kind` selects the type check. `"bool"`, `"int"` and `"str"` are checked
+    here; `"parsed"` delegates wholly to `parse`, which is how the three
+    structured settings reach the module that already owns their grammar --
+    `hotkey.parse_chord` for a chord, `vocabulary.parse_rule` per rule -- rather
+    than having it restated here.
+
+    `parse` is `(raw, note, strict) -> (value, defect)`. **`strict` is the one
+    place load and write legitimately differ**, and it is a disposition rather
+    than a second rule: reading a hand-edited file, one malformed vocabulary
+    rule is dropped with its own log line and the twenty beside it survive
+    (`V-CF-13`); writing through `Settings.set`, the same rule is a *rejection*,
+    because a partially-applied write reported as success is precisely what
+    FR-CG-11 forbids.
+
+    `does`, `when` and `risk` are the per-setting prose. They live here because
+    `build_knowledge_pack.py` generates the pack's per-setting half from this
+    table (`concierge_design.md` section 5.05): that half cannot drift from the
+    application, because it *is* the application.
+
+    `agent_writable` is the scope exclusion the requirements state as prose.
+    "Editing vocabulary rules is out of scope for v3.0" is unenforceable as a
+    sentence -- `set_config("vocabulary", ...)` reaches them -- so it is an
+    allowlist here instead.
+    """
+    kind: str
+    default: Any
+    does: str = ""
+    when: str = ""
+    risk: str = ""
+    choices: tuple = ()
+    minimum: int | None = None
+    maximum: int | None = None
+    nullable: bool = False
+    parse: Callable | None = None
+    json_type: str = ""
+    fallback_note: str = ""
+    agent_readable: bool = True
+    agent_writable: bool = True
+    internal: bool = False
+
+    @property
+    def note(self):
+        """What the log line says was done instead, when a value is rejected."""
+        return self.fallback_note or f"using default {self.default}"
+
+    def schema_type(self):
+        """This field's JSON type, for the generated tool schema (design 4.1)."""
+        if self.json_type:
+            return self.json_type
+        return {"bool": "boolean", "int": "integer", "str": "string"}[self.kind]
+
+    def check(self, raw, note="config.json", strict=False):
+        """
+        Validate one candidate value.
+
+        Returns ``(value, None)`` when it is acceptable, or ``(None, defect)``
+        where `defect` is the phrase that follows the key name in the log line
+        -- "is not a boolean (0)", "invalid (empty)". Never raises and never
+        logs: the caller owns the disposition and therefore owns the message
+        (`OBS-3` keeps `config.py` the only module that writes it).
+        """
+        if raw is None and self.nullable:
+            return None, None
+
+        if self.kind == "bool":
+            if isinstance(raw, bool):
+                return raw, None
+            return None, f"is not a boolean ({raw!r})"
+
+        if self.kind == "int":
+            if isinstance(raw, bool) or not isinstance(raw, int):
+                return None, f"is not an integer ({raw!r})"
+            if self.minimum is not None and raw < self.minimum:
+                if self.minimum == 0:
+                    return None, f"is negative ({raw!r})"
+                return None, f"is below {self.minimum} ({raw!r})"
+            if self.maximum is not None and raw > self.maximum:
+                return None, f"is above {self.maximum} ({raw!r})"
+            return raw, None
+
+        if self.kind == "str":
+            if not isinstance(raw, str):
+                return None, f"is not a string ({raw!r})"
+            if self.choices and raw not in self.choices:
+                return None, f"{raw!r} is not one of {list(self.choices)}"
+            return raw, None
+
+        return self.parse(raw, note, strict)
+
+
+def _parse_chord(raw, note, strict):
+    """A chord, through the module that owns the vocabulary of key names."""
+    chord, reason = hotkey_mod.parse_chord(raw)
+    if chord is None:
+        return None, f"invalid ({reason})"
+    return chord, None
+
+
+def _parse_benchmarks(raw, note="config.json", strict=False):
+    """
+    Validate the measured-latency cache, dropping entries that make no sense.
+
+    Shape: ``{"<model>|<device>": {"seconds": float, "at": str, "clip": str,
+    "llm_resident": bool}}``. `clip` is a digest of the benchmark WAV, so
+    re-recording the clip invalidates the numbers taken against the old one
+    instead of silently comparing measurements of two different recordings.
+    `llm_resident` records whether the Concierge model was in VRAM when the
+    figure was taken (`concierge_design.md` section 10 Q23): spike C5 measured a
+    1.46x Whisper penalty during active LLM decode, and a contended figure
+    sitting in the Model tab beside a clean one looks comparable and is not.
+
+    Per-entry, because one malformed entry someone hand-edited must not throw
+    away the twenty beside it. Under `strict` -- the write path -- there is no
+    such thing as a partial success, so the first bad entry rejects the write.
+    """
+    if not isinstance(raw, dict):
+        return None, f"is not an object ({raw!r})"
+
+    kept = {}
+    for key, entry in raw.items():
+        defect = _benchmark_defect(entry)
+        if defect:
+            if strict:
+                return None, f"entry {key!r} {defect}"
+            log_debug(f"{note} benchmarks[{key!r}] {defect}; dropping it.")
+            continue
+        kept[str(key)] = {
+            "seconds": float(entry["seconds"]),
+            "at": str(entry.get("at", "")),
+            "clip": str(entry.get("clip", "")),
+            "llm_resident": bool(entry.get("llm_resident", False)),
+        }
+    return kept, None
+
+
+def _benchmark_defect(entry):
+    """What is wrong with one benchmark entry, or None."""
+    if not isinstance(entry, dict):
+        return "is not an object"
+    seconds = entry.get("seconds")
+    if not isinstance(seconds, (int, float)) or isinstance(seconds, bool) or seconds <= 0:
+        return f"has no positive numeric 'seconds' ({seconds!r})"
+    return None
+
+
+def _parse_vocabulary(raw, note="config.json", strict=False):
+    """
+    Validate the replacement rules, dropping the ones that make no sense.
+
+    Per entry, like `_parse_benchmarks` and for the same reason. The validation
+    itself lives in `vocabulary.parse_rule`, which is pure and never logs, so
+    this is the only place a rejected rule is explained (OBS-3).
+    """
+    if not isinstance(raw, list) and not isinstance(raw, tuple):
+        return None, f"is not a list ({raw!r})"
+
+    kept = []
+    for index, entry in enumerate(raw):
+        if isinstance(entry, vocabulary_mod.Rule):
+            kept.append(entry)
+            continue
+        rule, reason = vocabulary_mod.parse_rule(entry)
+        if rule is None:
+            if strict:
+                return None, f"rule {index} is invalid ({reason})"
+            log_debug(f"{note} vocabulary[{index}] is invalid ({reason}); dropping it.")
+            continue
+        kept.append(rule)
+    return tuple(kept), None
+
+
+#: What `concierge.opt_in` may say. Three values, not two: `enabled` alone
+#: cannot distinguish "never asked" from "said no" from "said yes, currently
+#: switched off", and a pre-v3 config.json upgraded in place must arrive
+#: `unset` rather than silently opted in (`concierge_design.md` 10, Q26).
+OPT_IN_STATES = ("unset", "accepted", "declined")
+
+#: The three values, named, so nothing spells one of them as a literal.
+OPT_IN_UNSET, OPT_IN_ACCEPTED, OPT_IN_DECLINED = OPT_IN_STATES
+
+
+def concierge_switched_on(opt_in, enabled):
+    """
+    Whether the Concierge runtime may start, given the two keys that decide it.
+
+    Here rather than in the UI because three surfaces ask it and they must not
+    disagree: the thread adapter, which refuses to launch `llama-server`; the
+    controller, which refuses to start a 6.87 GB download; and the panel, which
+    renders the card that explains why. Q26 keeps the keys separate -- declined
+    is an answer to a question, `enabled: false` is a switch -- and this is the
+    one place that says what the pair means together.
+
+    **`unset` is off.** Nobody has been asked, so nothing runs: not the runtime,
+    and above all not the download. The opt-in card is the thing that asks, and
+    the panel reaches it by testing `unset` *before* it asks this -- so a card
+    that has to be reachable is never gated behind the switch it exists to set.
+    """
+    return opt_in == OPT_IN_ACCEPTED and bool(enabled)
+
+#: How the Concierge asks the model for a decision. `grammar` constrains the
+#: sampler with a generated JSON schema; `native` sends an OpenAI-style tools
+#: array and trusts the model's own chat template. Both are generated from one
+#: registry (Q15); which one ships is set by gate 2.5's qualification record.
+TOOL_MODES = ("grammar", "native")
+
+#: The one Concierge model tier v3.0 qualifies. A 24 GB+ tier is deferred and
+#: the key exists so that adding one is configuration, not a code change.
+CONCIERGE_MODELS = ("gemma-4-12b-q4_k_m",)
+
+
+#: The schema. Adding a setting here is the only edit needed to make it
+#: validated on load, validated on write, offerable to the Concierge, and
+#: documented in the knowledge pack.
+#:
+#: Dotted keys are nested one level in the file: `concierge.opt_in` is
+#: `{"concierge": {"opt_in": ...}}`. The table stays flat because both the
+#: `key` enum in the generated tool schema and `Settings.set`'s addressing want
+#: one name per setting.
+FIELDS = {
+    "version": Field(
+        "int", CONFIG_VERSION,
+        does="Which schema this file was written against.",
+        fallback_note=f"treating as {CONFIG_VERSION}",
+        agent_readable=False, agent_writable=False, internal=True,
+    ),
+    "use_gpu": Field(
+        "bool", True,
+        does="Run Whisper on the NVIDIA GPU (CUDA) rather than the CPU. "
+             "Changing it reloads the model on the chosen device by "
+             "itself, within a few seconds, with no restart.",
+        when="Turn it off if CUDA is unavailable or you want the GPU free for "
+             "something else; transcription still works, several times slower.",
+        risk="Hardware has the last word. If a CUDA load fails, the engine "
+             "forces this to false and saves it, so the setting can change "
+             "without anyone touching it (FR-6).",
+    ),
+    "keep_stream_warm": Field(
+        "bool", True,
+        does="Hold the microphone stream open between recordings (NFR-2, NFR-4).",
+        when="Leave it on. Turning it off releases the device as soon as each "
+             "recording ends.",
+        risk="Off costs the hardware wake-up latency on every hold, and on a "
+             "headset it re-triggers the connection chime that issue #6 exists "
+             "to avoid. It does not zero the idle threshold -- the stream is "
+             "still released after engine.IDLE_THRESHOLD_SEC of inactivity.",
+    ),
+    "ignore_short_holds": Field(
+        "bool", True,
+        does="Discard a hold shorter than engine.MIN_RECORD_SEC as an "
+             "accidental tap (FR-3).",
+        when="Turn it off if you dictate single words and they are being "
+             "swallowed.",
+        risk="Off means a brushed key transcribes whatever the microphone "
+             "caught. An empty buffer is still never transcribed.",
+    ),
+    "start_click": Field(
+        "bool", False,
+        does="Play a short system sound when recording starts.",
+        when="Turn it on if you cannot tell whether the hotkey registered.",
+        risk="The sound goes to the Windows output device, so an open desktop "
+             "microphone can hear it and it lands in the transcript.",
+    ),
+    "hotkey": Field(
+        "parsed", hotkey_mod.DEFAULT_HOTKEY, parse=_parse_chord,
+        json_type="array",
+        does="The push-to-talk chord: a list of key names from hotkey.KEYS, "
+             "held together (FR-4).",
+        when="Change it if the default collides with something you use. The "
+             "picker offers at most three keys.",
+        risk="Detection does not suppress the keypress, so the chord must be "
+             "keys that do nothing on their own (FR-C3). Alt opens the target "
+             "window's menu bar; Win opens the Start menu; a lone unsided "
+             "modifier fires during ordinary typing.",
+    ),
+    "model": Field(
+        "str", transcribe.DEFAULT_MODEL, choices=transcribe.MODEL_NAMES,
+        does="Which Whisper size tier transcribes (FR-5). Changing it **is** "
+             "loading it: the engine rebuilds the model on its next poll "
+             "iteration, which takes a few seconds and needs no restart and no "
+             "separate load step.",
+        when="Larger is more accurate and slower; large-v3-turbo is near-large "
+             "accuracy at about half the time, which is why it is the default.",
+        risk="Validated against the catalogue, because an unrecognised name "
+             "would be handed to faster-whisper, which tries to fetch it from "
+             "Hugging Face by name.",
+    ),
+    "benchmarks": Field(
+        "parsed", {}, parse=_parse_benchmarks, json_type="object",
+        agent_writable=False, fallback_note="ignoring it",
+        does="Measured transcription latencies, keyed by model and device.",
+        when="Written by the Model tab's Measure button, not by hand.",
+        risk="A figure taken while the Concierge model was generating is about "
+             "1.46x slow and is not comparable with a clean one, so each entry "
+             "records llm_resident. Re-recording benchmark_sample.wav changes "
+             "the clip digest and invalidates the old numbers rather than "
+             "leaving them on screen looking comparable.",
+    ),
+    "audio_device": Field(
+        "int", None, nullable=True, minimum=0,
+        fallback_note="using the system default",
+        does="PortAudio input-device index, or null to follow the Windows "
+             "default device.",
+        when="Set it when you want a specific microphone regardless of what "
+             "Windows considers default.",
+        risk="PortAudio renumbers when a device is plugged in or removed, so a "
+             "saved index is re-checked before it is used and falls back to the "
+             "default with a reason in the log. Device 0 is a real device, not "
+             "'none'. The saved choice is never rewritten, so an unplugged "
+             "headset comes back.",
+    ),
+    "vocabulary": Field(
+        "parsed", (), parse=_parse_vocabulary, json_type="array",
+        agent_writable=False, fallback_note="ignoring it",
+        does="Replacement rules applied to the transcript before it is pasted: "
+             "whole-word, case-insensitive, literal.",
+        when="Edited on the Vocabulary tab. Editing rules is out of scope for "
+             "the Concierge in v3.0, which is why this key is not in its write "
+             "allowlist.",
+        risk="One pass, so a replacement is never itself replaced; the longest "
+             "phrase wins where two could match; ties go in list order. An "
+             "unrecognised scope drops the rule rather than widening it.",
+    ),
+    "concierge.opt_in": Field(
+        "str", "unset", choices=OPT_IN_STATES, agent_writable=False,
+        does="Whether the first-run Concierge card has been answered: unset, "
+             "accepted or declined (FR-CG-6).",
+        when="Set by the opt-in card, not by hand.",
+        risk="Declined means nothing ever again except the menu entries. A "
+             "pre-v3 config.json arrives 'unset', which is what stops an "
+             "upgrade opting a user in on their behalf.",
+    ),
+    "concierge.enabled": Field(
+        "bool", True,
+        does="The Concierge switch, once opt-in has been accepted.",
+        when="Turn it off to stop the runtime starting without forgetting that "
+             "you accepted.",
+        risk="Off is not the same as declined; see concierge.opt_in.",
+    ),
+    "concierge.model": Field(
+        "str", CONCIERGE_MODELS[0], choices=CONCIERGE_MODELS,
+        does="Which qualified Concierge model to run.",
+        when="One tier ships in v3.0. The key exists so a 24 GB+ tier is "
+             "configuration rather than a code change.",
+        risk="A model that has not been through the qualification suite "
+             "(NFR-CG-6) has no evidence behind it, so the choices are the "
+             "qualified ones only.",
+    ),
+    "concierge.tool_mode": Field(
+        "str", "native", choices=TOOL_MODES,
+        does="How the Concierge asks the model for a decision: 'native' sends "
+             "an OpenAI-style tools array and lets the model's own chat "
+             "template handle the call; 'grammar' constrains the sampler with a "
+             "generated JSON schema instead.",
+        when="Set by the model's qualification record, not by hand. The "
+             "qualified default is native (gate 2.5, 2026-08-26).",
+        risk="Grammar makes a malformed call structurally impossible, which is "
+             "why it is the conformance reference -- but gate 2.5 measured that "
+             "it guarantees shape and not judgement: across three models it "
+             "chose worse, ran slower, and was the only mode in which any "
+             "candidate made an unsafe write. Native depends on the model's own "
+             "chat template being good, which is a per-model question the "
+             "qualification suite answers.",
+    ),
+    "concierge.idle_unload_minutes": Field(
+        "int", 5, minimum=0, maximum=30,
+        does="Minutes since the last message before the Concierge model is "
+             "unloaded from VRAM (FR-CG-8).",
+        when="0 unloads the moment the chat panel closes. 30 is the maximum.",
+        risk="A longer residency holds about 9.4 GB of VRAM. Resident and idle "
+             "costs dictation nothing measurable; a cold reload costs the "
+             "load plus the knowledge pack prewarm.",
+    ),
+    "concierge.history_limit": Field(
+        "int", 20, minimum=1, maximum=200,
+        does="How many saved Concierge transcripts to keep for rereading.",
+        when="Raise it if you refer back to old sessions often.",
+        risk="Saved transcripts are never fed back to the model -- each "
+             "session starts fresh with the knowledge pack and the memory note "
+             "(FR-CG-13). They are for you, not for it.",
+    ),
+}
+
+#: Setting names the Concierge may read, and the subset it may write. Derived,
+#: never listed by hand: `concierge_design.md` section 5.05 makes this the
+#: settings whitelist too, so a field added above is scored as a real setting
+#: rather than as an invention the moment it exists (review 2.9).
+READABLE_KEYS = tuple(k for k, f in FIELDS.items() if f.agent_readable)
+WRITABLE_KEYS = tuple(
+    k for k, f in FIELDS.items() if f.agent_writable and not f.internal
+)
+
+
+def benchmark_key(model_name, device):
+    """
+    How one measurement is keyed in `benchmarks`.
+
+    Model *and* device: a CPU figure and a CUDA figure for the same model are
+    different numbers about different hardware, and showing one where the other
+    belongs would be the sort of quiet misreport OBS-3 exists to prevent.
+
+    Here rather than in the Model panel, which is where it was written, because
+    the Concierge's `list_models` tool reports the same measurements and may not
+    import a module that imports Qt (CON-CG-6). Two copies of a key format is
+    exactly the drift `FIELDS` exists to prevent, one level down.
+    """
+    return f"{model_name}|{device}"
+
+
+def _split(key):
+    """`"concierge.opt_in"` -> `("concierge", "opt_in")`; `"model"` -> `("model",)`."""
+    return tuple(key.split("."))
+
+
+@dataclass
+class ConciergeSettings:
+    """
+    The `concierge` block of config.json (`concierge_handoff.md` section 6).
+
+    A separate object rather than six dotted attributes on `Settings` so that
+    the file's nesting and the schema's nesting are the same shape, and so a
+    Qt-free harness can be handed the block alone.
+
+    Rebound whole, never mutated: `Settings.set("concierge.enabled", False)`
+    builds a **new** instance and rebinds the attribute, which is the same
+    discipline `Settings`' docstring states for `hotkey`, `benchmarks` and
+    `vocabulary` and for the same reason -- the engine and the harness read this
+    object from other threads.
+
+    There is deliberately no `port`. It is pre-bound in Python at every launch
+    and recorded in `concierge_state.json`, not configured (design 10, Q13).
+    """
+    opt_in: str = "unset"
+    enabled: bool = True
+    model: str = CONCIERGE_MODELS[0]
+    tool_mode: str = "native"
+    idle_unload_minutes: int = 5
+    history_limit: int = 20
+
+    #: Unknown keys inside the block, preserved for the same reason
+    #: `Settings.extra` preserves them at the top level: a newer build's
+    #: settings must survive a rollback (acceptance criterion 8).
+    extra: dict = field(default_factory=dict, repr=False)
+
+    def to_dict(self):
+        return {
+            **self.extra,
+            "opt_in": str(self.opt_in),
+            "enabled": bool(self.enabled),
+            "model": str(self.model),
+            "tool_mode": str(self.tool_mode),
+            "idle_unload_minutes": int(self.idle_unload_minutes),
+            "history_limit": int(self.history_limit),
+        }
+
+    def replacing(self, name, value):
+        """A new instance with one attribute changed. Never mutates this one."""
+        values = {
+            "opt_in": self.opt_in, "enabled": self.enabled, "model": self.model,
+            "tool_mode": self.tool_mode,
+            "idle_unload_minutes": self.idle_unload_minutes,
+            "history_limit": self.history_limit, "extra": self.extra,
+        }
+        values[name] = value
+        return ConciergeSettings(**values)
 
 
 @dataclass
@@ -62,48 +553,140 @@ class Settings:
     `vocabulary.Rule`, which is a NamedTuple, so the same discipline is
     enforced by the type rather than only by this docstring -- editing a rule
     builds a new tuple and rebinds it, and the engine's transcription path
-    reads whichever tuple is current.
+    reads whichever tuple is current. `concierge` is a `ConciergeSettings`,
+    replaced through `replacing()` for the same reason.
+
+    **`set()` is now the only supported way to write a field**, and it is what
+    makes the rebind rule and the validation rule properties of this object
+    rather than of whoever happens to be calling. `Settings.save()` has three
+    writers now -- the GUI thread on every control, the engine thread on a CUDA
+    fallback, and the Concierge's worker thread -- and tool code has never read
+    this docstring.
 
     The lock inside `save` is a different thing entirely and is not the lock
-    this docstring forbids: it guards the **file**, which two threads can now
-    reach -- every control in the settings window applies instantly, and
-    `Engine._persist_cpu_fallback` writes from the engine thread. It never
-    covers a field read or write, so the live re-read stays lock-free.
+    this docstring forbids: it guards the **file**, which those three threads
+    can now reach. It never covers a field read or write, so the live re-read
+    stays lock-free.
+
+    What each setting means, when to change it and what can go wrong is in
+    `FIELDS`, not in comments here: the knowledge pack is generated from that
+    table, and a second copy in this docstring is a second copy of the rule.
     """
     use_gpu: bool = True
     hotkey: tuple = hotkey_mod.DEFAULT_HOTKEY
     model: str = transcribe.DEFAULT_MODEL
     benchmarks: dict = field(default_factory=dict)
-
-    #: PortAudio input-device index, or None for "follow the Windows default
-    #: device". None is the default and is what every configuration written
-    #: before this build says by omission, so existing installations keep the
-    #: behaviour they have today.
     audio_device: int | None = None
-
-    #: Hold the input stream open between recordings (NFR-2, NFR-4). True is
-    #: the shipped behaviour: the stream stays open while the user is at the
-    #: machine and is released after `engine.IDLE_THRESHOLD_SEC` of inactivity.
-    #: False closes it as soon as each recording ends, which costs the hardware
-    #: wake-up latency and the headset chime issue #6 exists to avoid.
     keep_stream_warm: bool = True
-
-    #: Discard a hold shorter than `engine.MIN_RECORD_SEC` as an accidental tap
-    #: (FR-3). True is the shipped behaviour.
     ignore_short_holds: bool = True
-
-    #: Play a short system sound when recording starts. Off by default: it goes
-    #: to the Windows output device, so an open desktop microphone can hear it.
     start_click: bool = False
-
-    #: Replacement rules, applied to the transcript before it is pasted. A
-    #: tuple of `vocabulary.Rule`; see this class's docstring for why it is a
-    #: tuple and not a list.
     vocabulary: tuple = ()
+    concierge: ConciergeSettings = field(default_factory=ConciergeSettings)
 
     version: int = CONFIG_VERSION
     extra: dict = field(default_factory=dict, repr=False)
     path: str = field(default_factory=paths.config_path, repr=False)
+
+    # -- reading and writing one field ---------------------------------------
+
+    def get(self, key):
+        """
+        One setting's current value, addressed the way `FIELDS` names it.
+
+        Raises `KeyError` for a name that is not a field, because a caller
+        asking for a setting that does not exist has a bug; the *tool* path
+        checks `FIELDS` first and reports a refusal instead.
+        """
+        if key not in FIELDS:
+            raise KeyError(key)
+        parts = _split(key)
+        value = getattr(self, parts[0])
+        for part in parts[1:]:
+            value = getattr(value, part)
+        return value
+
+    def set(self, key, value):
+        """
+        Validate one write, apply it, and persist it. Returns `(ok, reason)`.
+
+        This is FR-CG-11. A rejected write changes nothing, saves nothing, and
+        comes back with the reason -- which the Concierge surfaces in the chat
+        verbatim, and which the log records either way. The alternative the code
+        had before this method existed was to accept the value, write it to
+        disk, and revert it at the next application start: a rejection reported
+        as a success, invisible until a restart.
+
+        `reason` is None on success. On failure it names the key and the defect,
+        in the same words `load()` uses for the same value in a hand-edited
+        file, because they are the same rule.
+        """
+        rule = FIELDS.get(key)
+        if rule is None:
+            reason = f"{key!r} is not a setting"
+            log_debug(f"Rejected write: {reason}.")
+            return False, reason
+        if rule.internal:
+            reason = f"{key!r} is not writable"
+            log_debug(f"Rejected write: {reason}.")
+            return False, reason
+
+        checked, defect = rule.check(value, note="write", strict=True)
+        if defect:
+            reason = f"{key} {defect}"
+            log_debug(f"Rejected write: {reason}.")
+            return False, reason
+
+        before = self.get(key)
+        self._assign(key, checked)
+        self.save()
+        log_debug(f"Set {key}: {before!r} -> {checked!r}")
+        return True, None
+
+    def override(self, key, value):
+        """
+        Force one field for **this run only**, without touching config.json.
+
+        The one legitimate caller is hardware having the last word over a saved
+        preference: `Engine.__init__` clears `use_gpu` on a machine with no
+        CUDA device (FR-6) so that the tray checkmark and the model loader agree
+        with the hardware. That is deliberately not a save. A driver that is
+        broken this morning must not cost the user the preference they chose,
+        and the *load failure* path -- `Engine._persist_cpu_fallback` -- is the
+        one that does persist, because a load that actually failed is evidence
+        about the machine rather than about the moment.
+
+        Validated exactly as `set` is, so the distinction between the two is
+        durability and nothing else. A bare `setattr` from outside this module
+        is what this method exists to make unnecessary.
+        """
+        rule = FIELDS.get(key)
+        if rule is None:
+            reason = f"{key!r} is not a setting"
+            log_debug(f"Refused override: {reason}.")
+            return False, reason
+        checked, defect = rule.check(value, note="override", strict=True)
+        if defect:
+            reason = f"{key} {defect}"
+            log_debug(f"Refused override: {reason}.")
+            return False, reason
+        self._assign(key, checked)
+        return True, None
+
+    def _assign(self, key, value):
+        """
+        Rebind one field. Whole-value, never an in-place mutation.
+
+        A dotted key rebuilds its block and rebinds that, so a reader on another
+        thread sees either the whole old block or the whole new one.
+        """
+        parts = _split(key)
+        if len(parts) == 1:
+            setattr(self, parts[0], value)
+            return
+        block = getattr(self, parts[0])
+        setattr(self, parts[0], block.replacing(parts[1], value))
+
+    # -- the file -------------------------------------------------------------
 
     def to_dict(self):
         """Serialise, preserving unknown keys. Known keys are written last, so
@@ -122,6 +705,7 @@ class Settings:
             "ignore_short_holds": bool(self.ignore_short_holds),
             "start_click": bool(self.start_click),
             "vocabulary": vocabulary_mod.to_json(self.vocabulary),
+            "concierge": self.concierge.to_dict(),
         }
 
     def save(self):
@@ -139,9 +723,10 @@ class Settings:
           is their settings silently resetting, the exact failure OBS-3 exists
           to make impossible. `os.replace` is atomic on NTFS: the file is either
           entirely the old contents or entirely the new ones.
-        - Two threads can reach this now. The GUI thread writes on every click;
-          the engine thread writes on a CUDA fallback. Interleaved `json.dump`
-          calls into one handle produce a file that is neither version.
+        - Three threads can reach this now. The GUI thread writes on every
+          click; the engine thread writes on a CUDA fallback; the Concierge's
+          worker thread writes through `set`. Interleaved `json.dump` calls into
+          one handle produce a file that is neither version.
         """
         tmp = self.path + ".tmp"
         try:
@@ -167,118 +752,14 @@ class Settings:
             log_debug(f"Failed to save config.json: {str(e)}")
 
 
-def _load_benchmarks(raw_value, path_note="config.json"):
-    """
-    Validate the measured-latency cache, dropping entries that make no sense.
-
-    Kept out of `load` only because it is the one field with per-entry
-    validation; the rule is the same as every other field's -- check the type,
-    log what was rejected and why, never raise.
-
-    Shape: ``{"<model>|<device>": {"seconds": float, "at": str, "clip": str}}``.
-    `clip` is a digest of the benchmark WAV, so re-recording the clip
-    invalidates the numbers taken against the old one instead of silently
-    comparing measurements of two different recordings.
-    """
-    if not isinstance(raw_value, dict):
-        log_debug(f"{path_note} benchmarks is not an object ({raw_value!r}); ignoring it.")
-        return {}
-
-    kept = {}
-    for key, entry in raw_value.items():
-        if not isinstance(entry, dict):
-            log_debug(f"{path_note} benchmarks[{key!r}] is not an object; dropping it.")
-            continue
-        seconds = entry.get("seconds")
-        if not isinstance(seconds, (int, float)) or isinstance(seconds, bool) or seconds <= 0:
-            log_debug(
-                f"{path_note} benchmarks[{key!r}] has no positive numeric "
-                f"'seconds' ({seconds!r}); dropping it."
-            )
-            continue
-        kept[str(key)] = {
-            "seconds": float(seconds),
-            "at": str(entry.get("at", "")),
-            "clip": str(entry.get("clip", "")),
-        }
-    return kept
-
-
-def _load_vocabulary(raw_value, path_note="config.json"):
-    """
-    Validate the replacement rules, dropping the ones that make no sense.
-
-    Per entry, like `_load_benchmarks` and for the same reason: one malformed
-    rule someone hand-edited must not throw away the twenty beside it. The
-    validation itself lives in `vocabulary.parse_rule`, which is pure and never
-    logs, so this is the only place a rejected rule is explained (OBS-3).
-    """
-    if not isinstance(raw_value, list):
-        log_debug(f"{path_note} vocabulary is not a list ({raw_value!r}); ignoring it.")
-        return ()
-
-    kept = []
-    for index, entry in enumerate(raw_value):
-        rule, reason = vocabulary_mod.parse_rule(entry)
-        if rule is None:
-            log_debug(f"{path_note} vocabulary[{index}] is invalid ({reason}); dropping it.")
-            continue
-        kept.append(rule)
-    return tuple(kept)
-
-
-def _load_bool(raw, key, default, path_note="config.json"):
-    """
-    One boolean setting, validated by type rather than by truthiness.
-
-    A bare truthiness test accepts the string "false" as True, which is how a
-    hand-edited config.json silently turns a safety default off. Shared by all
-    four booleans so the message shape -- and therefore the OBS-3 evidence a
-    user sees -- is identical for every one of them.
-    """
-    value = raw.get(key, default)
-    if isinstance(value, bool):
-        return value
-    log_debug(f"{path_note} {key} is not a boolean ({value!r}); using default {default}.")
-    return default
-
-
-def _load_audio_device(raw_value, path_note="config.json"):
-    """
-    Validate the input-device index. `None` means "follow the Windows default".
-
-    Only the type is checked here. Whether the index still names a live input
-    device is a question about the machine rather than about the file, and it
-    is answered at stream-open time by `audio.Recorder._resolve_device` -- a
-    device that is unplugged while the app is closed must not cause the saved
-    choice to be forgotten, and a device that is missing right now may be back
-    before the next recording.
-
-    `bool` is excluded explicitly: `True` is an `int` in Python and would
-    otherwise be accepted as device 1.
-    """
-    if raw_value is None:
-        return None
-    if isinstance(raw_value, bool) or not isinstance(raw_value, int):
-        log_debug(
-            f"{path_note} audio_device is not an integer ({raw_value!r}); "
-            f"using the system default."
-        )
-        return None
-    if raw_value < 0:
-        log_debug(
-            f"{path_note} audio_device is negative ({raw_value!r}); "
-            f"using the system default."
-        )
-        return None
-    return raw_value
-
-
 def load(path=None):
     """
     Read config.json, falling back to defaults field by field. Never raises.
 
-    Every fallback is logged with the reason that caused it (OBS-3).
+    Every fallback is logged with the reason that caused it (OBS-3), and every
+    rule comes from `FIELDS` -- the same declaration `Settings.set` validates
+    writes against, so a value the file may hold and a value the Concierge may
+    write can never mean different things.
     """
     if path is None:
         path = paths.config_path()
@@ -304,54 +785,29 @@ def load(path=None):
 
     s = Settings(path=path)
 
-    # version: absent means this file predates versioning, i.e. v1.
-    version = raw.get("version", CONFIG_VERSION)
-    if not isinstance(version, int):
-        log_debug(f"config.json version is not an integer ({version!r}); treating as {CONFIG_VERSION}.")
-        version = CONFIG_VERSION
-    s.version = version
+    block = raw.get("concierge")
+    if block is not None and not isinstance(block, dict):
+        log_debug(f"config.json concierge is not an object ({block!r}); using defaults.")
+        block = None
+    block = block or {}
 
-    # The booleans. A bare truthiness test would accept the string "false" as
-    # True -- forcing GPU on a machine that cannot do it, or switching FR-3's
-    # minimum hold off -- so every one of them is checked by type.
-    s.use_gpu = _load_bool(raw, "use_gpu", s.use_gpu)
-    s.keep_stream_warm = _load_bool(raw, "keep_stream_warm", s.keep_stream_warm)
-    s.ignore_short_holds = _load_bool(raw, "ignore_short_holds", s.ignore_short_holds)
-    s.start_click = _load_bool(raw, "start_click", s.start_click)
-
-    # hotkey
-    if "hotkey" in raw:
-        chord, reason = hotkey_mod.parse_chord(raw["hotkey"])
-        if chord is None:
-            log_debug(f"config.json hotkey invalid ({reason}); using default {s.hotkey}.")
-        else:
-            s.hotkey = chord
-
-    # model: validated against the tiers this build knows how to present, so an
-    # unrecognised name loads the default rather than being handed to
-    # faster-whisper, which would try to fetch it from Hugging Face by name.
-    if "model" in raw:
-        model = raw["model"]
-        if not isinstance(model, str):
-            log_debug(f"config.json model is not a string ({model!r}); using default {s.model}.")
-        elif model not in transcribe.MODEL_NAMES:
-            log_debug(
-                f"config.json model {model!r} is not one of "
-                f"{list(transcribe.MODEL_NAMES)}; using default {s.model}."
-            )
-        else:
-            s.model = model
-
-    if "benchmarks" in raw:
-        s.benchmarks = _load_benchmarks(raw["benchmarks"])
-
-    if "audio_device" in raw:
-        s.audio_device = _load_audio_device(raw["audio_device"])
-
-    if "vocabulary" in raw:
-        s.vocabulary = _load_vocabulary(raw["vocabulary"])
+    for key, rule in FIELDS.items():
+        parts = _split(key)
+        source = raw if len(parts) == 1 else block
+        name = parts[-1]
+        if name not in source:
+            continue
+        value, defect = rule.check(source[name], note="config.json")
+        if defect:
+            log_debug(f"config.json {key} {defect}; {rule.note}.")
+            continue
+        s._assign(key, value)
 
     s.extra = {k: v for k, v in raw.items() if k not in _KNOWN_KEYS}
+    s.concierge = s.concierge.replacing("extra", {
+        k: v for k, v in block.items()
+        if f"concierge.{k}" not in FIELDS
+    })
 
     log_debug(
         f"Loaded config.json: use_gpu={s.use_gpu}, hotkey={s.hotkey}, "
@@ -359,6 +815,7 @@ def load(path=None):
         f"audio_device={s.audio_device}, keep_stream_warm={s.keep_stream_warm}, "
         f"ignore_short_holds={s.ignore_short_holds}, start_click={s.start_click}, "
         f"vocabulary={len(s.vocabulary)}, "
+        f"concierge={s.concierge.opt_in}/{s.concierge.model}, "
         f"version={s.version}, unknown_keys={sorted(s.extra)}"
     )
     return s

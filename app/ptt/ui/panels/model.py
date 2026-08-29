@@ -33,7 +33,7 @@ from PySide6.QtWidgets import (
     QPushButton, QRadioButton, QStyledItemDelegate, QTableView, QVBoxLayout,
 )
 
-from ptt import paths, transcribe
+from ptt import config, paths, transcribe
 from ptt.ui.panels import InstantApplyPanel
 
 #: Placeholder for a model this machine has never timed. The same em dash the
@@ -50,15 +50,10 @@ LOCAL_ROLE = Qt.ItemDataRole.UserRole + 4
 ROW_HEIGHT_PX = 36
 
 
-def benchmark_key(model_name, device):
-    """
-    How one measurement is keyed in config.json.
-
-    Model *and* device: a CPU figure and a CUDA figure for the same model are
-    different numbers about different hardware, and showing one where the other
-    belongs would be the sort of quiet misreport OBS-3 exists to prevent.
-    """
-    return f"{model_name}|{device}"
+#: Re-exported from `config`, which owns the `benchmarks` schema and therefore
+#: owns how one measurement is keyed. `V-UI-09` still names it here because this
+#: is where the panel reads it.
+benchmark_key = config.benchmark_key
 
 
 def _format_bytes(count):

@@ -1,0 +1,29 @@
+[2026-08-24 09:14:02] === App Started ===
+[2026-08-24 09:14:02] sys.frozen: False
+[2026-08-24 09:14:02] app_dir: C:\PTT Dictation\app
+[2026-08-24 09:14:02] nvidia package found via import. Paths: _NamespacePath(['C:\\PTT Dictation\\.venv\\Lib\\site-packages\\nvidia'])
+[2026-08-24 09:14:02] Checking directory: C:\PTT Dictation\.venv\Lib\site-packages\nvidia\cudnn\bin
+[2026-08-24 09:14:02] Added DLL directory: C:\PTT Dictation\.venv\Lib\site-packages\nvidia\cudnn\bin
+[2026-08-24 09:14:03] ctranslate2 detected CUDA devices count: 1
+[2026-08-24 09:14:03] Initial check_cuda_availability: True
+[2026-08-24 09:14:03] Loaded config.json: use_gpu=True, hotkey=('rctrl',), model=large-v3-turbo, benchmarks=2, audio_device=None, keep_stream_warm=True, ignore_short_holds=True, start_click=False, vocabulary=0, version=1
+[2026-08-24 09:14:03] MODEL_SIZE: large-v3-turbo
+[2026-08-24 09:14:04] Using on-demand model name: large-v3-turbo
+[2026-08-24 09:14:04] Attempting to load model 'large-v3-turbo' on 'CUDA' (float16)...
+[2026-08-24 09:14:06] ERROR: Failed to load model on 'CUDA': Library cublas64_12.dll is not found or cannot be loaded
+[2026-08-24 09:14:06] Initiating auto CPU fallback...
+[2026-08-24 09:14:06] Attempting to load fallback model 'large-v3-turbo' on CPU (int8)...
+[2026-08-24 09:14:19] Model successfully loaded on 'CPU'.
+[2026-08-24 09:14:19] Persisted use_gpu=False after the CUDA load failed (FR-6).
+[2026-08-24 09:14:19] Initializing PortAudio and opening input stream...
+[2026-08-24 09:14:19] Audio input stream opened and started successfully.
+[2026-08-24 09:14:19] Recording from 'Microphone (Yeti Stereo Microphone)' (the system default).
+[2026-08-24 09:16:41] Recording stopped. Audio samples: 92160
+[2026-08-24 09:17:05] Transcription finished in 23.87s. Result: 'Could you take a look at the deployment notes before the stand-up tomorrow.'
+[2026-08-24 09:17:05] Pasted 74 chars into 'Inbox - Outlook'.
+[2026-08-24 09:19:02] Recording stopped. Audio samples: 70656
+[2026-08-24 09:19:21] Transcription finished in 18.44s. Result: 'The invoice should go out on Friday at the latest.'
+[2026-08-24 09:19:21] Pasted 49 chars into 'Inbox - Outlook'.
+[2026-08-24 09:24:38] Recording stopped. Audio samples: 110592
+[2026-08-24 09:25:07] Transcription finished in 29.12s. Result: 'Let me know if the numbers look wrong to you as well.'
+[2026-08-24 09:25:07] Pasted 52 chars into 'Slack | general'.

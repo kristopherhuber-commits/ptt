@@ -43,7 +43,7 @@ def is_error(status_text):
     with a different status string -- "Error loading model" from the model
     loader, and "Error: ..." from the poll loop's exception handler. So the only
     discriminator available is the text, and this is the single place that
-    knows it. See docs/gui_handoff/stage0_review.md section 3.3.
+    knows it. See docs/ptt-v2-gui/stage0_review.md section 3.3.
     """
     return bool(status_text) and status_text.startswith("Error")
 

@@ -456,7 +456,7 @@ Instead:
 
 - A `Measure on this machine` button transcribes the bundled
   `app/assets/benchmark_sample.wav` (30 s, 16 kHz mono, recorded once with
-  `docs/gui_handoff/record_sample.py`) with the selected model and records the
+  `docs/ptt-v2-gui/record_sample.py`) with the selected model and records the
   wall time. Store results under a new `benchmarks` key in `config.json`, keyed by
   model name and device, with a timestamp.
 

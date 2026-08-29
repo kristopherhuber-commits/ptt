@@ -50,6 +50,89 @@ def local_model_dir(model_size):
     return os.path.join(APP_DIR, "models", model_size)
 
 
+# -- the Concierge (v3.0) ----------------------------------------------------
+#
+# Six per-machine artifacts and one shipped one. The five that live beside
+# config.json are runtime state, not configuration, and `build_portable.py`
+# excludes every one of them by name; `app/models/` is excluded as a whole
+# directory, because a 6.87 GB GGUF inside a distribution zip is CON-CG-4
+# breached in the most expensive possible way.
+
+def concierge_model_dir():
+    """Where the downloaded Concierge GGUF lives (`concierge_design.md` 10 Q4)."""
+    return os.path.join(APP_DIR, "models", "concierge")
+
+
+def concierge_state_path():
+    """
+    `{pid, create_time, port}` for the running llama-server (design 8.1, Q11).
+
+    Written *before* `Popen` and deleted on clean shutdown, so a startup reap
+    has something to identify an orphan by that does not require reading
+    another process's command line.
+    """
+    return os.path.join(APP_DIR, "concierge_state.json")
+
+
+def concierge_key_path():
+    """The per-launch `--api-key-file` for the loopback listener (design 2, Q19)."""
+    return os.path.join(APP_DIR, "concierge_key")
+
+
+def memory_note_path():
+    """The Concierge's durable memory note (FR-CG-14)."""
+    return os.path.join(APP_DIR, "concierge_memory.txt")
+
+
+def previous_memory_note_path():
+    """
+    The one kept previous version of the note (FR-CG-14, Q22).
+
+    The `OBS-4` log-rotation idiom applied to the only durable state the
+    Concierge has: without it, one bad autonomous write erases everything it has
+    learned and repairing it by hand needs knowing what it used to say.
+    """
+    return os.path.join(APP_DIR, "concierge_memory.prev.txt")
+
+
+def concierge_sessions_path():
+    """
+    The saved Concierge transcripts (FR-CG-13, `concierge/sessions.py`).
+
+    One JSON file rather than a directory, and beside `config.json` rather than
+    under it: `build_portable.py` excludes per-machine artifacts by file name at
+    the top level of `app/`, so a file costs one entry in that frozenset where a
+    directory would have cost a second exclusion rule (Q27).
+    """
+    return os.path.join(APP_DIR, "concierge_sessions.json")
+
+
+def concierge_prompt_path():
+    """
+    The Concierge's system prompt, a versioned artifact in the package.
+
+    D-CG-12 (design 4.5): the prompt is harness code in the same sense the
+    grammar is, so it is a file in git, loaded at construction, never assembled
+    inline -- and gate 2.5 records its hash in every scorecard row, because a
+    prompt that moves between candidates makes the scorecards incomparable.
+
+    Here rather than derived in `concierge/agent.py` because this module is the
+    single owner of every path the application computes, and a resource beside a
+    module is still a path.
+    """
+    return os.path.join(PACKAGE_DIR, "concierge", "system_prompt.md")
+
+
+def knowledge_pack_path():
+    """The generated knowledge pack, shipped as an asset (design 5.05)."""
+    return asset_path("concierge_kb.md")
+
+
+def llama_server_path():
+    """The bundled llama-server executable (CON-CG-2), shipped under `app/`."""
+    return os.path.join(APP_DIR, "llama", "llama-server.exe")
+
+
 def startup_shortcut_path():
     """
     The Startup-folder shortcut `install.ps1` creates, whose presence the
@@ -87,3 +170,4 @@ def asset_path(*parts):
     `app/` wholesale, so anything under this directory ships automatically.
     """
     return os.path.join(assets_dir(), *parts)
+

@@ -22,6 +22,29 @@ dist/
 app/config.json
 app/debug_log.prev.txt
 
+# The Concierge's per-machine runtime state (v3.0). concierge_state.json names a
+# pid and a port; concierge_key is one launch's API key; the memory note is the
+# user's own text about their own machine. All four are in build_portable.py's
+# RUNTIME_ARTIFACTS for the same reason they are here.
+app/concierge_state.json
+app/concierge_key
+app/concierge_memory.txt
+app/concierge_memory.prev.txt
+
+# Downloaded weights: the Concierge GGUF (6.87 GB) and any bundled Whisper
+# model. Excluded from the distribution zip by build_portable.py's EXCLUDED_DIRS
+# and preserved across a reinstall by install.ps1 (design 10, Q27).
+app/models/
+
+# The bundled llama.cpp runtime, fetched by build_llama_runtime.py.
+app/llama/
+
+# NOTE: app/assets/concierge_kb.md is deliberately NOT ignored. It is generated,
+# but acceptance criterion v3-12 is "edit a source document without
+# regenerating, run the L1 suite, the digest test fails and names the file" --
+# which needs the pack present in a fresh clone to mean anything. Gate 2.5
+# freezes and hashes it for the same reason.
+
 # Test artifacts
 .pytest_cache/
 *.egg-info/
@@ -31,3 +54,36 @@ app/debug_log.prev.txt
 # a commit that adds it stays in a public repo's history even if a later commit
 # deletes it.
 docs/expenses/
+
+# Spike scratch: llama.cpp binaries + GGUF weights (docs/ptt-v3-concierge/spike_prompt.md).
+#
+# Contents rather than the directory, so the two session-1 check scripts at the
+# top level CAN be tracked. `concierge_design.md` section 5 names
+# `spike/kv_persistence.py` as the mini-spike that decided which ready path
+# ships, and `concierge_verification.md` section 4 says it is the check to re-run
+# if a later llama.cpp build changes the answer -- a named check that is not in
+# the repository is a dangling reference. Git cannot re-include a file whose
+# parent directory is excluded, hence `spike/*` and not `spike/`.
+#
+# Everything heavy stays out: spike/llama/ (640 MB), spike/models/ (7.4 GB),
+# spike/out/ (raw results; the figures that matter are quoted in
+# spike_results.md) and spike/checks/ (the original throwaway run).
+spike/*
+!spike/*.py
+
+# The Concierge instruments' scratch (tests/tools/README.md). `.rig/` is the
+# redirected APP_DIR a rig run writes its config.json, log and memory note into;
+# `runs/` holds transcripts and scorecards. The figures that matter are quoted
+# in model_qualification.md, the same way spike/out/ relates to spike_results.md.
+tests/tools/.rig/
+tests/tools/.probe/
+tests/tools/runs/
+
+# ...but the seeded logs are suite *data*, not artifacts, and `*.log` at the top
+# of this file would otherwise swallow them. The diagnosis class is "given a
+# seeded fake log, names the seeded cause": a scenario whose evidence is not in
+# the repository is a check that cannot run on a fresh clone. Same argument as
+# `!spike/*.py` above and as the note about concierge_kb.md.
+!tests/tools/seeds/*.log
+tests/tools/.cublas/
+tests/tools/.rig/

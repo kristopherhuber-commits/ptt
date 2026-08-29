@@ -61,7 +61,7 @@ active_hotkey:
 | `app/assets/` | `style.qss`, the bundled Barlow faces with **both `OFL.txt` licence files**, and `benchmark_sample.wav`. Shipped by `build_portable.py`'s `os.walk` over `app/`, which is why nothing here needs an entry in `items_to_zip`. The licence files travelling with the fonts is a condition of the SIL OFL, not housekeeping; verified in the built archive as `V-M-64`. |
 | `tests/` | The unit suite. See [verification.md](verification.md). |
 | `requirements-dev.txt` | pytest and the packages the tests import. Never shipped — see section 8. |
-| `docs/` | This document, `requirements.md`, `verification.md`, `development_history.md`, `gui_handoff/`. |
+| `docs/` | This document, `requirements.md`, `verification.md`, `development_history.md`, `ptt-v2-gui/`. |
 
 `build_portable.py`, `run_tray.bat` and `install.ps1` are unchanged by the split, which
 is the whole reason section 4 chose `app/ptt/` over `src/ptt/`.
@@ -419,6 +419,48 @@ that they choose with the information.
   thread on a CUDA fallback. That lock guards the **file**; it is not the field lock the
   `Settings` docstring forbids, and the engine's live re-read stays lock-free.
 
+### 7.1 The `FIELDS` table — validation on write, not only on load
+
+*Added for v3.0. `ptt-v3-concierge/concierge_design.md` §4.6 is the full statement; this
+section records it because the change lives in `config.py`, which the rule above makes the
+sole owner of the schema.*
+
+Every rule above validates on **load**. A *write* is `setattr` — `InstantApplyPanel.
+apply_now` writes the field, saves, then tells the engine. That has been safe only because
+every writer so far is a widget that can physically only produce a legal value: a radio
+button cannot emit `"medium-ish"`.
+
+The Concierge is the first writer that can hand `Settings` anything at all, and
+`FR-CG-11` requires a bad value to be **rejected at the moment of writing**. Under the
+load-only scheme it would instead be accepted, written to disk, and silently reverted at
+the next start — a failure whose only symptom is the user's settings changing back
+overnight, which is `OBS-1`'s prohibition in a new place.
+
+So the per-field rules move out of `load()`'s body into one declarative table:
+
+```python
+FIELDS = {
+    "use_gpu":  Field(bool),
+    "model":    Field(str,   choices=transcribe.MODEL_NAMES),
+    "hotkey":   Field(tuple, parse=hotkey.parse_chord),
+    "audio_device": Field((int, type(None))),
+    …
+}
+```
+
+Three consumers, no second copy of any rule:
+
+| Consumer | Uses it for |
+|---|---|
+| `load()` | The fallback-with-a-logged-reason path it has today. Behaviour unchanged |
+| `Settings.set(key, value) -> (ok, reason)` | The validated write. **Every** writer goes through it, panels included — the invariant belongs to the object, not to the caller |
+| The Concierge's tool registry | Its `key` enum, each tool's argument schema, and the qualification suite's settings whitelist |
+
+This is `hotkey.KEYS`' idiom (`V-HK-01`) applied to configuration, and for the same
+reason: issue #12 is the recorded case of a derived table acquiring a private copy and
+drifting until a GUI control made the defect reachable. The mutation check that keeps it
+honest is giving one field a private rule and proving a test fails.
+
 ---
 
 ## 8. Testability
@@ -506,7 +548,7 @@ put `NFR-6`/`NFR-7` back in play for no gain.
    described. The classifier is `hotkey.classify()`.
 4. ~~Build the Qt interface: the tray, the popover, the window and its six panels, and
    retire `pystray`.~~ **Done**, over four sessions, to
-   [gui_handoff.md](gui_handoff/gui_handoff.md). See section 4.1.
+   [gui_handoff.md](ptt-v2-gui/gui_handoff.md). See section 4.1.
 5. **Verify and package.** Worked through, and the results are
    [verification.md](verification.md) §5.3 and §6. All ten acceptance criteria were
    exercised. Criteria 1, 2, 3, 6, 8 and 9 are closed. Criteria 4 and 5 pass with one

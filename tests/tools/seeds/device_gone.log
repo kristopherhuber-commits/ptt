@@ -1,0 +1,19 @@
+[2026-08-25 08:02:11] === App Started ===
+[2026-08-25 08:02:11] app_dir: C:\PTT Dictation\app
+[2026-08-25 08:02:12] ctranslate2 detected CUDA devices count: 1
+[2026-08-25 08:02:12] Initial check_cuda_availability: True
+[2026-08-25 08:02:12] Loaded config.json: use_gpu=True, hotkey=('rctrl',), model=large-v3-turbo, benchmarks=2, audio_device=9, keep_stream_warm=True, ignore_short_holds=True, start_click=False, vocabulary=0, version=1
+[2026-08-25 08:02:12] MODEL_SIZE: large-v3-turbo
+[2026-08-25 08:02:13] Attempting to load model 'large-v3-turbo' on 'CUDA' (float16)...
+[2026-08-25 08:02:15] Model successfully loaded on 'CUDA'.
+[2026-08-25 08:02:15] Input devices (5 found, 1 offered in the picker; the rest are the same hardware seen through another host API). Any of these indexes may be set as audio_device by hand: 0='Microsoft Sound Mapper - Input' (MME) [hidden]; 1='Microphone Array (Realtek(R) Audio)' (MME) [hidden]; 4='Primary Sound Capture Driver' (Windows DirectSound) [hidden]; 5='Microphone Array (Realtek(R) Audio)' (Windows DirectSound); 8='Microphone Array (Realtek(R) Audio)' (Windows WASAPI) [hidden]
+[2026-08-25 08:02:15] Saved audio_device 9 is not an input device on this machine now; using the system default instead. The saved choice is left alone so the device comes back when it is plugged in.
+[2026-08-25 08:02:15] Initializing PortAudio and opening input stream...
+[2026-08-25 08:02:15] Audio input stream opened and started successfully.
+[2026-08-25 08:02:15] Recording from 'Microphone Array (Realtek(R) Audio)' (the system default).
+[2026-08-25 08:04:52] Recording stopped. Audio samples: 64512
+[2026-08-25 08:04:53] Transcription finished in 1.42s. Result: 'Testing testing, can you hear this properly.'
+[2026-08-25 08:04:53] Pasted 44 chars into 'Untitled - Notepad'.
+[2026-08-25 08:07:19] Recording stopped. Audio samples: 81920
+[2026-08-25 08:07:21] Transcription finished in 1.81s. Result: 'It sounds quieter than it did yesterday and there is a hiss on it.'
+[2026-08-25 08:07:21] Pasted 66 chars into 'Untitled - Notepad'.

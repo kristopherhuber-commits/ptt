@@ -32,7 +32,7 @@ There are two ways to install. **Most people want Option 1.**
 | **Option 1** | Anyone who just wants to use the app | A browser. Nothing else. |
 | **Option 2** | Developers, or anyone modifying the code | Git and a Python 3.14 installation |
 
-Both produce the same application. The published archive is built from the tagged commit it is attached to, so the two are equivalent.
+Both produce the same application. The published archives are built from the tagged commit they are attached to, so the two routes are equivalent.
 
 **Requirements either way:** Windows 11, and a microphone. An NVIDIA GPU is optional and only affects speed (see section 1). The first launch downloads the speech model (~1.6 GB) and takes a few minutes; every launch after that takes a few seconds.
 
@@ -40,10 +40,24 @@ Both produce the same application. The published archive is built from the tagge
 
 No Python, no developer tools, no command line.
 
-1. Download **`ptt_dictate_dist.zip`** (~1.45 GB) from the [**Releases page**](https://github.com/kristopherhuber-commits/ptt/releases/latest).
-2. Extract the ZIP file completely.
+1. Download from the [**Releases page**](https://github.com/kristopherhuber-commits/ptt/releases/latest). There are **two** files:
+
+   | File | Size | Needed? |
+   |---|---|---|
+   | **`ptt_dictate_dist.zip`** | ~1.43 GB | **Yes.** The application. |
+   | **`ptt_llama_runtime.zip`** | ~0.61 GB | Only if you want the **Concierge** — the local assistant that explains and changes your settings. Dictation does not use it. |
+
+2. Extract them **into the same folder**. Order does not matter; together they
+   produce one tree, with `app\llama\` sitting beside `app\ptt\`.
 3. Double-click **`install.bat`** inside the extracted folder.
 4. Click **Yes** on the User Account Control (UAC) prompt. The batch script will automatically self-elevate to Administrator to complete the setup.
+
+> **Why two files?** A GitHub release asset must be under 2 GiB and the whole
+> thing is 2.04 GiB. The split is at the one component the application does not
+> need, so the second download is genuinely optional rather than a package you
+> have to reassemble. If you install without it, the installer says so and
+> dictation works normally; you can add it later by extracting it into the same
+> folder and running `install.bat` again.
 
 The application is distributed as a portable Python environment, so no pre-existing Python installation or library configuration is required on the target computer.
 
@@ -61,11 +75,22 @@ For developers, or if you pull the repository onto a new computer and want to re
 
 #### Build the distributable
 
-1. Ensure any running executable is closed (right-click the tray icon and select **Exit**).
-2. Run the build script using your local Python installation:
+1. Ensure any running executable is closed (right-click the tray icon and select **Exit**),
+   and anything else running out of `.venv`.
+
+   The distribution is **one archive**, `ptt_dictate_dist.zip` (1.67 GiB). Its root
+   holds exactly one executable — `install.bat` — with `install.ps1` and
+   `run_tray.bat` in `_internal\`, because Windows hides known file extensions by
+   default and two files both displayed as `install` is a coin toss.
+2. Run the build script **with the interpreter inside `.venv`**:
    ```powershell
-   python build_portable.py
+   .venv\Scripts\python.exe build_portable.py
    ```
+   Not the base Python: the knowledge-pack step imports the application's own
+   modules, which need the packages `requirements.txt` installs into `.venv`.
+   The script verifies the six interpreter files it copies rather than skipping
+   a locked one silently, and stops if the copy in `.venv` differs from the base
+   install.
 
 This script will automatically:
 * Create a virtual environment (`.venv`) if it does not exist.
@@ -161,7 +186,7 @@ privileges" instead of using the Startup folder, which is a change to
 * [docs/design.md](docs/design.md) — how it is built: configuration matrix, module layout, the keystroke-injection contract, and the hotkey design.
 * [docs/verification.md](docs/verification.md) — the tests: what each one verifies, which part of the design it traces to, and the results.
 * [docs/development_history.md](docs/development_history.md) — the retrospective log of solved issues.
-* [docs/gui_handoff/gui_handoff.md](docs/gui_handoff/gui_handoff.md) — the PySide6 GUI specification: the three UI layers (tray icon, hover popover, settings window), panel-by-panel behaviour, and the acceptance criteria. `docs/gui_handoff/ptt_dictation_ui_mockups.html` is the visual reference and `claude_code_prompt.md` is the staged build plan.
+* [docs/ptt-v2-gui/gui_handoff.md](docs/ptt-v2-gui/gui_handoff.md) — the PySide6 GUI specification: the three UI layers (tray icon, hover popover, settings window), panel-by-panel behaviour, and the acceptance criteria. `docs/ptt-v2-gui/ptt_dictation_ui_mockups.html` is the visual reference and `claude_code_prompt.md` is the staged build plan.
 
 The implementation lives in `app/ptt/`; `ptt_dictate.py` and `app/ptt_tray.py` are thin
 entry points over it. See [docs/design.md](docs/design.md) section 4 for the full module
@@ -180,6 +205,9 @@ The three layers described in section 1 are `app/ptt/ui/`, one module per piece:
 | `ui/qt_statusview.py` | The read-only state display — built once and embedded twice, as the popover's body and as the window's banner, so the two cannot drift apart. |
 | `ui/qt_theme.py` | Registers the bundled fonts and applies `style.qss`. |
 | `ui/qt_marks.py` | The small `+` registration marks at the corners of the status panel and every tab — the crosshair a printer uses to align colour plates, and the motif that makes the window read as a technical drawing. |
+| `ui/qt_threadcheck.py` | `THREAD-CHECK`: the one line each queued hop writes to `debug_log.txt` at its first emission, which is the evidence that the hop is real. Two threads must be named and they must differ. |
+| `ui/qt_concierge.py` | Layer 4 (v3.0): the Concierge chat panel, docked right of the tabs. Holds a `ConciergeView` — a plain object with no Qt in it that decides what the transcript contains — and renders it. A chat is one of five things it can be showing: `gate_for` picks between the first-run card, the model download, the no-CUDA and switched-off cards and the chat, from the state machine plus the two opt-in keys. |
+| `ui/qt_concierge_worker.py` | The thread adapter between that panel and the Qt-free harness in `ptt/concierge/`. `ConciergeWorker` owns the harness on a worker thread; `ConciergeController` lives on the GUI thread and is the only place a cross-thread connection is made. |
 | `ui/panels/` | One module per tab: `hotkey`, `model`, `audio`, `vocabulary`, `advanced`, `diagnostics`. `panels/__init__.py` holds `InstantApplyPanel`, the one write-then-save-then-tell-the-engine sequence every control routes through. |
 
 **The engine never imports the UI.** It reports state through a callback the frontend
