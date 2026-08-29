@@ -57,8 +57,29 @@ class MissingSource(Exception):
 
 
 def digest_of(path):
-    with open(path, "rb") as f:
-        return hashlib.sha256(f.read()).hexdigest()
+    """
+    SHA-256 of a source's **content**, with line endings normalised.
+
+    Not of its bytes on disk, and that distinction is the whole of
+    `development_history.md` #58. `core.autocrlf` is `true` on Windows and this
+    repository has no `.gitattributes`, so git stores LF and checks out CRLF:
+    `concierge_narrative.md` is 11 296 bytes in the object store and 11 492 in
+    the working tree, and a byte-wise digest is therefore a fact about how the
+    file arrived rather than about what it says.
+
+    That mattered twice over. `test_the_shipped_pack_is_current` failed on a
+    fresh `git checkout` with nothing edited, which is a check that cries wolf
+    and gets ignored. And regenerating on such a checkout would have produced a
+    pack whose manifest differed from the one gate 2.5 froze at `76a281c8a388`,
+    breaking the digest every qualification scorecard is compared against --
+    while the pack's *body* was identical, because `read_source` has always read
+    text with universal newlines.
+
+    Normalising here makes the recorded digest equal the content digest, which
+    is the LF one git already stores.
+    """
+    with open(path, "r", encoding="utf-8", newline=None) as f:
+        return hashlib.sha256(f.read().encode("utf-8")).hexdigest()
 
 
 def read_source(path):
@@ -82,7 +103,11 @@ def read_source(path):
         raise MissingSource(f"{path} is empty; a knowledge-pack source may not be.")
     return text, {
         "path": path.replace("\\", "/"),
-        "size": os.path.getsize(path),
+        # The normalised length, for the same reason `digest_of` normalises: on
+        # a CRLF checkout `os.path.getsize` reports 196 bytes more than the file
+        # has lines' worth of content, and the manifest would record a size
+        # nothing else in the project agrees with.
+        "size": len(text.encode("utf-8")),
         "sha256": digest_of(path),
     }
 

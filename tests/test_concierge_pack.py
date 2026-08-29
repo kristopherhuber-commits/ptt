@@ -92,9 +92,15 @@ def test_the_manifest_records_path_size_and_digest_for_every_source(tmp_path):
     assert manifest
     for row in manifest:
         assert set(row) == {"path", "size", "sha256"}
-        assert os.path.getsize(os.path.join(REPO, row["path"])) == row["size"]
-        with open(os.path.join(REPO, row["path"]), "rb") as f:
-            assert hashlib.sha256(f.read()).hexdigest() == row["sha256"]
+        full = os.path.join(REPO, row["path"])
+        # Content, not bytes on disk. A second copy of the rule here is how this
+        # test came to disagree with the generator on a CRLF checkout (#58);
+        # asking the module is what makes them one rule.
+        with open(full, "r", encoding="utf-8", newline=None) as f:
+            content = f.read().encode("utf-8")
+        assert len(content) == row["size"]
+        assert hashlib.sha256(content).hexdigest() == row["sha256"]
+        assert pack_mod.digest_of(full) == row["sha256"]
 
 
 def test_the_manifest_is_in_the_packs_front_matter(tmp_path):
@@ -105,6 +111,32 @@ def test_the_manifest_is_in_the_packs_front_matter(tmp_path):
     assert "concierge_narrative.md" in head
     assert "sha256:" in head
     assert "config.FIELDS" in head
+
+
+def test_a_sources_digest_does_not_depend_on_its_line_endings(tmp_path):
+    """
+    **`V-CG-142`, and it is `development_history.md` #58.** `core.autocrlf` is
+    `true` on Windows and this repository has no `.gitattributes`, so git stores
+    LF and checks out CRLF. A byte-wise digest of a source is therefore a fact
+    about how the file arrived, not about what it says -- and the manifest that
+    gate 2.5 froze would change on a fresh clone with nothing edited.
+
+    The same text, written both ways, must digest the same.
+    """
+    lf = tmp_path / "lf.md"
+    crlf = tmp_path / "crlf.md"
+    body = "# Title\n\nA line.\nAnother line.\n"
+    lf.write_bytes(body.encode("utf-8"))
+    crlf.write_bytes(body.replace("\n", "\r\n").encode("utf-8"))
+
+    assert lf.stat().st_size != crlf.stat().st_size, "the fixture is not testing anything"
+    assert pack_mod.digest_of(str(lf)) == pack_mod.digest_of(str(crlf))
+
+    # and the manifest row agrees, size included
+    _text_a, row_a = pack_mod.read_source(str(lf))
+    _text_b, row_b = pack_mod.read_source(str(crlf))
+    assert row_a["sha256"] == row_b["sha256"]
+    assert row_a["size"] == row_b["size"]
 
 
 def test_the_shipped_pack_is_current(tmp_path):
@@ -123,8 +155,7 @@ def test_the_shipped_pack_is_current(tmp_path):
         full = os.path.join(REPO, path)
         assert os.path.exists(full), (
             f"{path} is recorded in the knowledge pack and no longer exists")
-        with open(full, "rb") as f:
-            actual = hashlib.sha256(f.read()).hexdigest()
+        actual = pack_mod.digest_of(full)
         assert actual == digest, (
             f"{path} has changed since the knowledge pack was generated. "
             f"Run build_knowledge_pack.py.")

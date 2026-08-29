@@ -394,6 +394,13 @@ When packaging using PyInstaller (`--onedir` mode):
 * **Note:** `setup/` was the obvious name and is the wrong one — `setup.exe` has been *the* Windows installer filename for thirty years, so a folder called `setup` attracts exactly the click it is meant to prevent. `_internal/` reads as machinery and sorts to the top.
 
 
+### 58. The Digest That Was About The Checkout (Concierge, session 5a)
+* **Symptom:** `git checkout main` — nothing edited, nothing regenerated — and `test_the_shipped_pack_is_current` failed, naming `concierge_narrative.md` and reporting `558107c9b2ae` against the manifest's `88df6fab7eb0`.
+* **Cause:** `core.autocrlf` is `true` and the repository has no `.gitattributes`, so git stores LF and checks out CRLF. The file is **11 296 bytes in the object store and 11 492 in the working tree**, and `digest_of()` hashed the file's bytes. So the manifest recorded a fact about how the file arrived rather than about what it said, and the same commit produced two different answers depending on which branch you had last checked out.
+* **Fix:** hash the **content** — read with universal newlines, encode UTF-8, digest that — and record the normalised length as the size. `read_source` had always read text this way, so the pack's *body* was never affected and the regenerated pack is byte-identical: gate 2.5's frozen `76a281c8a388` still holds, and the manifest now records the LF digest git already stores. `V-CG-142`.
+* **Note:** two things worth keeping. **The second-worst outcome was the one that nearly happened**: not the false alarm, but a regeneration on a fresh clone silently producing a pack whose digest no longer matched the one every qualification scorecard is compared against — the body identical, the manifest not, and nothing to say why. And the two tests that broke when the generator was fixed had each re-implemented the hashing rule instead of calling `digest_of`, which is why they could disagree with it; they call it now. A derived expectation is only derived if both halves come from the same place — the same lesson as #54, one file over.
+
+
 ## 🛠️ Maintenance & Execution Protocols
 
 ### Native Terminal Execution
