@@ -259,3 +259,40 @@ def test_no_vocabulary_leaves_the_cleaned_text_alone():
     """The benchmark path passes no rules, so it measures the dictation path."""
     model = FakeModel("nothing to replace")
     assert transcribe.transcribe_audio(model, None) == "nothing to replace"
+
+
+# -- a load that cannot even import ------------------------------------------
+
+def test_an_unimportable_faster_whisper_is_reported_not_raised(monkeypatch):
+    r"""
+    The import lives inside the guard, not above it.
+
+    `av\error.pyd` is unsigned, and Smart App Control refused to load it on one
+    machine's first run of v3.0. Raised from above the `try`, that left this
+    function entirely and took the caller's poll loop with it. It is a model
+    load that failed and is reported as one, so the CPU/GPU contract -- a
+    triple, never an exception -- holds for every failure and not just the ones
+    CTranslate2 raises.
+    """
+    def blocked():
+        raise ImportError("DLL load failed while importing error: "
+                          "a code integrity policy blocked the file")
+
+    monkeypatch.setattr(transcribe, "_whisper_model_cls", blocked)
+    model, device, status = transcribe.load_model_with_fallback(
+        "large-v3", use_gpu=True, cuda_supported=True)
+    assert model is None
+    assert device == "cuda"
+    assert status == "Error loading model"
+
+
+def test_an_unimportable_faster_whisper_reports_cpu_when_cpu_was_asked_for(
+        monkeypatch):
+    """The reported device is the one that was attempted, not a guess."""
+    def blocked():
+        raise ImportError("nope")
+
+    monkeypatch.setattr(transcribe, "_whisper_model_cls", blocked)
+    _model, device, _status = transcribe.load_model_with_fallback(
+        "large-v3", use_gpu=False, cuda_supported=True)
+    assert device == "cpu"

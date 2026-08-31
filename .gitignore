@@ -87,3 +87,8 @@ tests/tools/runs/
 !tests/tools/seeds/*.log
 tests/tools/.cublas/
 tests/tools/.rig/
+
+# The payload manifest, written into the archive by build_portable.py so the
+# installer can verify an extraction. Derived from the tree it describes, so it
+# is generated at build time rather than committed and left to go stale.
+_internal/manifest.sha256

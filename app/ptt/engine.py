@@ -57,6 +57,29 @@ MIN_RECORD_SEC = 0.3
 #: half an hour ago is not still dragging the figure around.
 LATENCY_SAMPLES = 20
 
+#: Longest status text the loop will hand a frontend. A Windows tray tooltip
+#: truncates past 128 characters, and an exception message is the one status
+#: string in the application whose length nobody chose -- a blocked DLL import
+#: reports the file, the reason, and a paragraph of advice about it.
+STATUS_TEXT_LIMIT = 110
+
+
+def _error_text(headline, exc):
+    """
+    A one-line status string for an exception, prefixed with `headline`.
+
+    `qt_statusview.is_error` reads these by their first word, so every caller
+    passes a headline beginning "Error". The rest is the exception's own first
+    line, which is what turns "Error loading model" -- equally true of a missing
+    file, a dead GPU and a code integrity block -- into something the user can
+    act on or paste into an issue.
+    """
+    lines = str(exc).strip().splitlines()
+    detail = lines[0].strip() if lines else ""
+    if not detail:
+        detail = exc.__class__.__name__
+    return f"{headline}: {detail}"[:STATUS_TEXT_LIMIT]
+
 
 class Engine:
     def __init__(self, settings, cuda_supported, on_state,
@@ -329,7 +352,35 @@ class Engine:
             while self._running:
                 if self._reload_model.is_set():
                     self._reload_model.clear()
-                    self._reload()
+                    try:
+                        self._reload()
+                    except Exception as e:
+                        # **A load that fails must not take the loop with it.**
+                        #
+                        # `load_model_with_fallback` reports every failure it
+                        # can see; what arrives here is one it could not. In
+                        # v3.0 that was Smart App Control refusing to load
+                        # `av\error.pyd` -- an unsigned component of a
+                        # dependency of a dependency -- which raised out of the
+                        # faster-whisper import *before* that function's first
+                        # `try`. The exception unwound the entire loop, the
+                        # `finally` below logged a tidy "loop finished", and the
+                        # traceback went to the stderr a windowed launcher does
+                        # not have. The tray sat on "Loading Model..." with no
+                        # error, no log line and no way back, for as long as the
+                        # user was willing to wait for it.
+                        #
+                        # So: say what happened, forget the resident model, and
+                        # keep polling. The Model tab's next selection is then a
+                        # retry, which is what makes a *transient* refusal --
+                        # and Smart App Control's first-run block is transient,
+                        # it allows the same file once its reputation lookup has
+                        # resolved -- recoverable without a reinstall.
+                        log_debug(f"ERROR while loading the model: {str(e)}")
+                        log_debug(traceback.format_exc())
+                        self._model = None
+                        self.current_model = ""
+                        self._emit("idle", _error_text("Error loading model", e))
 
                 # After the reload check, so selecting a model and measuring it
                 # in one go measures the model that was just loaded.
@@ -447,6 +498,18 @@ class Engine:
                         self._emit("idle", f"Error: {str(e)}")
 
                 time.sleep(POLL_SEC)
+        except Exception as e:
+            # The loop is ending on something no handler above it caught. It
+            # ends either way; what this adds is that it says so. A daemon
+            # thread's traceback goes to `threading.excepthook`, and from there
+            # to a stderr that `ptt_dictate.exe` -- a windowed launcher -- does
+            # not have. Without this the only record of a fatal error is the
+            # "loop finished" line in the `finally`, which reads exactly like a
+            # clean shutdown, and was read as one for an afternoon.
+            log_debug("CRITICAL: the transcription loop is ending on an "
+                      f"unhandled error: {str(e)}")
+            log_debug(traceback.format_exc())
+            self._emit("idle", _error_text("Error", e))
         finally:
             if recording:
                 rec.stop()

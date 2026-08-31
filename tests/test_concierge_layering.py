@@ -566,3 +566,97 @@ def test_every_preserved_file_is_put_back_after_the_copy():
         text.index("Remove-Item -Path $TargetDir")
     assert text.index("Remove-Item -Path $TargetDir") < \
         text.index("foreach ($Name in $PreservedNames)")
+
+
+# -- the payload manifest (v3.0.1) -------------------------------------------
+
+def test_the_manifest_and_the_archive_come_from_one_traversal(tmp_path):
+    """
+    `payload_files` is the single rule. The manifest and the zip loop both walk
+    through it, because a manifest that disagreed with the archive would fail
+    every installation, and it would do it on release day.
+    """
+    sys.path.insert(0, REPO)
+    import build_portable
+
+    (tmp_path / "app").mkdir()
+    (tmp_path / "app" / "keep.py").write_text("x", encoding="utf-8")
+    (tmp_path / "app" / "config.json").write_text("{}", encoding="utf-8")
+    (tmp_path / "app" / "models").mkdir()
+    (tmp_path / "app" / "models" / "big.gguf").write_text("x", encoding="utf-8")
+    (tmp_path / "app" / "__pycache__").mkdir()
+    (tmp_path / "app" / "__pycache__" / "keep.pyc").write_text("x", encoding="utf-8")
+
+    cwd = os.getcwd()
+    os.chdir(tmp_path)
+    try:
+        skipped = []
+        found = sorted(build_portable.archive_name(p) for p in
+                       build_portable.payload_files(
+                           ["app"], on_skip=lambda p, r: skipped.append(r)))
+    finally:
+        os.chdir(cwd)
+
+    assert found == ["app/keep.py"]
+    assert any("runtime artifact" in r for r in skipped)
+    assert any("weights never ship" in r for r in skipped)
+
+
+def test_a_manifest_round_trips(tmp_path):
+    """`sha256sum`'s format, so the file is checkable with the usual tools too."""
+    sys.path.insert(0, REPO)
+    import build_portable
+
+    path = tmp_path / "manifest.sha256"
+    entries = [("a" * 64, "app/one.py"), ("b" * 64, ".venv/Lib/two with space.txt")]
+    build_portable.write_manifest(str(path), "9.9.9", entries)
+    text = path.read_text(encoding="utf-8")
+
+    assert build_portable.read_manifest(text) == dict(
+        (name, digest) for digest, name in entries)
+    # The header carries the version, which is how install.ps1 names what it is
+    # installing without a second copy of the number to keep in step.
+    assert "PTT Dictation 9.9.9" in text.splitlines()[0]
+
+
+def test_the_manifest_never_lists_itself(tmp_path):
+    """A file that hashed itself would be wrong in a way nothing could detect."""
+    sys.path.insert(0, REPO)
+    import build_portable
+
+    internal = tmp_path / "_internal"
+    internal.mkdir()
+    (internal / "install.ps1").write_text("x", encoding="utf-8")
+    # A rebuild starts with the previous build's manifest still on disk.
+    (internal / "manifest.sha256").write_text("stale", encoding="utf-8")
+
+    cwd = os.getcwd()
+    os.chdir(tmp_path)
+    try:
+        walked = [build_portable.archive_name(p)
+                  for p in build_portable.payload_files(["_internal"])]
+        hashed = [n for n in walked
+                  if os.path.normpath(n) != os.path.normpath(
+                      build_portable.MANIFEST_PATH)]
+    finally:
+        os.chdir(cwd)
+
+    # It is packed, because install.ps1 needs it; it is not hashed.
+    assert build_portable.MANIFEST_ARCHIVE_NAME in walked
+    assert build_portable.MANIFEST_ARCHIVE_NAME not in hashed
+
+
+def test_the_version_is_read_without_importing_the_package():
+    """
+    Importing `ptt` from the repository root means putting `app/` on sys.path
+    from a script with no other reason to, and running the package's
+    module-scope code on the build machine.
+    """
+    sys.path.insert(0, REPO)
+    import build_portable
+
+    version = build_portable.read_version(
+        os.path.join(REPO, "app", "ptt", "__init__.py"))
+    assert version.count(".") == 2
+    from ptt import __version__
+    assert version == __version__

@@ -20,3 +20,13 @@ Import submodules explicitly:
 """
 
 __all__ = []
+
+#: The released version, and the single place it is written down.
+#:
+#: `build_portable.py` reads it out of this file with a regular expression
+#: rather than importing it, because importing `ptt` from the repository root
+#: means putting `app/` on `sys.path`, and the build script has no other reason
+#: to. It stamps the archive's payload manifest with what it finds, which is how
+#: `install.ps1` can name the version it is installing without a second copy of
+#: the number to keep in step.
+__version__ = "3.0.1"

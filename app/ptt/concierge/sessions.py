@@ -128,6 +128,23 @@ class SessionStore:
 
     # -- writing ------------------------------------------------------------
 
+    def _fresh_id(self, taken):
+        """
+        A session id no existing entry is using.
+
+        The id is the save time in milliseconds, and that is unique for exactly
+        as long as nobody saves twice inside one millisecond -- true of a person
+        with a mouse, false of anything driving the store in a loop, including
+        this module's own tests, where it failed. A collision does not produce
+        two rows: `save` replaces the entry whose id matches, so the second save
+        silently ate the first. Counting forward from the clock keeps the ids
+        ordered and in the same format, and needs no randomness to do it.
+        """
+        stamp = int(time.time() * 1000)
+        while f"s{stamp:x}" in taken:
+            stamp += 1
+        return f"s{stamp:x}"
+
     def save(self, name, rows, session_id=None):
         """
         Save (or re-save) one transcript. Returns `(saved, reason)`.
@@ -141,8 +158,12 @@ class SessionStore:
             return None, "there is nothing in this session to save yet"
 
         name = (str(name or "").strip() or f"Session {self._clock()}")[:120]
+
+        # Read once: the existing entries are both what a new id must avoid and
+        # what the entry below is inserted in front of.
+        existing = self._read()
         session_id = (str(session_id or "").strip()
-                      or f"s{int(time.time() * 1000):x}")
+                      or self._fresh_id({str(e.get("id", "")) for e in existing}))
         rows, dropped = fit(rows)
         if dropped:
             log_debug(f"Concierge: dropped {dropped} row(s) from the saved "
@@ -151,7 +172,7 @@ class SessionStore:
 
         entry = {"id": session_id, "name": name, "saved_at": self._clock(),
                  "rows": rows}
-        entries = [e for e in self._read() if str(e.get("id", "")) != session_id]
+        entries = [e for e in existing if str(e.get("id", "")) != session_id]
         entries.insert(0, entry)
 
         try:

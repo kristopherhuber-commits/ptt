@@ -197,7 +197,26 @@ def load_model_with_fallback(model_size, use_gpu, cuda_supported, on_fallback=No
     rather than a direct write so this module never imports `ptt.config` --
     config.py stays the only module that touches config.json (design.md #7).
     """
-    WhisperModel = _whisper_model_cls()
+    # **Inside a guard, not above one.** This import pulls in faster-whisper,
+    # and through it `av`, `ctranslate2`, `tokenizers` and `onnxruntime` -- some
+    # four hundred `.pyd` and `.dll` files, most of them unsigned, any one of
+    # which a Windows code integrity policy may refuse to load. Smart App
+    # Control refused `av\error.pyd` on one machine's first run of v3.0, and
+    # allowed the identical file minutes later once its reputation lookup had
+    # resolved.
+    #
+    # Raised from where this call used to be -- above the `try` -- that produced
+    # no status text, no log line and no CPU attempt, because the exception left
+    # this function entirely and then took the calling loop with it. It is a
+    # model load that failed, which is the one thing this function exists to
+    # report.
+    try:
+        WhisperModel = _whisper_model_cls()
+    except Exception as e:
+        log_debug(f"ERROR: faster-whisper could not be imported: {str(e)}")
+        log_debug(traceback.format_exc())
+        return None, ("cuda" if (use_gpu and cuda_supported) else "cpu"), \
+            "Error loading model"
 
     target_device = "cuda" if (use_gpu and cuda_supported) else "cpu"
     target_compute_type = CUDA_COMPUTE_TYPE if target_device == "cuda" else CPU_COMPUTE_TYPE

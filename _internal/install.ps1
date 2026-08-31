@@ -1,5 +1,10 @@
 # install.ps1
 # Installer script for Push-to-Talk Dictation
+#
+# LOAD-BEARING FIRST LINE: install.bat greps this file for the literal
+# `# install.ps1` before it runs it, because a payload verifier cannot verify
+# itself and an extraction that blanks this file leaves PowerShell reporting an
+# empty command at line 1. Change the first line and that guard stops guarding.
 
 $AppName = "PTT Dictation"
 # This script lives in _internal\; the payload it installs is its parent.
@@ -25,7 +30,133 @@ if (-not (Test-Path "$SourceDir\.venv") -or -not (Test-Path "$SourceDir\app")) {
     Exit
 }
 
-# 1a. The Concierge's runtime ships as a second archive, because one asset over
+# 1a. Verify the extraction before anything is copied.
+#
+# **The archive is not what arrives.** v3.0 was reported as a broken installer:
+# `install.ps1` failed at line 1, character 1, with "The term '' is not
+# recognized". The file was the right length and every byte in it was NUL --
+# and so were 2,137 others, out of 8,550, all written by Windows Explorer's own
+# "Extract All" from an archive that passed `unzip -t` without a complaint. The
+# extractor does this silently on an archive this size, and every symptom it
+# produces points somewhere else: at PowerShell, at the installer, at the
+# package. Not one of them points at the extraction.
+#
+# So the package carries its own manifest and the installer checks it. Three
+# seconds of SHA-256 (measured: 2.95 GiB at ~1 GB/s) buys the difference between
+# an installation that fails later in a way nobody can read and one that stops
+# here saying which files did not survive and what to run instead.
+#
+# A missing manifest is a warning rather than a refusal. It means an archive
+# built before v3.0.1, or a tree somebody assembled by hand, and neither is a
+# reason not to install.
+$ManifestPath = Join-Path $PSScriptRoot "manifest.sha256"
+$PackageVersion = ""
+if (-not (Test-Path $ManifestPath)) {
+    Write-Host "Note: this package carries no manifest, so the extraction cannot be verified." -ForegroundColor Yellow
+    Write-Host ""
+} else {
+    Write-Host "Verifying the extracted files..." -ForegroundColor Gray
+    $Expected = @{}
+    foreach ($Line in [System.IO.File]::ReadAllLines($ManifestPath)) {
+        $Line = $Line.Trim()
+        if ($Line.Length -eq 0) { continue }
+        if ($Line.StartsWith("#")) {
+            if ($Line -match '^#\s*PTT Dictation\s+(\S+)') { $PackageVersion = $Matches[1] }
+            continue
+        }
+        $Split = $Line.IndexOf("  ")
+        if ($Split -lt 0) { continue }
+        $Expected[$Line.Substring($Split + 2).Trim()] = $Line.Substring(0, $Split).Trim()
+    }
+
+    # Opened with FileShare.ReadWrite and hashed through one reused SHA-256
+    # object: the alternative is Get-FileHash 8,550 times, which is the same
+    # arithmetic wrapped in 8,550 cmdlet invocations and takes minutes.
+    $Sha = [System.Security.Cryptography.SHA256]::Create()
+    $Missing = New-Object System.Collections.Generic.List[string]
+    $Corrupt = New-Object System.Collections.Generic.List[string]
+    $Blank = 0
+    foreach ($Relative in $Expected.Keys) {
+        $Full = Join-Path $SourceDir ($Relative -replace '/', '\')
+        if (-not [System.IO.File]::Exists($Full)) { $Missing.Add($Relative); continue }
+        $Stream = [System.IO.File]::Open($Full, 'Open', 'Read', 'ReadWrite')
+        try {
+            $Actual = [System.BitConverter]::ToString($Sha.ComputeHash($Stream)).Replace("-", "").ToLowerInvariant()
+        } finally { $Stream.Dispose() }
+        if ($Actual -ne $Expected[$Relative]) {
+            $Corrupt.Add($Relative)
+            # Naming the symptom is what identifies the culprit. "Does not
+            # match" could be anything; "the right length and entirely blank"
+            # is the extractor, and only the extractor.
+            if ((Get-Item $Full).Length -gt 0) {
+                $Bytes = [System.IO.File]::ReadAllBytes($Full)
+                $NonZero = $false
+                foreach ($B in $Bytes) { if ($B -ne 0) { $NonZero = $true; break } }
+                if (-not $NonZero) { $Blank++ }
+            }
+        }
+    }
+
+    if ($Missing.Count -gt 0 -or $Corrupt.Count -gt 0) {
+        Write-Host ""
+        Write-Host "==================================================" -ForegroundColor Red
+        Write-Host "  This folder is not a complete copy of the app.  " -ForegroundColor Red
+        Write-Host "==================================================" -ForegroundColor Red
+        Write-Host ""
+        if ($Missing.Count -gt 0) {
+            Write-Host "  $($Missing.Count) file(s) are missing." -ForegroundColor Yellow
+        }
+        if ($Corrupt.Count -gt 0) {
+            Write-Host "  $($Corrupt.Count) file(s) do not match the package." -ForegroundColor Yellow
+            if ($Blank -gt 0) {
+                Write-Host "  $Blank of those are the right size and entirely blank." -ForegroundColor Yellow
+            }
+        }
+        Write-Host ""
+        Write-Host "  The download is almost certainly fine. Windows Explorer's" -ForegroundColor Gray
+        Write-Host "  'Extract All' loses files from an archive this large, and" -ForegroundColor Gray
+        Write-Host "  gives no error when it does." -ForegroundColor Gray
+        Write-Host ""
+        Write-Host "  Extract it again with Windows' own tar, which does not." -ForegroundColor Gray
+        Write-Host "  Open Command Prompt in the folder holding the .zip and run:" -ForegroundColor Gray
+        Write-Host ""
+        Write-Host "      rmdir /s /q ptt_dictate_dist" -ForegroundColor Cyan
+        Write-Host "      mkdir ptt_dictate_dist" -ForegroundColor Cyan
+        Write-Host "      tar -xf ptt_dictate_dist.zip -C ptt_dictate_dist" -ForegroundColor Cyan
+        Write-Host ""
+        Write-Host "  Then run install.bat from the new folder." -ForegroundColor Gray
+        Write-Host ""
+        Write-Host "  The first few files that did not survive:" -ForegroundColor Gray
+        foreach ($Name in (@($Missing) + @($Corrupt) | Select-Object -First 8)) {
+            Write-Host "    $Name" -ForegroundColor Gray
+        }
+        Write-Host ""
+        Exit 1
+    }
+    Write-Host "  $($Expected.Count) files verified against the package manifest." -ForegroundColor Green
+    if ($PackageVersion) {
+        Write-Host "  Installing PTT Dictation $PackageVersion." -ForegroundColor Green
+    }
+    Write-Host ""
+}
+
+# 1b. Take the Mark of the Web off the payload.
+#
+# A file extracted from a downloaded archive inherits its `Zone.Identifier`
+# stream, and `Copy-Item` carries that stream into the installation. It is worth
+# removing for the same reason the verification above is worth doing: on a
+# machine with Smart App Control on, an internet-marked script is refused
+# outright -- which is how the same report that produced the manifest also
+# arrived saying "Smart App Control blocked a file" with nothing naming which.
+#
+# Cheap enough not to need a reason: 0.7 seconds over 8,550 files. Extracting
+# with `tar` avoids the mark entirely, but the installer cannot assume anybody
+# read that part.
+Write-Host "Clearing the downloaded-file mark..." -ForegroundColor Gray
+Get-ChildItem -Path $SourceDir -Recurse -File -Force -ErrorAction SilentlyContinue |
+    Unblock-File -ErrorAction SilentlyContinue
+
+# 1c. The Concierge's runtime ships as a second archive, because one asset over
 # 2 GiB is one GitHub will not accept (build_portable.py, DISTRIBUTION_ARCHIVE).
 # Its absence is not an error: dictation never touches llama-server, and a user
 # who does not want a local assistant is right to have skipped 628 MB. It is

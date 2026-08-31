@@ -496,3 +496,76 @@ def test_cuda_unsupported_forces_cpu_at_construction(tmp_path):
     settings.use_gpu = True
     engine_mod.Engine(settings, cuda_supported=False, on_state=lambda s, t: None)
     assert settings.use_gpu is False
+
+
+def test_a_failing_model_load_does_not_kill_the_poll_loop(monkeypatch, tmp_path):
+    """
+    v3.0's Smart App Control defect, as a test.
+
+    An exception escaping the loader used to unwind the whole of `run()`. The
+    `finally` logged "loop finished", the traceback went to a windowed
+    launcher's absent stderr, and the tray held "Loading Model..." forever with
+    nothing anywhere saying why. The loop must survive it, say so, and stay
+    available for the retry that the Model tab is.
+    """
+    monkeypatch.setattr(audio_mod, "get_idle_duration", lambda: 9999.0)
+    monkeypatch.setattr(audio_mod, "Recorder",
+                        lambda samplerate, device=None: FakeRecorder())
+
+    states, asked = [], []
+    settings = config.Settings(path=str(tmp_path / "config.json"))
+
+    def exploding_load(model_size, use_gpu, cuda_supported, on_fallback=None):
+        raise ImportError("DLL load failed while importing error: blocked")
+
+    monkeypatch.setattr(transcribe, "load_model_with_fallback", exploding_load)
+
+    engine = engine_mod.Engine(
+        settings, cuda_supported=False,
+        on_state=lambda s, t: states.append((s, t)),
+        chord_held=lambda chord: asked.append(tuple(chord)) or False,
+    )
+    thread = threading.Thread(target=engine.run, daemon=True)
+    thread.start()
+    try:
+        # The failure is reported, and reported as an error: qt_statusview
+        # decides by the first word, so the prefix is the contract.
+        wait_for(lambda: any(t.startswith("Error") for _s, t in states),
+                 what="an error status")
+        assert any("DLL load failed" in t for _s, t in states)
+        assert engine.current_model == ""
+
+        # And the loop is still there to be retried into. This is the half that
+        # matters: Smart App Control allows on the second attempt what it
+        # refused on the first. It is also the only liveness signal available
+        # here -- the chord is polled only while a model is resident, so a loop
+        # with none is silent whether it is running or dead.
+        monkeypatch.setattr(
+            transcribe, "load_model_with_fallback",
+            lambda m, g, c, on_fallback=None: (object(), "cpu", "Ready (CPU)"))
+        engine.request_model_reload()
+        wait_for(lambda: ("idle", "Ready (CPU)") in states,
+                 what="the retry to load the model")
+        assert engine.current_model == settings.model
+        wait_for(lambda: len(asked) > 3, what="the loop to poll the chord again")
+    finally:
+        engine.stop()
+        thread.join(timeout=TIMEOUT)
+
+
+def test_a_status_string_is_capped_so_a_tray_tooltip_can_hold_it(tmp_path):
+    """
+    Windows truncates a tray tooltip past 128 characters. A blocked DLL import
+    reports the file, the reason and a paragraph of advice, so the one status
+    string whose length nobody chose is capped where it is built.
+    """
+    long_error = OSError("x" * 400)
+    text = engine_mod._error_text("Error loading model", long_error)
+    assert text.startswith("Error loading model: xxx")
+    assert len(text) == engine_mod.STATUS_TEXT_LIMIT <= 128
+
+
+def test_a_silent_exception_still_names_its_type(tmp_path):
+    """An exception with an empty message must not report an empty reason."""
+    assert engine_mod._error_text("Error", KeyboardInterrupt()) == \
+        "Error: KeyboardInterrupt"

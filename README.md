@@ -29,7 +29,7 @@ There are two ways to install. **Most people want Option 1.**
 
 | | Who it is for | What you need |
 |---|---|---|
-| **Option 1** | Anyone who just wants to use the app | A browser. Nothing else. |
+| **Option 1** | Anyone who just wants to use the app | A browser, and one line typed into Command Prompt. |
 | **Option 2** | Developers, or anyone modifying the code | Git and a Python 3.14 installation |
 
 Both produce the same application. The published archives are built from the tagged commit they are attached to, so the two routes are equivalent.
@@ -38,31 +38,54 @@ Both produce the same application. The published archives are built from the tag
 
 ### Option 1 — Install the ready-made release *(recommended)*
 
-No Python, no developer tools, no command line.
+One download, one archive, one thing to double-click.
 
-1. Download from the [**Releases page**](https://github.com/kristopherhuber-commits/ptt/releases/latest). There are **two** files:
+1. Download **`ptt_dictate_dist.zip`** (1.67 GiB) from the
+   [**Releases page**](https://github.com/kristopherhuber-commits/ptt/releases/latest).
+   It is the whole application: dictation, the Concierge runtime, and a portable
+   Python environment. Nothing else needs installing on the target computer.
 
-   | File | Size | Needed? |
-   |---|---|---|
-   | **`ptt_dictate_dist.zip`** | ~1.43 GB | **Yes.** The application. |
-   | **`ptt_llama_runtime.zip`** | ~0.61 GB | Only if you want the **Concierge** — the local assistant that explains and changes your settings. Dictation does not use it. |
+2. **Extract it with `tar`, not with Explorer's "Extract All".** Open a
+   Command Prompt in the folder holding the `.zip` and run:
 
-2. Extract them **into the same folder**. Order does not matter; together they
-   produce one tree, with `app\llama\` sitting beside `app\ptt\`.
+   ```bat
+   mkdir ptt_dictate_dist
+   tar -xf ptt_dictate_dist.zip -C ptt_dictate_dist
+   ```
+
+   `tar` is part of Windows 11 — there is nothing to download and nothing to
+   install. This step matters; see the box below.
+
 3. Double-click **`install.bat`** inside the extracted folder.
-4. Click **Yes** on the User Account Control (UAC) prompt. The batch script will automatically self-elevate to Administrator to complete the setup.
+4. Click **Yes** on the User Account Control (UAC) prompt. The batch script
+   self-elevates to Administrator to complete the setup.
 
-> **Why two files?** A GitHub release asset must be under 2 GiB and the whole
-> thing is 2.04 GiB. The split is at the one component the application does not
-> need, so the second download is genuinely optional rather than a package you
-> have to reassemble. If you install without it, the installer says so and
-> dictation works normally; you can add it later by extracting it into the same
-> folder and running `install.bat` again.
-
-The application is distributed as a portable Python environment, so no pre-existing Python installation or library configuration is required on the target computer.
+> [!IMPORTANT]
+> **Why not "Extract All"?** Windows Explorer's built-in extractor loses files
+> from an archive this large, silently. On one reported v3.0 installation it
+> wrote **2,138 of the 8,550 files as the right number of blank bytes** — from a
+> download that was itself perfect. `install.ps1` was one of them, so the visible
+> symptom was PowerShell failing on an empty script and nothing anywhere
+> pointing at the extractor.
+>
+> Since v3.0.1 the installer checks every file against a manifest that ships
+> inside the archive and stops with an explanation rather than installing a
+> half-copied application. `tar` avoids the problem in the first place, and has
+> a second benefit: it does not mark the extracted files as downloaded, which is
+> what makes **Smart App Control** refuse to run `install.bat` at all on
+> machines that have it switched on.
+>
+> If you have already extracted with Explorer, delete the folder and redo it
+> with the two commands above. 7-Zip works too, if you happen to have it; you do
+> not need to install it.
 
 #### What the installer does
 
+* Verify every extracted file against `_internal/manifest.sha256`, which ships
+  inside the archive, and refuse to install a copy that is not intact. About
+  three seconds for the whole 3 GB payload.
+* Clear the "downloaded from the internet" mark from the payload, so Windows
+  does not block components of the installed application.
 * Terminate any running PTT Dictation processes to prevent file locks.
 * Copy the application files to `C:\Users\<Username>\AppData\Local\Programs\ptt_dictate\`.
 * Create a **PTT Dictation** shortcut on the Desktop, pre-configured to **Run as Administrator** (required to type into elevated Windows apps) and styled with the built-in Windows **microphone icon**.
@@ -78,7 +101,9 @@ For developers, or if you pull the repository onto a new computer and want to re
 1. Ensure any running executable is closed (right-click the tray icon and select **Exit**),
    and anything else running out of `.venv`.
 
-   The distribution is **one archive**, `ptt_dictate_dist.zip` (1.67 GiB). Its root
+   The distribution is **one archive**, `ptt_dictate_dist.zip` (1.67 GiB), and
+   the build writes `_internal/manifest.sha256` into it so the installer can
+   verify what was extracted. Its root
    holds exactly one executable — `install.bat` — with `install.ps1` and
    `run_tray.bat` in `_internal\`, because Windows hides known file extensions by
    default and two files both displayed as `install` is a coin toss.

@@ -432,6 +432,21 @@ def test_the_newest_session_is_first_and_the_limit_is_honoured(store):
         ["session 4", "session 3", "session 2"]
 
 
+def test_two_saves_in_one_millisecond_are_two_sessions(tmp_path):
+    """
+    The id was the save time in milliseconds and nothing else, so two saves
+    inside one tick got the same id -- and `save` replaces the entry whose id
+    matches, so the second silently ate the first. Out of reach of a person with
+    a mouse and reliably in reach of anything driving the store in a loop.
+    """
+    store = sessions_mod.SessionStore(str(tmp_path / "s.json"),
+                                      limit_provider=lambda: 20)
+    saved = [store.save(f"session {i}", ROWS)[0] for i in range(6)]
+
+    assert len({s.id for s in saved}) == 6
+    assert len(store.list()) == 6
+
+
 def test_the_limit_is_read_at_every_save_not_captured(tmp_path):
     """
     The same live-re-read discipline the residency timer and the hotkey use:

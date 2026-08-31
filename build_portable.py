@@ -1,6 +1,7 @@
 import fnmatch
 import hashlib
 import os
+import re
 import sys
 import subprocess
 import shutil
@@ -130,6 +131,25 @@ LLAMA_RUNTIME_PATTERNS = ("ggml-cpu-*.dll",)
 #: `LLAMA_RUNTIME_FILES`. 1.67 GiB, with 340 MiB of headroom.
 DISTRIBUTION_ARCHIVE = "ptt_dictate_dist.zip"
 
+#: The payload manifest: one SHA-256 and one archive-relative path per line,
+#: written into the archive and verified by `install.ps1` before it copies a
+#: byte.
+#:
+#: **This exists because the archive is not what arrives.** v3.0 was reported as
+#: a broken installer; the archive was intact, and Windows Explorer's own
+#: "Extract All" had written 2,138 of its 8,550 files as the right number of NUL
+#: bytes. `install.ps1` was one of them, so the failure the user saw was
+#: PowerShell parsing 12,724 zeroes -- "The term '' is not recognized" -- and
+#: nothing anywhere connected that to the extractor. A build cannot prevent
+#: Explorer from doing this. It can hand the installer the means to notice, and
+#: to say which files and what to do instead.
+#:
+#: Verification costs about three seconds: SHA-256 over 2.95 GiB measured at
+#: ~1 GB/s on the reference machine, which is cheaper than the copy that
+#: follows it.
+MANIFEST_PATH = os.path.join("_internal", "manifest.sha256")
+MANIFEST_ARCHIVE_NAME = "_internal/manifest.sha256"
+
 #: GitHub's per-asset limit, checked against the finished archive. Not a
 #: splitter -- a refusal. An archive 40 MB too big is not discovered by building
 #: it; it is discovered at the end of a 2 GB upload, on release day.
@@ -217,6 +237,101 @@ def should_skip(item, root, filename):
     if filename.lower().endswith(".old"):
         return "backup file"
     return None
+
+
+def read_version(path=os.path.join("app", "ptt", "__init__.py")):
+    """
+    The released version, read out of `app/ptt/__init__.py` without importing it.
+
+    An import would mean putting `app/` on `sys.path` from a script that has no
+    other reason to, and would run the package's module-scope code on the build
+    machine. A regular expression over one assignment is the smaller thing.
+    """
+    with open(path, "r", encoding="utf-8") as f:
+        match = re.search(r'^__version__\s*=\s*"([^"]+)"', f.read(), re.M)
+    if not match:
+        raise RuntimeError(f"no __version__ in {path}")
+    return match.group(1)
+
+
+def archive_name(path):
+    """One walked path as the archive spells it: relative, forward slashes."""
+    return path.replace("\\", "/")
+
+
+def payload_files(items, on_skip=None):
+    """
+    Every file the distribution archive contains, in walk order.
+
+    Lifted out of `main`'s zip loop when the manifest arrived, so that the list
+    of files hashed and the list of files packed come from one traversal rule
+    instead of two that have to be kept saying the same thing. A manifest that
+    disagreed with the archive would fail every installation on earth, and it
+    would do it on release day.
+
+    `on_skip(path, reason)` is called for each exclusion, so the packing pass
+    can print what it left out and the hashing pass can stay quiet.
+    """
+    for item in items:
+        if not os.path.exists(item):
+            continue
+        if not os.path.isdir(item):
+            yield item
+            continue
+        for root, dirs, files in os.walk(item):
+            if "__pycache__" in dirs:
+                dirs.remove("__pycache__")
+            if ".pytest_cache" in dirs:
+                dirs.remove(".pytest_cache")
+            for name in list(dirs):
+                reason = should_skip_dir(root, name)
+                if reason:
+                    if on_skip:
+                        on_skip(os.path.join(root, name) + os.sep, reason)
+                    dirs.remove(name)
+            for name in files:
+                reason = should_skip(item, root, name)
+                if reason:
+                    if on_skip:
+                        on_skip(os.path.join(root, name), reason)
+                    continue
+                yield os.path.join(root, name)
+
+
+def write_manifest(path, version, entries):
+    """
+    Write the payload manifest: a commented header, then `<sha256>  <path>`.
+
+    Two spaces between the fields, which is `sha256sum`'s format, so the file is
+    checkable with any of the usual tools as well as by `install.ps1`. Written
+    with LF endings and no BOM: PowerShell's `Get-Content` reads that correctly,
+    and it keeps the file's own hash stable across machines.
+    """
+    with open(path, "w", encoding="utf-8", newline="\n") as f:
+        f.write(f"# PTT Dictation {version} -- payload manifest for "
+                f"{DISTRIBUTION_ARCHIVE}\n")
+        f.write("#\n")
+        f.write("# One line per file: <sha256>  <path>, relative to the folder\n")
+        f.write("# this archive extracts to. install.ps1 checks every one of\n")
+        f.write("# them before it installs anything, because Windows Explorer's\n")
+        f.write("# 'Extract All' has been observed writing whole files as NUL\n")
+        f.write("# bytes from an archive that was itself intact.\n")
+        f.write(f"# {MANIFEST_ARCHIVE_NAME} is absent from its own list.\n")
+        for digest, name in entries:
+            f.write(f"{digest}  {name}\n")
+
+
+def read_manifest(text):
+    """Parse a manifest back into `{path: sha256}`. The installer's half, in Python."""
+    entries = {}
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        digest, _, name = line.partition("  ")
+        if name:
+            entries[name.strip()] = digest.strip()
+    return entries
 
 
 def main():
@@ -358,7 +473,6 @@ def main():
         print(f"Removing old {zip_name}...")
         os.remove(zip_name)
 
-    print("Zipping directories and files...")
     items_to_zip = [
         ".venv",
         "app",
@@ -367,35 +481,31 @@ def main():
         "README.md"
     ]
 
+    # 6a. The payload manifest, written before the archive so that it is in it.
+    #
+    # Its own path is skipped rather than assumed absent: a rebuild runs with
+    # last build's manifest still on disk, and a file that hashed itself would
+    # be wrong in a way nothing downstream could detect.
+    version = read_version()
+    print(f"Hashing the payload for {MANIFEST_PATH} (PTT Dictation {version})...")
+    entries = []
+    for filepath in payload_files(items_to_zip):
+        if os.path.normpath(filepath) == os.path.normpath(MANIFEST_PATH):
+            continue
+        entries.append((file_digest(filepath), archive_name(filepath)))
+    write_manifest(MANIFEST_PATH, version, entries)
+    print(f"  {len(entries)} files hashed, "
+          f"{os.path.getsize(MANIFEST_PATH) / 1024:.0f} KB")
+
+    print("Zipping directories and files...")
     count = 0
     with zipfile.ZipFile(zip_name, 'w', zipfile.ZIP_DEFLATED) as zipf:
-        for item in items_to_zip:
-            if not os.path.exists(item):
-                continue
-            if os.path.isdir(item):
-                print(f"Adding directory: {item} ...")
-                for root, dirs, files in os.walk(item):
-                    if "__pycache__" in dirs:
-                        dirs.remove("__pycache__")
-                    if ".pytest_cache" in dirs:
-                        dirs.remove(".pytest_cache")
-                    for name in list(dirs):
-                        reason = should_skip_dir(root, name)
-                        if reason:
-                            print(f"  Skipping {os.path.join(root, name)}{os.sep} ({reason})...")
-                            dirs.remove(name)
-                    for file in files:
-                        reason = should_skip(item, root, file)
-                        if reason:
-                            print(f"  Skipping {os.path.join(root, file)} ({reason})...")
-                            continue
-                        filepath = os.path.join(root, file)
-                        zipf.write(filepath, filepath)
-                        count += 1
-            else:
-                print(f"Adding file: {item} ...")
-                zipf.write(item, item)
-                count += 1
+        def announce(path, reason):
+            print(f"  Skipping {path} ({reason})...")
+
+        for filepath in payload_files(items_to_zip, on_skip=announce):
+            zipf.write(filepath, filepath)
+            count += 1
 
     # 8. Audit the finished archive. The two checks above are about the source
     # tree; this one is about the artefact that leaves the building, which is
@@ -420,9 +530,26 @@ def main():
     if not any(n.endswith("app/assets/concierge_kb.md") for n in names):
         problems.append("app/assets/concierge_kb.md is not in the archive")
     for required in ("install.bat", "_internal/install.ps1",
-                     "_internal/run_tray.bat"):
+                     "_internal/run_tray.bat", MANIFEST_ARCHIVE_NAME):
         if required not in names:
             problems.append(f"{required} is not in the archive")
+
+    # The manifest is checked against the archive, not against the source tree
+    # it was computed from. Those are the same list twice only while nothing
+    # changes between the two passes, and "only while" is the part that goes
+    # wrong. A manifest that names a file the archive lacks fails every
+    # installation, so it is worth the second read.
+    if MANIFEST_ARCHIVE_NAME in names:
+        with zipfile.ZipFile(zip_name) as zipf:
+            listed = read_manifest(
+                zipf.read(MANIFEST_ARCHIVE_NAME).decode("utf-8"))
+        expected = names - {MANIFEST_ARCHIVE_NAME}
+        for missing in sorted(expected - set(listed))[:5]:
+            problems.append(f"{missing} is in the archive but not the manifest")
+        for extra in sorted(set(listed) - expected)[:5]:
+            problems.append(f"{extra} is in the manifest but not the archive")
+        if MANIFEST_ARCHIVE_NAME in listed:
+            problems.append(f"{MANIFEST_ARCHIVE_NAME} lists itself")
 
     # Exactly one thing in the root may look clickable. Windows hides known
     # extensions by default, so `install.bat` and `install.ps1` side by side
@@ -447,7 +574,8 @@ def main():
     print(f"  {len(names)} entries, {size / 1024 ** 3:.3f} GiB "
           f"({100 * size / MAX_ASSET_BYTES:.0f} % of GitHub's asset limit); "
           f"runtime, licences and knowledge pack present; no weights, no "
-          f"per-launch state; one executable in the root")
+          f"per-launch state; one executable in the root; the manifest "
+          f"describes every other entry")
 
     print(f"\nSuccess! Created ready-to-distribute package: {zip_name}")
     print(f"Total size: {size / (1024*1024):.2f} MB")
