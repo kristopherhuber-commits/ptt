@@ -1,0 +1,42 @@
+[
+  {
+    "heard": "geek night",
+    "typed": "geeknight",
+    "scope": "always"
+  },
+  {
+    "heard": "cmap",
+    "typed": "Seamap",
+    "scope": "always"
+  },
+  {
+    "heard": "c-map",
+    "typed": "Seamap",
+    "scope": "always"
+  },
+  {
+    "heard": "Huber",
+    "typed": "huber",
+    "scope": "always"
+  },
+  {
+    "heard": "Chris",
+    "typed": "kris",
+    "scope": "always"
+  },
+  {
+    "heard": "Christopher",
+    "typed": "kristopher",
+    "scope": "always"
+  },
+  {
+    "heard": "dark lord",
+    "typed": "Darklord",
+    "scope": "always"
+  },
+  {
+    "heard": "night lord",
+    "typed": "Nightlord",
+    "scope": "always"
+  }
+]
