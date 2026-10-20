@@ -95,7 +95,7 @@ These are the complete settings this application has. There are no others. A nam
 - **Default:** `[]`
 - **The Concierge may change it:** no
 - **What it does:** Replacement rules applied to the transcript before it is pasted: whole-word, case-insensitive, literal.
-- **When to change it:** Edited on the Vocabulary tab. Editing rules is out of scope for the Concierge in v3.0, which is why this key is not in its write allowlist.
+- **When to change it:** Edited on the Vocabulary tab. When ~/agent-configs/vocabulary.json exists it is the only store of the rules and the tab edits that file, which is re-read whenever it changes; config.json then holds the fallback copy. Editing rules is out of scope for the Concierge, which is why this key is not in its write allowlist.
 - **What can go wrong:** One pass, so a replacement is never itself replaced; the longest phrase wins where two could match; ties go in list order. An unrecognised scope drops the rule rather than widening it.
 
 ### `concierge.opt_in`
