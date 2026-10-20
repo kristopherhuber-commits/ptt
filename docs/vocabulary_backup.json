@@ -38,5 +38,85 @@
     "heard": "night lord",
     "typed": "Nightlord",
     "scope": "always"
+  },
+  {
+    "heard": "geek night nas",
+    "typed": "GeeknightNAS",
+    "scope": "always"
+  },
+  {
+    "heard": "CloudScience",
+    "typed": "Claude Science",
+    "scope": "always"
+  },
+  {
+    "heard": "gun link",
+    "typed": "Gunlink",
+    "scope": "always"
+  },
+  {
+    "heard": "C-link",
+    "typed": "Sealink",
+    "scope": "always"
+  },
+  {
+    "heard": "clink",
+    "typed": "Sealink",
+    "scope": "always"
+  },
+  {
+    "heard": "gooey",
+    "typed": "GUI",
+    "scope": "always"
+  },
+  {
+    "heard": "sea link",
+    "typed": "Sealink",
+    "scope": "always"
+  },
+  {
+    "heard": "clod",
+    "typed": "Claude",
+    "scope": "always"
+  },
+  {
+    "heard": "json-l",
+    "typed": "jsonl",
+    "scope": "always"
+  },
+  {
+    "heard": "new phrase",
+    "typed": "replacement",
+    "scope": "always"
+  },
+  {
+    "heard": "eye tar",
+    "typed": "ITAR",
+    "scope": "always"
+  },
+  {
+    "heard": "cloud code",
+    "typed": "Claude Code",
+    "scope": "always"
+  },
+  {
+    "heard": "clawed code",
+    "typed": "Claude Code",
+    "scope": "always"
+  },
+  {
+    "heard": "Christopher",
+    "typed": "Kristopher",
+    "scope": "always"
+  },
+  {
+    "heard": "Clawed",
+    "typed": "Claude",
+    "scope": "always"
+  },
+  {
+    "heard": "Laura",
+    "typed": "LoRA",
+    "scope": "always"
   }
 ]
