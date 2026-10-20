@@ -43,6 +43,19 @@ def log_lines(tmp_path, monkeypatch):
     return read
 
 
+@pytest.fixture(autouse=True)
+def no_shared_vocabulary(tmp_path, monkeypatch):
+    """
+    Point the shared vocabulary file (FR-10) at a path that does not exist.
+
+    `config.load()` with no arguments reads `~/agent-configs/vocabulary.json`,
+    which on the developer's machine is a real file full of real rules. A test
+    that reached it would depend on that machine's state, and one that wrote
+    through `Settings.set` would edit it.
+    """
+    monkeypatch.setenv("PTT_VOCABULARY_FILE", str(tmp_path / "no-shared-vocabulary.json"))
+
+
 @pytest.fixture
 def config_file(tmp_path):
     """

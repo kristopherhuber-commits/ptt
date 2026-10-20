@@ -1,5 +1,9 @@
 # Vocabulary backup
 
+> **Since v3.1 the rules normally live in `%USERPROFILE%\agent-configs\vocabulary.json`**
+> (`FR-10`, `design.md` §7.2), which is in git and survives a reinstall by itself. This
+> backup and the restore below matter only on a machine without that file.
+
 The replacement rules from the Vocabulary tab, kept in the repository so they
 survive the one thing that will otherwise lose them: `app/config.json` is in
 `.gitignore` (it is per-machine runtime state, and `build_portable.py` excludes

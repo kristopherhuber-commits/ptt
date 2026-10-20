@@ -234,6 +234,71 @@ def _parse_vocabulary(raw, note="config.json", strict=False):
     return tuple(kept), None
 
 
+# -- the shared vocabulary file (FR-10) ---------------------------------------
+#
+# `paths.shared_vocabulary_path()`, a JSON object outside the application:
+#
+#     {"version": 1,
+#      "always":  [{"heard": "...", "typed": "...", "scope": "always"}, ...],
+#      "context": [{"heard": "mine", "means": "MIND"}, ...]}
+#
+# When it exists it is the **only** store of the rules: the Vocabulary tab reads
+# and writes it, and config.json's `vocabulary` key becomes the fallback copy
+# used when the file is absent. PTT reads `always` and nothing else. Every other
+# key -- `context` above all, which is for Claude Code and is never applied,
+# because a mis-hearing that is also a real word cannot be replaced every time
+# -- is preserved verbatim when the tab writes the file back.
+
+#: Serialises writers of the shared file, as `_save_lock` does for config.json.
+_vocabulary_lock = threading.Lock()
+
+
+def _vocabulary_signature(path):
+    """`(mtime_ns, size)` of the shared file, or None when it is not there."""
+    try:
+        st = os.stat(path)
+    except OSError:
+        return None
+    return (st.st_mtime_ns, st.st_size)
+
+
+def _read_vocabulary_document(path):
+    """
+    The shared file as `(document, defect)`. Never raises and never logs.
+
+    A file that exists and cannot be used is a defect, not an absence: it is
+    most often a hand edit or a git merge in progress, and treating it as "no
+    file" would either drop every rule or let the next tab edit overwrite what
+    is being fixed.
+    """
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            document = json.load(f)
+    except Exception as e:
+        return None, f"could not be read ({e})"
+    if not isinstance(document, dict):
+        return None, f"is a {type(document).__name__}, not an object"
+    if not isinstance(document.get("always", []), list):
+        return None, "has an 'always' that is not a list"
+    return document, None
+
+
+def read_shared_vocabulary(path):
+    """
+    The `always` rules of the shared file, or None when there are none to use.
+
+    Rules are validated by the same `_parse_vocabulary` config.json's are, so a
+    malformed row is dropped with its own log line and the rest survive.
+    """
+    document, defect = _read_vocabulary_document(path)
+    if defect:
+        log_debug(f"{path} {defect}; keeping the rules already loaded.")
+        return None
+    rules, _ = _parse_vocabulary(document.get("always", []),
+                                 note=os.path.basename(path))
+    return rules
+
+
 #: What `concierge.opt_in` may say. Three values, not two: `enabled` alone
 #: cannot distinguish "never asked" from "said no" from "said yes, currently
 #: switched off", and a pre-v3 config.json upgraded in place must arrive
@@ -378,9 +443,11 @@ FIELDS = {
         agent_writable=False, fallback_note="ignoring it",
         does="Replacement rules applied to the transcript before it is pasted: "
              "whole-word, case-insensitive, literal.",
-        when="Edited on the Vocabulary tab. Editing rules is out of scope for "
-             "the Concierge in v3.0, which is why this key is not in its write "
-             "allowlist.",
+        when="Edited on the Vocabulary tab. When ~/agent-configs/vocabulary.json "
+             "exists it is the only store of the rules and the tab edits that "
+             "file, which is re-read whenever it changes; config.json then holds "
+             "the fallback copy. Editing rules is out of scope for the Concierge, "
+             "which is why this key is not in its write allowlist.",
         risk="One pass, so a replacement is never itself replaced; the longest "
              "phrase wins where two could match; ties go in list order. An "
              "unrecognised scope drops the rule rather than widening it.",
@@ -587,6 +654,16 @@ class Settings:
     extra: dict = field(default_factory=dict, repr=False)
     path: str = field(default_factory=paths.config_path, repr=False)
 
+    #: The shared vocabulary file (FR-10), or None for config.json only. Not
+    #: persisted: `load()` sets it, and an explicit config path leaves it None
+    #: so that tests and harnesses never read the user's real file.
+    vocabulary_path: str | None = field(default=None, repr=False)
+
+    #: `_vocabulary_signature` of the file as last read or written, so
+    #: `refresh_vocabulary` costs one `stat` when nothing has changed. `()`
+    #: means never checked; None means checked and not there.
+    vocabulary_signature: tuple | None = field(default=(), repr=False)
+
     # -- reading and writing one field ---------------------------------------
 
     def get(self, key):
@@ -636,11 +713,92 @@ class Settings:
             log_debug(f"Rejected write: {reason}.")
             return False, reason
 
+        if key == "vocabulary" and self.shared_vocabulary_active():
+            # The shared file first: if it cannot be written, nothing changes,
+            # rather than config.json and the file disagreeing about the rules.
+            reason = self._write_shared_vocabulary(checked)
+            if reason:
+                log_debug(f"Rejected write: {reason}.")
+                return False, reason
+
         before = self.get(key)
         self._assign(key, checked)
         self.save()
         log_debug(f"Set {key}: {before!r} -> {checked!r}")
         return True, None
+
+    # -- the shared vocabulary file (FR-10) -----------------------------------
+
+    def shared_vocabulary_active(self):
+        """Whether the rules live in the shared file rather than config.json."""
+        return self.vocabulary_path is not None and os.path.exists(self.vocabulary_path)
+
+    def refresh_vocabulary(self, persist=True):
+        """
+        Re-read the shared file if it has changed. Returns True when the rules
+        were rebound. Never raises.
+
+        Called before every transcription and by the Vocabulary tab while it is
+        open, so an edit made anywhere -- by hand, by Claude Code, by a git pull
+        -- applies to the next thing said. One `stat` when nothing changed.
+
+        A file that disappears keeps the rules already loaded: config.json holds
+        the same copy, and a `git checkout` that briefly removes the file must
+        not empty the vocabulary. `persist` saves that copy to config.json; it is
+        False only from `load()`, which never rewrites the file it reads.
+        """
+        path = self.vocabulary_path
+        if path is None:
+            return False
+        signature = _vocabulary_signature(path)
+        if signature == self.vocabulary_signature:
+            return False
+        self.vocabulary_signature = signature
+        if signature is None:
+            log_debug(f"{path} not found; using the {len(self.vocabulary)} "
+                      f"rules in config.json.")
+            return False
+
+        rules = read_shared_vocabulary(path)
+        if rules is None or rules == self.vocabulary:
+            return False
+        self.vocabulary = rules
+        log_debug(f"Read the shared vocabulary from {path}: {len(rules)} rules.")
+        if persist:
+            self.save()
+        return True
+
+    def _write_shared_vocabulary(self, rules):
+        """
+        Write `rules` into the shared file's `always` list. Returns None on
+        success, or the reason it was refused.
+
+        Atomic, like `save()`. Every key other than `always` is carried over
+        untouched, so the tab never erases the `context` list. A file that
+        cannot be parsed is refused rather than overwritten, because it is most
+        likely being edited.
+        """
+        path = self.vocabulary_path
+        with _vocabulary_lock:
+            document, defect = _read_vocabulary_document(path)
+            if defect:
+                return f"{os.path.basename(path)} {defect}; fix it before editing rules"
+            document["always"] = vocabulary_mod.to_json(rules)
+            tmp = path + ".tmp"
+            try:
+                with open(tmp, "w", encoding="utf-8") as f:
+                    json.dump(document, f, indent=2, ensure_ascii=False)
+                    f.write("\n")
+                os.replace(tmp, path)
+            except Exception as e:
+                try:
+                    os.remove(tmp)
+                except OSError:
+                    pass
+                return f"could not write {os.path.basename(path)} ({e})"
+            self.vocabulary_signature = _vocabulary_signature(path)
+        log_debug(f"Wrote {len(rules)} rules to {path}.")
+        return None
 
     def override(self, key, value):
         """
@@ -752,7 +910,7 @@ class Settings:
             log_debug(f"Failed to save config.json: {str(e)}")
 
 
-def load(path=None):
+def load(path=None, vocabulary_path=None):
     """
     Read config.json, falling back to defaults field by field. Never raises.
 
@@ -760,10 +918,25 @@ def load(path=None):
     rule comes from `FIELDS` -- the same declaration `Settings.set` validates
     writes against, so a value the file may hold and a value the Concierge may
     write can never mean different things.
+
+    Then the shared vocabulary file (FR-10), whose rules replace config.json's
+    when it exists. Its location defaults only when `path` does too: an
+    explicit config path is a test or a harness, and must not pick up the
+    user's real file by accident.
     """
+    if vocabulary_path is None and path is None:
+        vocabulary_path = paths.shared_vocabulary_path()
     if path is None:
         path = paths.config_path()
 
+    s = _load_config(path)
+    s.vocabulary_path = vocabulary_path
+    s.refresh_vocabulary(persist=False)
+    return s
+
+
+def _load_config(path):
+    """`load()`'s config.json half."""
     if not os.path.exists(path):
         s = Settings(path=path)
         log_debug(

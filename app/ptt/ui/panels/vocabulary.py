@@ -27,6 +27,11 @@ than it was written is the wrong direction.
 The preview line is the only way to see what a rule does without speaking into
 the microphone, which is why it is here: the substitution is otherwise invisible
 until it has already altered something the user dictated.
+
+**Where the rules live is stated, not implied** (FR-10). When the shared
+vocabulary file exists the table edits it, and the panel re-reads it every
+second while it is visible, so a rule Claude Code adds to the file appears here
+without reopening the window.
 """
 
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt, QTimer
@@ -47,6 +52,9 @@ NEW_RULE = ("new phrase", "replacement")
 PREVIEW_HINT = "Type a sentence to see what would be pasted."
 
 ROW_HEIGHT_PX = 30
+
+#: How often the open panel checks the shared file for edits made elsewhere.
+WATCH_INTERVAL_MS = 1000
 
 
 class VocabularyTableModel(QAbstractTableModel):
@@ -156,6 +164,13 @@ class VocabularyPanel(InstantApplyPanel):
         blurb.setWordWrap(True)
         box.addWidget(heading)
         box.addWidget(blurb)
+        box.addSpacing(8)
+
+        self._source = QLabel()
+        self._source.setObjectName("panelNote")
+        self._source.setWordWrap(True)
+        self._source.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        box.addWidget(self._source)
         box.addSpacing(14)
 
         box.addWidget(self._build_table())
@@ -177,6 +192,10 @@ class VocabularyPanel(InstantApplyPanel):
         note.setWordWrap(True)
         box.addWidget(note)
         box.addStretch(1)
+
+        self._watch = QTimer(self)
+        self._watch.setInterval(WATCH_INTERVAL_MS)
+        self._watch.timeout.connect(self._check_shared_file)
 
         self.refresh()
 
@@ -250,6 +269,29 @@ class VocabularyPanel(InstantApplyPanel):
         """Re-read the rules from the settings object; see the base class."""
         self._model.set_rules(self._settings.vocabulary)
         self._update_preview()
+        self._source.setText(self._source_text())
+
+    def _source_text(self):
+        path = self._settings.vocabulary_path
+        if self._settings.shared_vocabulary_active():
+            return (f"Stored in {path}, shared through agent-configs. Edits made "
+                    f"there, by hand or by Claude Code, appear here within a second.")
+        if path:
+            return (f"Stored in config.json. Create {path} to share these rules "
+                    f"across machines.")
+        return "Stored in config.json."
+
+    def _check_shared_file(self):
+        """
+        Pick up an edit made to the shared file outside this window.
+
+        Skipped while a cell is being edited: resetting the model under an open
+        editor discards what is being typed. The next tick catches up.
+        """
+        if self._table.state() == QAbstractItemView.State.EditingState:
+            return
+        if self._settings.refresh_vocabulary():
+            self.refresh()
 
     def _commit(self, rules):
         """
@@ -334,4 +376,10 @@ class VocabularyPanel(InstantApplyPanel):
 
     def showEvent(self, event):
         super().showEvent(event)
+        self._settings.refresh_vocabulary()
         self.refresh()
+        self._watch.start()
+
+    def hideEvent(self, event):
+        super().hideEvent(event)
+        self._watch.stop()

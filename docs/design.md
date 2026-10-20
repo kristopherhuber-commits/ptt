@@ -461,6 +461,45 @@ reason: issue #12 is the recorded case of a derived table acquiring a private co
 drifting until a GUI control made the defect reachable. The mutation check that keeps it
 honest is giving one field a private rule and proving a test fails.
 
+### 7.2 The shared vocabulary file (`FR-10`)
+
+*Added for v3.1.* Whisper's mistakes are noticed far more often by Claude Code, reading
+the dictated text, than by the user at the Vocabulary tab. So the rules can live in a
+file both of them edit, in the `agent-configs` git repo that is already kept in step on
+every machine: `~/agent-configs/vocabulary.json` (`paths.shared_vocabulary_path()`,
+overridable with `PTT_VOCABULARY_FILE`).
+
+```json
+{
+  "version": 1,
+  "always":  [{ "heard": "clogged code", "typed": "Claude Code", "scope": "always" }],
+  "context": [{ "heard": "mine", "means": "MIND" }]
+}
+```
+
+- **One store, not two.** When the file exists, `load()` takes the rules from its
+  `always` list, and `Settings.set("vocabulary", …)` writes them there **before**
+  config.json — a write the file refuses changes nothing. config.json's `vocabulary` key
+  is kept as the fallback copy, used only when the file is absent.
+- **PTT reads `always` and nothing else.** `context` holds mis-hearings that are also real
+  words ("mine" for MIND), which a replace-every-time rule would wreck; it is for Claude
+  Code. Every key other than `always` is carried over verbatim when the tab writes.
+- **Re-read when it changes.** `Settings.refresh_vocabulary()` compares `(mtime_ns, size)`
+  and re-reads only on a difference, so it costs one `stat`. The engine calls it before
+  every transcription; the Vocabulary tab calls it once a second while visible, skipping a
+  tick while a cell is being edited. A change it picks up is saved to config.json as the
+  new fallback copy — except from `load()`, which never rewrites the file it reads (`V-CF-03`).
+- **Broken is not absent.** A file that exists and will not parse is most likely being
+  edited, or mid-merge. Its rules are kept, the reason is logged, and tab writes are
+  refused rather than overwriting it. A file that disappears — a `git checkout` can do
+  that briefly — also keeps the rules already loaded.
+- **Atomic and serialised,** like `save()`: a temp file and `os.replace`, under its own lock.
+- **An explicit config path never reads the real file.** `load(path)` defaults the
+  vocabulary location only when `path` also defaulted, and the suite's autouse fixture
+  points `PTT_VOCABULARY_FILE` at a path that does not exist.
+- **Not synced by PTT.** A tab edit leaves `agent-configs` with an uncommitted change; it
+  reaches the other machine only once it is committed and pushed there.
+
 ---
 
 ## 8. Testability

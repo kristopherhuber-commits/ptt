@@ -37,6 +37,7 @@ the transcribed text appears at the cursor in whatever application has focus.
 | `FR-7` | The tray icon distinguishes four states at a glance: loading, idle/ready, recording, transcribing. |
 | `FR-8` | Preferences persist in a `config.json` next to the application. |
 | `FR-9` | The application exits fully on request, leaving no background process behind. **(retro — issue #8)** |
+| `FR-10` | When the shared vocabulary file `~/agent-configs/vocabulary.json` exists, it is the only store of the replacement rules: the Vocabulary tab reads and writes it, and an edit made to it outside the application applies to the next dictation without a restart. When it does not exist, the rules in `config.json` are used. A broken or missing file never empties the vocabulary. *(Added in v3.1. The file is shared across the user's machines through the `agent-configs` git repo, and Claude Code adds rules to it as it notices mis-transcriptions.)* |
 
 ---
 

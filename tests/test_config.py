@@ -516,7 +516,9 @@ def test_every_settings_field_has_a_fields_entry():
     declared = set(config.FIELDS)
     on_object = set()
     for name in config.Settings.__dataclass_fields__:
-        if name in ("extra", "path"):
+        # Where the files are and what was last read from them: runtime state,
+        # not settings, and none of it is written to config.json.
+        if name in ("extra", "path", "vocabulary_path", "vocabulary_signature"):
             continue
         if name == "concierge":
             on_object |= {

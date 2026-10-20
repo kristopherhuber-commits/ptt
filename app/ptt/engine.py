@@ -476,7 +476,10 @@ class Engine:
                             # The vocabulary is re-read here, on the same
                             # principle as the chord: the Vocabulary panel's
                             # edits apply to the next thing said, with no
-                            # reload and no restart.
+                            # reload and no restart. The shared file (FR-10)
+                            # is checked first, so an edit made outside the
+                            # application applies here too.
+                            self._settings.refresh_vocabulary()
                             text = transcribe.transcribe_audio(
                                 self._model, samples, self._settings.vocabulary)
                             t1 = time.time()

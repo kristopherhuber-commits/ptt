@@ -35,6 +35,22 @@ def config_path():
     return os.path.join(APP_DIR, "config.json")
 
 
+def shared_vocabulary_path():
+    """
+    The shared vocabulary file (FR-10): `~/agent-configs/vocabulary.json`.
+
+    Outside `APP_DIR` on purpose. `agent-configs` is a git clone kept in step
+    on every machine the user works on, and Claude Code edits the same file when
+    it notices a mis-transcription -- so a rule added anywhere reaches every
+    installation without a reinstall erasing it. `PTT_VOCABULARY_FILE`
+    overrides the location, which is how a harness points it somewhere else.
+    """
+    override = os.environ.get("PTT_VOCABULARY_FILE")
+    if override:
+        return override
+    return os.path.join(os.path.expanduser("~"), "agent-configs", "vocabulary.json")
+
+
 def debug_log_path():
     """Absolute path of the current session's log (OBS-4)."""
     return os.path.join(APP_DIR, "debug_log.txt")

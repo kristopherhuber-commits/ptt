@@ -185,7 +185,7 @@ privileges" instead of using the Startup folder, which is a change to
   | **Hotkey** | A full keyboard diagram. Click a key to bind it; only keys that type nothing on their own can be bound. Every key you press shades as you press it. A compatibility panel warns about chords that will interfere with ordinary typing. |
   | **Model** | The Whisper size tiers, and the GPU/CPU choice. `Measure on this machine` times one transcription of a bundled 30-second clip. |
   | **Audio** | The microphone picker, a live level meter, and three recording-behaviour switches. |
-  | **Vocabulary** | Replacement rules applied to the transcript before it is pasted — for names and jargon the model mishears. |
+  | **Vocabulary** | Replacement rules applied to the transcript before it is pasted — for names and jargon the model mishears. If `%USERPROFILE%\agent-configs\vocabulary.json` exists, the rules live there instead of in `config.json`, are shared across machines through that repo, and are re-read whenever the file changes. |
   | **Advanced** | The engine's tuning constants, read live from the modules that own them. A readout, not a form. |
   | **Diagnostics** | CUDA state, median latency, where the last paste went, and the tail of `debug_log.txt`. |
 * **Persistence**: The application creates a local `config.json` file in its directory to remember your CPU/GPU preference, hotkey and model across restarts. Settings it does not recognise are preserved, so a newer build's config survives a rollback.
