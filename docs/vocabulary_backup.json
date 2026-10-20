@@ -25,11 +25,6 @@
     "scope": "always"
   },
   {
-    "heard": "Christopher",
-    "typed": "kristopher",
-    "scope": "always"
-  },
-  {
     "heard": "dark lord",
     "typed": "Darklord",
     "scope": "always"
@@ -85,11 +80,6 @@
     "scope": "always"
   },
   {
-    "heard": "new phrase",
-    "typed": "replacement",
-    "scope": "always"
-  },
-  {
     "heard": "eye tar",
     "typed": "ITAR",
     "scope": "always"
@@ -117,6 +107,71 @@
   {
     "heard": "Laura",
     "typed": "LoRA",
+    "scope": "always"
+  },
+  {
+    "heard": "clogged code",
+    "typed": "Claude Code",
+    "scope": "always"
+  },
+  {
+    "heard": "Claude Cote",
+    "typed": "Claude Code",
+    "scope": "always"
+  },
+  {
+    "heard": "Cloud Design",
+    "typed": "Claude Design",
+    "scope": "always"
+  },
+  {
+    "heard": "Mine Technology",
+    "typed": "MIND Technology",
+    "scope": "always"
+  },
+  {
+    "heard": "Lama server",
+    "typed": "llama-server",
+    "scope": "always"
+  },
+  {
+    "heard": "Ader",
+    "typed": "Aider",
+    "scope": "always"
+  },
+  {
+    "heard": "QN",
+    "typed": "Qwen",
+    "scope": "always"
+  },
+  {
+    "heard": "Veet",
+    "typed": "Viet",
+    "scope": "always"
+  },
+  {
+    "heard": "bouy",
+    "typed": "buoy",
+    "scope": "always"
+  },
+  {
+    "heard": "BOE",
+    "typed": "buoy",
+    "scope": "always"
+  },
+  {
+    "heard": "search protector",
+    "typed": "surge protector",
+    "scope": "always"
+  },
+  {
+    "heard": "Gavia",
+    "typed": "Gaggia",
+    "scope": "always"
+  },
+  {
+    "heard": "whoosh whoosh",
+    "typed": "Wush Wush",
     "scope": "always"
   }
 ]
