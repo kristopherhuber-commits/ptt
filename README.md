@@ -29,7 +29,7 @@ There are two ways to install. **Most people want Option 1.**
 
 | | Who it is for | What you need |
 |---|---|---|
-| **Option 1** | Anyone who just wants to use the app | A browser, and one line typed into Command Prompt. |
+| **Option 1** | Anyone who just wants to use the app | A browser, and three lines typed into a terminal. |
 | **Option 2** | Developers, or anyone modifying the code | Git and a Python 3.14 installation |
 
 Both produce the same application. The published archives are built from the tagged commit they are attached to, so the two routes are equivalent.
@@ -46,19 +46,28 @@ One download, one archive, one thing to double-click.
    Python environment. Nothing else needs installing on the target computer.
 
 2. **Extract it with `tar`, not with Explorer's "Extract All".** Open a
-   Command Prompt in the folder holding the `.zip` and run:
+   terminal, go to the folder you downloaded it to (usually `cd ~\Downloads`),
+   and run:
 
-   ```bat
+   ```powershell
    mkdir ptt_dictate_dist
    tar -xf ptt_dictate_dist.zip -C ptt_dictate_dist
    ```
 
-   `tar` is part of Windows 11 — there is nothing to download and nothing to
-   install. This step matters; see the box below.
+   The folder has to be made first: the archive has no top-level folder of its
+   own. `tar` is part of Windows 11 — there is nothing to download and nothing
+   to install. This step matters; see the box below.
 
-3. Double-click **`install.bat`** inside the extracted folder.
+3. Start the install:
+
+   ```powershell
+   ptt_dictate_dist\install.bat
+   ```
+
 4. Click **Yes** on the User Account Control (UAC) prompt. The batch script
    self-elevates to Administrator to complete the setup.
+5. Once it finishes, you can delete `ptt_dictate_dist.zip` and the
+   `ptt_dictate_dist` folder: the installer copies everything it needs.
 
 > [!IMPORTANT]
 > **Why not "Extract All"?** Windows Explorer's built-in extractor loses files
@@ -90,6 +99,8 @@ One download, one archive, one thing to double-click.
 * Copy the application files to `C:\Users\<Username>\AppData\Local\Programs\ptt_dictate\`.
 * Create a **PTT Dictation** shortcut on the Desktop, pre-configured to **Run as Administrator** (required to type into elevated Windows apps) and styled with the built-in Windows **microphone icon**.
 * Create a **PTT Dictation** shortcut in the Windows Startup folder. **This does not currently start the application at log-in** — see [Known limitation](#known-limitation-it-does-not-start-itself-after-a-reboot) below.
+* Keep `config.json` and the downloaded models across an upgrade. If `config.json` cannot be set aside — almost always because a running copy still has it open — the installer stops with nothing changed rather than installing over it.
+* List **PTT Dictation** in **Settings > Apps > Installed apps** (since v3.2.0), with an Uninstall button. See [3.3 Uninstalling](#33-uninstalling).
 * Relaunch the application immediately.
 
 ### Option 2 — Build it yourself from source
@@ -186,7 +197,7 @@ privileges" instead of using the Startup folder, which is a change to
   | **Model** | The Whisper size tiers, and the GPU/CPU choice. `Measure on this machine` times one transcription of a bundled 30-second clip. |
   | **Audio** | The microphone picker, a live level meter, and three recording-behaviour switches. |
   | **Vocabulary** | Replacement rules applied to the transcript before it is pasted — for names and jargon the model mishears. If `%USERPROFILE%\agent-configs\vocabulary.json` exists, the rules live there instead of in `config.json`, are shared across machines through that repo, and are re-read whenever the file changes. |
-  | **Advanced** | The engine's tuning constants, read live from the modules that own them. A readout, not a form. |
+  | **Advanced** | The engine's tuning constants, read live from the modules that own them. A readout, not a form — plus the **Uninstall PTT Dictation…** button. |
   | **Diagnostics** | CUDA state, median latency, where the last paste went, and the tail of `debug_log.txt`. |
 * **Persistence**: The application creates a local `config.json` file in its directory to remember your CPU/GPU preference, hotkey and model across restarts. Settings it does not recognise are preserved, so a newer build's config survives a rollback.
 * **Changing the hotkey**: Open **Settings…** from the tray menu and click a key on the **Hotkey** tab's keyboard. It applies immediately — there is no OK button and no restart. Every key you press shades on the diagram as you press it, so you can see the app is reading your keyboard.
@@ -202,6 +213,25 @@ privileges" instead of using the Startup folder, which is a change to
   Two cautions when choosing your own, both learned the hard way (see [docs/development_history.md](docs/development_history.md)): keys that produce a **character or scroll** (`space`) leak into the focused window while you hold them, and chords containing **`alt`** activate the target window's menu bar on release, which steals keyboard focus and silently discards the paste. The app now disarms the Alt case automatically, but `Alt+Shift` and `Ctrl+Shift` remain Windows' input-language and keyboard-layout switches when a second layout is installed. The Hotkey tab shows these warnings for whatever chord you pick, so you no longer have to remember them.
 
 * **Changing the model**: The **Model** tab lists the Whisper size tiers and switches between them immediately, reloading the engine. `Measure on this machine` times one transcription of a bundled 30-second clip so the latency column is a figure from your hardware rather than a published number for someone else's. Downloading and deleting models are not implemented yet; selecting a model that is not on disk fetches it as part of loading it.
+
+### 3.3 Uninstalling
+
+Since v3.2.0, two ways, and both run the same uninstaller
+(`_internal\uninstall.ps1` in the installation):
+
+* **In PTT:** open it from the Desktop shortcut, go to the **Advanced** tab and
+  click **Uninstall PTT Dictation…**. It asks once, PTT closes, and a window
+  shows the progress.
+* **In Windows:** **Settings > Apps > Installed apps**, find **PTT Dictation**,
+  and click **Uninstall**. It asks for administrator permission, because only an
+  elevated process can stop the running app.
+
+It removes the installation folder (the app, `config.json`, the Concierge's
+model), the Whisper models in the Hugging Face cache — including their files in
+the cache's shared `blobs` folder, which v3.2.0 missed — both shortcuts, and the
+Installed apps entry. It keeps `%USERPROFILE%\agent-configs\vocabulary.json`,
+which belongs to that repo. An installation older than v3.2.0 has no
+uninstaller: install the current release over it first.
 
 ---
 

@@ -419,6 +419,34 @@ When packaging using PyInstaller (`--onedir` mode):
 * **Fix:** `_fresh_id` counts forward from the clock until the id is unused, which keeps the ordering and the format and needs no randomness. The entries are read once and used for both the collision check and the insert.
 * **Note:** out of reach of a person with a mouse and reliably in reach of anything driving the store in a loop, which is why it was a failing test rather than a bug report. It shipped in v3.0 with the test failing.
 
+### 62. Install Steps That Assumed You Were Already In The Folder (v3.1.0 release notes)
+* **Symptom:** following the v3.1.0 release notes, `tar -xf ptt_dictate_dist.zip -C ptt_dictate_dist` failed twice: `could not chdir to 'ptt_dictate_dist'` from inside the new folder, then `Failed to open 'ptt_dictate_dist.zip'` from its parent, which did not hold the zip.
+* **Cause:** the notes gave two commands in a `bat` block and never said where to run them. They only work from the folder holding the zip, and the `mkdir` is not optional: the archive has no top-level folder, so `tar -xf` without `-C` scatters `.venv`, `app`, `_internal` and `install.bat` into wherever the terminal happens to be.
+* **Fix:** the v3.1.0 notes were rewritten, and every release since carries the same four steps: download; `cd ~\Downloads`, then `mkdir` and `tar -C`; type `ptt_dictate_dist\install.bat` (unquoted — a quoted path on its own line in PowerShell is echoed, not run); and delete the zip and folder afterwards, with the install location named. README §2 follows them.
+* **Note:** `tar` is Windows' own (`C:\Windows\System32\tar.exe`, bsdtar), not PowerShell's, so the commands run in either shell — except the one-line `mkdir …; tar …` form in the release notes, whose `;` is PowerShell-only.
+
+### 63. An Upgrade That Could Still Lose config.json (v3.1.1)
+* **Symptom:** none reported; found in the preserve step of `install.ps1`. A `config.json` that could not be moved aside printed `could not set aside config.json; it will be lost`, and the next lines deleted the old installation.
+* **Cause:** `Move-Item` is a rename, and a rename fails on a file another process holds open unless that handle shares delete — so the app still running (the `Stop-Process` before it is best-effort) was enough to lose every setting and the vocabulary rules. `app\models` was also moved first, so an abort after it would have stranded 6.9 GB in `%TEMP%`.
+* **Fix:** the small files go first; a failed move falls back to a copy, which asks less of the open handle; and if `config.json` still cannot be kept the installer stops, with nothing yet moved or deleted, and says to quit PTT from the tray. Two tests read `$PreservedFiles` and `$DisposableFiles` out of the script itself and check they partition `build_portable.RUNTIME_ARTIFACTS` exactly (`test_concierge_layering.py`).
+
+### 64. No Way Out (v3.2.0)
+* **Symptom:** PTT did not appear in Add/Remove Programs, and there was no other way to remove it short of knowing every path it writes to — 9.81 GB in the installation and ~5.8 GB of Whisper models in the Hugging Face cache on the reference machine.
+* **Cause:** `install.ps1` never registered the application and shipped no uninstaller. Windows removes nothing by itself: an Installed apps entry is a name and a command line, and its Uninstall button runs that command.
+* **Fix:** `_internal/uninstall.ps1` removes the installation, the `models--*--faster-whisper-*` folders in the cache, both shortcuts and the Installed apps entry, and keeps `~\agent-configs\vocabulary.json`. Two ways in: `install.ps1` registers it under `HKCU\…\Uninstall\PTTDictation`, and the Advanced tab's **Uninstall PTT Dictation…** asks once, starts it with `-Confirmed`, and quits. It stops PTT by executable path rather than by name, deletes itself last so a removal that stops partway can be retried from the same entry, and elevates when started from Settings, because only an elevated process can stop the elevated app. The button is shown only in the installed copy, since anywhere else it would remove a different one. Its path parameters exist so the script can be run against a scratch tree.
+* **Note:** a right-click Uninstall on the desktop shortcut was considered and declined: context-menu verbs are registered per file type, so it would appear on every shortcut on the machine.
+
+### 65. One Running Process Counted As None (v3.2.0, caught before release)
+* **Symptom:** run against a scratch tree with a stand-in `ptt_dictate.exe` running from it, the uninstaller never printed "Waiting for PTT Dictation to close", left the process alive, and reported the folder locked.
+* **Cause:** `Get-PttProcesses` returns `@(…)`, but a function's output is unrolled, so one match arrives as a bare `CimInstance` — and on Windows PowerShell 5.1, which is what `powershell.exe` is, a lone `CimInstance` has no `.Count`. `$null -gt 0` is false. The same probe run inline, without the function, found and stopped the process, which is what isolated it.
+* **Fix:** every call is wrapped in `@()` at the call site, with a comment saying why.
+
+### 66. The Weights Were Not In The Folders (v3.2.1)
+* **Symptom:** after a real uninstall of v3.2.0 from the Advanced tab, every PTT path was gone except **704,299,713 bytes** in `%USERPROFILE%\.cache\huggingface\hub\blobs` — three files dated 2026-10-03.
+* **Cause:** huggingface_hub 1.x (1.18.0 ships in `.venv`) keeps each file's contents once per cache in `hub\blobs\<xx>\<sha256>`, marked by `.huggingface-shared-blobs`, and the model folders only point at them. Beside each shared file a `.refs` lists the repositories using it; these three named `faster-whisper-tiny.en`, `-base.en` and `-small.en` and nothing else. Deleting the folders deleted the pointers.
+* **Fix:** the uninstaller also removes every shared file whose `.refs` names only `faster-whisper` repositories, with its `.refs` and its emptied fan-out folder, and keeps any file another repository also uses. Tested on a scratch cache holding a Whisper-only, a mixed and an unrelated file; then run against the real cache, freeing the 704 MB.
+* **Note:** the 3.2.0 uninstaller was tested against a hand-built cache in the layout the code expected, so it could not find a layout nobody had looked at. What found it was a person uninstalling for real and asking whether the disk space came back.
+
 
 ## 🛠️ Maintenance & Execution Protocols
 

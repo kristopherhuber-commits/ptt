@@ -95,6 +95,7 @@ element is often pinned by several tests, and the ID is what other documents cit
 | `V-VC` | the replacement-rule vocabulary | `gui_handoff` §6.4 |
 | `V-UI` | the GUI's derived logic and data tables | `gui_handoff` §5, §6.1 – §6.6 |
 | `V-CG` | the Concierge — harness, panel, packaging | `ptt-v3-concierge/concierge_design.md`, `concierge_handoff.md` |
+| `V-IN` | installing, upgrading and uninstalling | `_internal/install.ps1`, `_internal/uninstall.ps1` — no design section yet |
 | `V-M`  | manual, executed by hand against the running app | — |
 
 `V-CG` items are v3.0's and their **layer** matters as much as their number:
@@ -247,36 +248,55 @@ than a test suite and its results are a scorecard rather than a pass or a fail. 
 in `ptt-v3-concierge/model_qualification.md` and gate 2.5 is what closed it. The L3 layer
 is §5.4 below.
 
+### 3.4 Installer and uninstaller — `_internal/install.ps1`, `_internal/uninstall.ps1`
+
+No requirement or design section names these yet; the source column is the scripts.
+
+| ID | Element | What it guarantees | Verified by | Req. |
+|---|---|---|---|---|
+| **`V-IN-01`** | `install.ps1` — **`$PreservedFiles` and `$DisposableFiles` partition the runtime artifacts** | Read out of the script, not restated: `config.json` and the three Concierge files survive an upgrade, and every name in `build_portable.RUNTIME_ARTIFACTS` is on exactly one list. Regression for `development_history.md` #63 | `test_concierge_layering.py::test_the_installer_carries_the_saved_settings_across_an_upgrade`, `::test_every_runtime_artifact_is_either_preserved_or_discarded` | `FR-8` |
+| `V-IN-02` | `install.ps1` step 7 — **the uninstaller is installed and registered** | `uninstall.ps1` is copied into `_internal\`, and `HKCU\…\Uninstall\PTTDictation` carries an `UninstallString` naming it | `test_uninstall.py::test_the_installer_copies_the_uninstaller_and_registers_it` | — |
+| `V-IN-03` | `uninstall.ps1` — **removes what PTT wrote, keeps the vocabulary** | It removes the same registry entry, matches `models--*--faster-whisper-*` and reads `.refs` for the shared blob store (#66), and has no parameter reaching `agent-configs` | `test_uninstall.py::test_the_uninstaller_removes_the_same_entry_and_keeps_the_vocabulary` | — |
+| `V-IN-04` | `paths.is_installed_copy` — **Uninstall is offered only from the installation** | True for `%LOCALAPPDATA%\Programs\ptt_dictate\app`, false for a checkout; `uninstaller_path` is inside the installation | `test_uninstall.py::test_uninstall_is_offered_only_from_the_installed_copy`, `::test_the_uninstaller_path_is_inside_the_installation` | — |
+
+The script's behaviour is §5.6's: it deletes files and stops processes, which the unit
+suite does not do.
+
 ---
 
 ## 4. Automated tests
 
-**845 tests, ~11 s.** Last run **2026-08-29** at the end of v3.0 session 5:
-**845 passed, 0 failed, in 10.82 s.** Session 4 ended at 838; session 2 at 646; session 1
-at 612; the v2.0 acceptance pass on 2026-08-24 ran 333, also all passing. Session 5 added
-seven: six for the llama.cpp packaging allowlist and one for the thread audit's key.
+**881 tests, ~5 s.** Last run **2026-10-20** at v3.2.1: **881 passed, 0 failed, in
+5.09 s.** v3.0 session 5 ended at 845 on 2026-08-29; session 4 at 838; session 2 at 646;
+session 1 at 612; the v2.0 acceptance pass on 2026-08-24 ran 333, also all passing.
+It stood at 877 at v3.1.1, the installer's two preserve-list tests included; v3.2.0
+added four for the uninstaller.
 
 | Module | Tests | Covers |
 |---|---:|---|
 | `tests/test_config.py` | 117 | `V-CF-01` … `V-CF-16` |
 | `tests/test_shared_vocabulary.py` | 11 | `V-CF-17` … `V-CF-20` |
 | `tests/test_concierge_worker.py` | 86 | `V-CG-115` … `V-CG-124`, `V-CG-129` … `V-CG-133`, `V-CG-138` |
-| `tests/test_concierge_panel.py` | 77 | `V-CG-101` … `V-CG-114`, `V-CG-125` … `V-CG-128` |
+| `tests/test_concierge_panel.py` | 78 | `V-CG-101` … `V-CG-114`, `V-CG-125` … `V-CG-128` |
 | `tests/test_concierge_tools.py` | 58 | `V-CG-10` … `V-CG-19` |
 | `tests/test_hotkey.py` | 56 | `V-HK-01` … `V-HK-14` |
+| `tests/test_concierge_server.py` | 51 | `V-CG-01` … `V-CG-09`, `V-CG-46` … `V-CG-55` |
 | `tests/test_concierge_fetch.py` | 50 | `V-CG-56` … `V-CG-68`, `V-CG-131` |
-| `tests/test_concierge_server.py` | 47 | `V-CG-01` … `V-CG-09`, `V-CG-46` … `V-CG-55` |
 | `tests/test_panels.py` | 43 | `V-UI-04` … `V-UI-14` |
 | `tests/test_concierge_suite.py` | 42 | `V-CG-89` … `V-CG-100` |
 | `tests/test_concierge_agent.py` | 42 | `V-CG-30` … `V-CG-45` |
 | `tests/test_concierge_llm.py` | 41 | `V-CG-20` … `V-CG-29` |
+| `tests/test_concierge_layering.py` | 37 | `V-CG-79` … `V-CG-88`, `V-CG-134` … `V-CG-137`, `V-IN-01` |
 | `tests/test_audio.py` | 32 | `V-AU-01` … `V-AU-07` |
+| `tests/test_transcribe.py` | 32 | `V-TR-01` … `V-TR-08` |
 | `tests/test_vocabulary.py` | 31 | `V-VC-01` … `V-VC-04` |
-| `tests/test_transcribe.py` | 30 | `V-TR-01` … `V-TR-08` |
-| `tests/test_concierge_layering.py` | 27 | `V-CG-79` … `V-CG-88`, `V-CG-134` … `V-CG-137` |
+| `tests/test_engine.py` | 28 | `V-EN-01` … `V-EN-10` |
 | `tests/test_statusview.py` | 25 | `V-UI-01` … `V-UI-03` |
-| `tests/test_engine.py` | 25 | `V-EN-01` … `V-EN-10` |
-| `tests/test_concierge_pack.py` | 16 | `V-CG-69` … `V-CG-78` |
+| `tests/test_concierge_pack.py` | 17 | `V-CG-69` … `V-CG-78` |
+| `tests/test_uninstall.py` | 4 | `V-IN-02` … `V-IN-04` |
+
+Several counts above moved between 2026-08-29 and this run without a row in §8. The
+figures are a fresh `--collect-only` on 2026-10-20, not an update of the old ones.
 
 The nine `test_concierge_*` modules are v3.0's **L1** layer
 (`ptt-v3-concierge/concierge_verification.md` §1): pure unit tests, a fake HTTP layer,
@@ -617,6 +637,26 @@ to know about is a step most people will not take. It is one archive again
 because it stopped shipping cuBLAS twice — #55 — and one file in the root
 because two files both displayed as `install` is a coin toss — #57.
 
+### 5.6 v3.1.1 – v3.2.1 — version in the title, uninstall · 2026-10-20
+
+One session, three releases. The uninstaller's checks ran against a **scratch tree**
+first — its `-TargetDir`, `-HubDir`, `-DesktopDir`, `-StartupDir` and `-RegistryKey`
+parameters exist for that — and then against the real machine.
+
+| ID | Test | Result |
+|---|---|---|
+| `V-M-99` | **The version in the settings window's title**, built offscreen | ✅ pass. `PTT Dictation — Settings — version 3.1.0`, read from `ptt.__version__`, before the bump to 3.1.1 |
+| `V-M-100` | **`uninstall.ps1` against a scratch tree**: an installation, a Whisper repo with a `.locks` entry, an unrelated repo, both shortcuts, an unrelated shortcut and a test registry key | ✅ pass. Everything PTT's removed, the unrelated repo and shortcut kept, the key deleted. Answering `n` changed nothing |
+| `V-M-101` | **The same, with a process running from the installation** — `PING.EXE` copied in as `ptt_dictate.exe` | ❌ then ✅. The first run left it running and the folder locked (#65); after the fix it waited, stopped it, and removed everything, in 12 s |
+| `V-M-102` | **`install.ps1`'s registration block**, run against `…\Uninstall\PTTDictationTest` and then deleted | ✅ pass. `DisplayName`, `DisplayVersion`, the quoted `UninstallString`, `InstallDate`, and `NoModify`/`NoRepair` as DWORD 1 |
+| `V-M-103` | **The Advanced tab's button**, offscreen with `is_installed_copy` forced true, the launch stubbed and the dialog answered Yes | ✅ pass. Rendered below the note; one click started the uninstaller and emitted `uninstall_requested`. Outside the installation the tab shows a note instead |
+| `V-M-104` | **A real install and uninstall of v3.2.0 on Darklord**, by the user, from the Advanced tab; every location then checked by script | ⚠️ partial. Installation, both shortcuts, the Installed apps entry, the Whisper folders and the preserve folder all gone; no PTT process left; `vocabulary.json` kept. **704,299,713 bytes left in `hub\blobs`** (#66) |
+| `V-M-105` | **The shared blob fix**: a scratch cache with a Whisper-only, a mixed and an unrelated shared file; then the real cache | ✅ pass. Only the Whisper-only file removed from the scratch cache; 704,299,713 bytes freed from the real one, leaving the cache's own empty scaffolding |
+| `V-M-106` | **v3.2.1 reinstalled on Darklord** | ✅ reported working by the user; not separately checked |
+
+Not run: an uninstall started from **Settings > Apps** on a real installation, which
+is the path that elevates for itself (§7).
+
 
 ---
 
@@ -711,6 +751,7 @@ Stated rather than omitted. Anything here is a known hole, not an oversight.
 | **`NFR-CG-3` under continuous decode reaches `NFR-1`'s bound** | Not a gap — a measured limit, recorded so nobody rediscovers it as a bug. The fitted generating line crosses 2 s at 21.9 seconds of audio and one reading of forty at a 20 s clip came in at 2.115 s (`V-M-75`). Dictating a twenty-second sentence *while the Concierge is mid-answer* is the case that touches it; at 10 s the figure is 1.22 s | — |
 | **`FR-CG-4`'s guided setup has no L3 evidence** | Session 4 pinned that the kickoff is sent once, to whoever accepted, at the right moment; `sel-11` scores the shape of the dialogue at L2 with `dialogue_tools`. What nobody has done is accept the card on a fresh install and walk the four steps with a real model in front of them | next desktop session |
 | **The shared vocabulary file on a second machine** (`FR-10`) | L1 covers the file's rules and an offscreen check covered the tab's one-second watch. What no single machine shows is the real path: a rule added on one machine, committed and pushed in `agent-configs`, pulled on the other, and picked up by a running PTT without a restart | Nightlord, after installing v3.1.0 |
+| **Uninstall from Settings > Apps on a real installation** | `V-M-104` ran the Advanced tab's path. The Installed apps path starts `uninstall.ps1` unelevated, so it relaunches itself through UAC and asks before deleting — neither of which the scratch runs exercised, since a scratch run does not elevate | next uninstall |
 | Per-application vocabulary scopes | `gui_handoff` §11 puts them out of scope for the first pass. The field is stored and validated and one value is accepted; a rule with any other scope is dropped and logged, so nothing silently applies more widely than it was written | — |
 | Making an Advanced value editable | Every one of them fixed a documented failure, so none is exposed. §6.5's rule stands: exposing one makes it a validated `Settings` field with a logged fallback, and `Shift+Insert` additionally has to warn on change | — |
 | "Start with Windows" as a control rather than a readout | Setting it means creating a `.lnk` through COM and re-applying `install.ps1`'s run-as-admin byte patch — the installer's logic, duplicated in the app | — |
@@ -745,6 +786,9 @@ question. If any of them is a box, the fix is a text label.
 
 | Date | Commit | Change |
 |---|---|---|
+| 2026-10-20 | `955268b` | **v3.2.1: uninstall frees the shared blob store.** The Whisper weights in `hub\blobs` whose `.refs` name only `faster-whisper` repositories are removed too. `V-M-104` … `V-M-106`, `development_history.md` #66 |
+| 2026-10-20 | `5984cff` | **v3.2.0: uninstall**, from the Advanced tab and from Settings > Apps. `_internal/uninstall.ps1`, its registration in `install.ps1`, §3.4 and the `V-IN` prefix added; `V-IN-02` … `V-IN-04`, `V-M-100` … `V-M-103`; `development_history.md` #64, #65. Suite 877 → 881 |
+| 2026-10-20 | `90c69ad`, `088b961` | **v3.1.1.** The installer keeps `config.json` across an upgrade or stops (`V-IN-01`, #63); the settings window's title shows the version (`V-M-99`). Release notes rewritten as four steps (#62) |
 | 2026-10-20 | — | **v3.1.0: the shared vocabulary file** (`FR-10`, `design.md` §7.2). `V-CF-17` … `V-CF-20` added. Suite 866 → 877 |
 | 2026-08-29 | — | **The release split.** The distributable became two archives at `app/llama/` — 1462 MB and 628 MB — because one asset of 2.041 GiB is one GitHub will not take, and the seam is the component the application does not need. `V-M-96`, `V-CG-140`, `development_history.md` #55. Suite 846 → 848 |
 | 2026-08-29 | `f592d70` | **v3.0's acceptance pass.** `concierge_verification.md`'s seed folded in as §3.3; §5.4 added with `V-M-75` … `V-M-95`; §6 split into v2.0's ten and v3.0's twelve. **Ten of the twelve pass, v3-6 needs a machine without CUDA, and v3-11 passes with the same residual v2-10 has.** `NFR-CG-3` re-measured at n=60 per state against the spike's n=3, in both states the requirement now names, and the actively-generating figure is ×3.60 rather than ×1.46 under continuous decode — with one reading of forty outside `NFR-1`, recorded as a bound. The real 6.87 GB download run end to end, twice interrupted; the llama.cpp runtime added to the packaging allowlist with its MIT licence; the distribution's size delta stated for the first time at **+628.3 MB compressed**. Seven defects found and fixed: `development_history.md` #48 … #54. `FR-9` closed. Suite 838 → 846 |
