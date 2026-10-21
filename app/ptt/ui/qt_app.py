@@ -172,6 +172,7 @@ class QtApp:
         # A panel wrote a setting: refresh the two places that display one but
         # do not own it, without waiting for the engine's next state change.
         self._window.settings_changed.connect(self._on_settings_changed)
+        self._window.quit_requested.connect(self._tray.exit_app)
         self.bridge.benchmark_done.connect(
             self._on_benchmark_done, Qt.ConnectionType.QueuedConnection
         )

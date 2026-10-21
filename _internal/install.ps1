@@ -341,6 +341,7 @@ Copy-Item -Path "$SourceDir\.venv" -Destination "$TargetDir\.venv" -Recurse -Con
 Copy-Item -Path "$SourceDir\app" -Destination "$TargetDir\app" -Recurse -Container -Force
 New-Item -ItemType Directory -Path "$TargetDir\_internal" -Force | Out-Null
 Copy-Item -Path "$SourceDir\_internal\run_tray.bat" -Destination "$TargetDir\_internal\run_tray.bat" -Force
+Copy-Item -Path "$SourceDir\_internal\uninstall.ps1" -Destination "$TargetDir\_internal\uninstall.ps1" -Force
 
 # 4a. Put back what was set aside in step 3.
 if ($PreservedModels) {
@@ -415,6 +416,25 @@ $bytesStartup = [System.IO.File]::ReadAllBytes($StartupShortcutPath)
 $bytesStartup[0x15] = $bytesStartup[0x15] -bor 0x20
 [System.IO.File]::WriteAllBytes($StartupShortcutPath, $bytesStartup)
 
+# 7. List PTT in Settings > Apps > Installed apps.
+#
+# Windows removes nothing itself: the entry is a name and a command line, and
+# its Uninstall button runs that command. The command is uninstall.ps1, the
+# same script the Advanced tab's button runs. Per-user (HKCU), because the
+# installation is per-user too.
+$UninstallKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\PTTDictation"
+Write-Host "Registering with Settings > Apps..." -ForegroundColor Gray
+New-Item -Path $UninstallKey -Force | Out-Null
+$Uninstaller = "$TargetDir\_internal\uninstall.ps1"
+Set-ItemProperty -Path $UninstallKey -Name "DisplayName" -Value $AppName
+if ($PackageVersion) { Set-ItemProperty -Path $UninstallKey -Name "DisplayVersion" -Value $PackageVersion }
+Set-ItemProperty -Path $UninstallKey -Name "UninstallString" -Value "powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$Uninstaller`""
+Set-ItemProperty -Path $UninstallKey -Name "InstallLocation" -Value $TargetDir
+Set-ItemProperty -Path $UninstallKey -Name "DisplayIcon" -Value "C:\Windows\System32\mmres.dll,-3014"
+Set-ItemProperty -Path $UninstallKey -Name "InstallDate" -Value (Get-Date -Format "yyyyMMdd")
+New-ItemProperty -Path $UninstallKey -Name "NoModify" -Value 1 -PropertyType DWord -Force | Out-Null
+New-ItemProperty -Path $UninstallKey -Name "NoRepair" -Value 1 -PropertyType DWord -Force | Out-Null
+
 Write-Host ""
 Write-Host "==================================================" -ForegroundColor Green
 Write-Host "      Installation Completed Successfully!        " -ForegroundColor Green
@@ -425,6 +445,7 @@ Write-Host ""
 Write-Host "Features Configured:" -ForegroundColor Gray
 Write-Host "  [+] Desktop shortcut created (with Auto-Admin elevation)" -ForegroundColor Green
 Write-Host "  [+] Startup folder shortcut created (to run at Windows login)" -ForegroundColor Green
+Write-Host "  [+] Listed in Settings > Apps, where it can be uninstalled" -ForegroundColor Green
 Write-Host ""
 Write-Host "Launching PTT Dictation now..." -ForegroundColor Cyan
 

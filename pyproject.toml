@@ -6,7 +6,7 @@
 
 [project]
 name = "ptt-dictate"
-version = "3.1.1"
+version = "3.2.0"
 description = "Push-to-talk local GPU dictation for Windows 11"
 requires-python = ">=3.14"
 

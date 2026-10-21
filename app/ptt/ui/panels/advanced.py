@@ -32,15 +32,27 @@ Setting it means creating a `.lnk` through `WScript.Shell` COM and re-applying
 the app -- and a checkbox that cannot be clicked explains nothing, because
 Windows delivers no mouse events to a disabled widget and its tooltip therefore
 never appears. The same lesson the Model panel's Delete button already learned.
+
+**The one thing here that acts: Uninstall.** The desktop icon is the only way
+into PTT most users know, so the way out is behind it too. The button asks
+once, starts `_internal\\uninstall.ps1` -- the same script Settings > Apps runs
+-- in its own window, and quits so the script can remove the files this process
+is running from. It is shown only in the installed copy; anywhere else it would
+uninstall a different one.
 """
 
 import os
+import subprocess
 from typing import NamedTuple
 
-from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QVBoxLayout
+from PySide6.QtCore import Signal
+from PySide6.QtWidgets import (
+    QFrame, QHBoxLayout, QLabel, QMessageBox, QPushButton, QVBoxLayout,
+)
 
 from ptt import engine as engine_mod
 from ptt import inject, paths, transcribe
+from ptt.logging_setup import log_debug
 from ptt.ui.panels import InstantApplyPanel
 
 #: Appended to a row whose constant the Audio tab has switched off. The value
@@ -91,12 +103,33 @@ def rows(settings):
     )
 
 
+def launch_uninstaller():
+    """
+    Start `uninstall.ps1` in a console window of its own, already confirmed.
+
+    The working directory is `%TEMP%`, not the installation: a process whose
+    current directory is inside a folder keeps that folder from being deleted.
+    The child inherits this process's elevation, so it can stop the app.
+    """
+    subprocess.Popen(
+        ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass",
+         "-File", paths.uninstaller_path(), "-Confirmed"],
+        cwd=os.environ.get("TEMP") or None,
+        creationflags=subprocess.CREATE_NEW_CONSOLE,
+    )
+
+
 class AdvancedPanel(InstantApplyPanel):
     """
-    A read-only list. It subclasses `InstantApplyPanel` for the two things every
-    tab needs and nothing else supplies -- the engine hand-off and the
-    status-bar message channel -- and never calls `apply_now`.
+    A read-only list, plus the Uninstall button. It subclasses
+    `InstantApplyPanel` for the two things every tab needs and nothing else
+    supplies -- the engine hand-off and the status-bar message channel -- and
+    never calls `apply_now`.
     """
+
+    #: The uninstaller is running; the app must quit so it can delete the
+    #: files this process holds open.
+    uninstall_requested = Signal()
 
     def __init__(self, settings, parent=None):
         super().__init__(settings, parent)
@@ -144,7 +177,52 @@ class AdvancedPanel(InstantApplyPanel):
         note.setObjectName("panelNote")
         note.setWordWrap(True)
         box.addWidget(note)
+
+        box.addSpacing(24)
+        if paths.is_installed_copy():
+            uninstall = QPushButton("Uninstall PTT Dictation…")
+            uninstall.clicked.connect(self._on_uninstall)
+            row = QHBoxLayout()
+            row.addWidget(uninstall)
+            row.addStretch(1)
+            box.addLayout(row)
+        else:
+            elsewhere = QLabel(
+                "Uninstall is offered in the installed copy only. This one is "
+                f"running from {os.path.dirname(paths.APP_DIR)}."
+            )
+            elsewhere.setObjectName("panelNote")
+            elsewhere.setWordWrap(True)
+            box.addWidget(elsewhere)
         box.addStretch(1)
+
+    def _on_uninstall(self):
+        """
+        Ask once, then hand over to the script. Cancel is the default button,
+        so a stray Return cannot remove the application.
+        """
+        box = QMessageBox(self)
+        box.setWindowTitle("Uninstall PTT Dictation")
+        box.setText(
+            "Remove PTT Dictation from this computer?\n\n"
+            "This deletes the app, your settings, the Concierge's model, the "
+            "downloaded Whisper models and both shortcuts. Your shared "
+            "vocabulary file in agent-configs is kept.\n\n"
+            "PTT Dictation will close, and a window will show the progress."
+        )
+        box.setStandardButtons(QMessageBox.StandardButton.Yes
+                               | QMessageBox.StandardButton.Cancel)
+        box.setDefaultButton(QMessageBox.StandardButton.Cancel)
+        if box.exec() != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            launch_uninstaller()
+        except OSError as e:
+            log_debug(f"WARNING: could not start the uninstaller: {e}")
+            self.message.emit(f"Could not start the uninstaller: {e}")
+            return
+        log_debug("Uninstall requested by user; quitting.")
+        self.uninstall_requested.emit()
 
     def _add_row(self, row, last=False):
         line = QFrame()

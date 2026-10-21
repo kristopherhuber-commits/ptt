@@ -168,6 +168,35 @@ def startup_shortcut_path():
     )
 
 
+def installed_dir():
+    """
+    Where `install.ps1` puts the application: `%LOCALAPPDATA%\\Programs\\ptt_dictate`.
+
+    A fixed location rather than one derived from `APP_DIR`, because the only
+    question asked of it is whether *this* copy is that one -- see
+    `is_installed_copy`.
+    """
+    return os.path.join(os.environ.get("LOCALAPPDATA", ""), "Programs", "ptt_dictate")
+
+
+def uninstaller_path():
+    """The `uninstall.ps1` the installer copies into the installation."""
+    return os.path.join(installed_dir(), "_internal", "uninstall.ps1")
+
+
+def is_installed_copy():
+    """
+    Whether this process is running out of the installation.
+
+    The Advanced tab offers Uninstall only then. From a development checkout or
+    an extracted archive, the button would remove a *different* copy -- the
+    installed one -- which is never what a click there means.
+    """
+    install_root = os.path.dirname(APP_DIR)
+    return os.path.normcase(os.path.abspath(install_root)) == \
+        os.path.normcase(os.path.abspath(installed_dir()))
+
+
 def assets_dir():
     """Directory holding the bundled fonts, stylesheet and benchmark clip."""
     return os.path.join(APP_DIR, "assets")

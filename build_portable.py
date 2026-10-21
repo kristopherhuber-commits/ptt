@@ -530,7 +530,8 @@ def main():
     if not any(n.endswith("app/assets/concierge_kb.md") for n in names):
         problems.append("app/assets/concierge_kb.md is not in the archive")
     for required in ("install.bat", "_internal/install.ps1",
-                     "_internal/run_tray.bat", MANIFEST_ARCHIVE_NAME):
+                     "_internal/run_tray.bat", "_internal/uninstall.ps1",
+                     MANIFEST_ARCHIVE_NAME):
         if required not in names:
             problems.append(f"{required} is not in the archive")
 

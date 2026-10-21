@@ -124,6 +124,10 @@ class SettingsWindow(QMainWindow):
     #: only this window knows.
     concierge_visible = Signal(bool)
 
+    #: The Advanced tab started the uninstaller. `QtApp` routes it to the
+    #: tray's Exit, so the app quits the same way it always does.
+    quit_requested = Signal()
+
     def __init__(self, settings, cuda_supported, parent=None):
         super().__init__(parent)
         self.setWindowTitle(f"PTT Dictation — Settings — version {__version__}")
@@ -149,7 +153,9 @@ class SettingsWindow(QMainWindow):
         self._add_panel("Model", self._model_panel)
         self._add_panel("Audio", AudioPanel(settings))
         self._add_panel("Vocabulary", VocabularyPanel(settings))
-        self._add_panel("Advanced", AdvancedPanel(settings))
+        advanced = AdvancedPanel(settings)
+        advanced.uninstall_requested.connect(self.quit_requested)
+        self._add_panel("Advanced", advanced)
         self._add_panel("Diagnostics", DiagnosticsPanel(settings, cuda_supported))
 
         # 2b. the Concierge, beside the tabs and collapsed until asked for

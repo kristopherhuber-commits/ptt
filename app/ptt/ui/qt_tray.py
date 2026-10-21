@@ -298,6 +298,11 @@ class QtTray(QObject):
         self.refresh_menu()
 
     @Slot()
+    def exit_app(self):
+        """The menu's Exit, for the one other caller: the Advanced tab's Uninstall."""
+        self._on_exit()
+
+    @Slot()
     def _on_exit(self):
         log_debug("Exit requested by user.")
         self._engine.stop()
