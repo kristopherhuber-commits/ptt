@@ -29,4 +29,4 @@ __all__ = []
 #: to. It stamps the archive's payload manifest with what it finds, which is how
 #: `install.ps1` can name the version it is installing without a second copy of
 #: the number to keep in step.
-__version__ = "3.2.0"
+__version__ = "3.2.1"

@@ -36,6 +36,9 @@ def test_the_uninstaller_removes_the_same_entry_and_keeps_the_vocabulary():
     text = read("_internal", "uninstall.ps1")
     assert r"CurrentVersion\Uninstall\PTTDictation" in text
     assert "models--*--faster-whisper-*" in text
+    # huggingface_hub 1.x's shared store: the weights themselves, which 3.2.0
+    # left behind after deleting only the folders that point at them.
+    assert '"*.refs"' in text
     assert "agent-configs" not in text.split("param(")[1].split(")")[0]
 
 

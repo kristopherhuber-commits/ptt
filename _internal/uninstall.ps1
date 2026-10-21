@@ -72,6 +72,25 @@ $WhisperModels = @()
 if (Test-Path $HubDir) {
     $WhisperModels = @(Get-ChildItem -Path $HubDir -Directory -Filter "models--*--faster-whisper-*" -ErrorAction SilentlyContinue)
 }
+# The weights are not always inside those folders. huggingface_hub 1.x keeps
+# each file's contents once per cache, in hub\blobs, and a model folder only
+# points at them; beside each shared file a .refs lists every repository using
+# it. A file whose .refs names only faster-whisper repositories is PTT's, and
+# nothing else reclaims it once the folders naming it are gone -- 3.2.0 left
+# 704 MB of tiny.en, base.en and small.en behind exactly that way.
+$SharedBlobDir = Join-Path $HubDir "blobs"
+$SharedBlobs = @()
+if (Test-Path $SharedBlobDir) {
+    foreach ($Refs in Get-ChildItem -Path $SharedBlobDir -Recurse -File -Filter "*.refs" -ErrorAction SilentlyContinue) {
+        $Users = @(Get-Content -LiteralPath $Refs.FullName -ErrorAction SilentlyContinue |
+            Where-Object { $_.Trim() } | ForEach-Object { ($_.Trim() -split '[/\\]')[0] })
+        $Others = @($Users | Where-Object { $_ -notlike "models--*--faster-whisper-*" })
+        $Blob = $Refs.FullName.Substring(0, $Refs.FullName.Length - ".refs".Length)
+        if ($Users.Count -gt 0 -and $Others.Count -eq 0 -and (Test-Path -LiteralPath $Blob)) {
+            $SharedBlobs += Get-Item -LiteralPath $Blob
+        }
+    }
+}
 $Shortcuts = @("$DesktopDir\PTT Dictation.lnk", "$StartupDir\PTT Dictation.lnk")
 
 Write-Host "==================================================" -ForegroundColor Cyan
@@ -83,6 +102,10 @@ Write-Host "  $TargetDir" -ForegroundColor Gray
 Write-Host "    (the app, your settings and the Concierge's downloaded model)" -ForegroundColor Gray
 foreach ($Model in $WhisperModels) {
     Write-Host "  $($Model.FullName)" -ForegroundColor Gray
+}
+if ($SharedBlobs.Count -gt 0) {
+    $SharedSize = ($SharedBlobs | Measure-Object -Property Length -Sum).Sum
+    Write-Host ("  {0} Whisper file(s) in {1} ({2:N2} GB)" -f $SharedBlobs.Count, $SharedBlobDir, ($SharedSize / 1GB)) -ForegroundColor Gray
 }
 Write-Host "  the Desktop and Startup shortcuts" -ForegroundColor Gray
 Write-Host ""
@@ -133,6 +156,19 @@ foreach ($Model in $WhisperModels) {
     $Lock = Join-Path $HubDir ".locks\$($Model.Name)"
     if (Test-Path $Lock) { Remove-Item -Path $Lock -Recurse -Force -ErrorAction SilentlyContinue }
 }
+foreach ($Blob in $SharedBlobs) {
+    Write-Host "Removing shared Whisper file $($Blob.Name)..." -ForegroundColor Gray
+    Remove-Item -LiteralPath $Blob.FullName -Force -ErrorAction SilentlyContinue
+    if (-not (Test-Path -LiteralPath $Blob.FullName)) {
+        Remove-Item -LiteralPath "$($Blob.FullName).refs" -Force -ErrorAction SilentlyContinue
+    }
+    # The two-character fan-out folder, once nothing else is in it.
+    $Fanout = $Blob.Directory
+    if ((Test-Path -LiteralPath $Fanout.FullName) -and
+        -not (Get-ChildItem -LiteralPath $Fanout.FullName -Force -ErrorAction SilentlyContinue)) {
+        Remove-Item -LiteralPath $Fanout.FullName -Force -ErrorAction SilentlyContinue
+    }
+}
 
 # 4. The installation. This script goes last, so a removal that stops partway
 # leaves the Installed apps entry pointing at a script that still exists.
@@ -165,7 +201,8 @@ if (Test-Path $TargetDir) {
 # 5. The Installed apps entry -- last, and only once the folder is gone, so a
 # removal that failed can be retried from the same place it was started.
 $Left = @($Shortcuts | Where-Object { Test-Path $_ }) +
-        @($WhisperModels | Where-Object { Test-Path $_.FullName } | ForEach-Object { $_.FullName })
+        @($WhisperModels | Where-Object { Test-Path $_.FullName } | ForEach-Object { $_.FullName }) +
+        @($SharedBlobs | Where-Object { Test-Path -LiteralPath $_.FullName } | ForEach-Object { $_.FullName })
 if (Test-Path $TargetDir) { $Left = @($TargetDir) + $Left }
 
 Write-Host ""
