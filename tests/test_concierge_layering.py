@@ -16,6 +16,7 @@ import builtins
 import importlib
 import inspect
 import os
+import re
 import sys
 
 import pytest
@@ -232,6 +233,68 @@ def test_config_json_still_never_ships():
 
     assert build_portable.should_skip("app", "app", "config.json")
     assert build_portable.should_skip("app", "app", "debug_log.txt")
+
+
+def installer_lists():
+    """
+    `$PreservedFiles` and `$DisposableFiles` as they are written in
+    `_internal/install.ps1`.
+
+    Read out of the script rather than restated here. A copy of the list in a
+    test asserts only that the test agrees with itself; parsing the installer is
+    the one way this file notices a name being dropped from the list that runs.
+    """
+    path = os.path.join(REPO, "_internal", "install.ps1")
+    with open(path, "r", encoding="utf-8") as f:
+        text = f.read()
+
+    def names(variable):
+        match = re.search(r"^\$" + variable + r"\s*=\s*@\((.*?)\)$",
+                          text, re.MULTILINE | re.DOTALL)
+        assert match, f"${variable} is no longer an array literal in install.ps1"
+        return frozenset(re.findall(r'"([^"]+)"', match.group(1)))
+
+    return names("PreservedFiles"), names("DisposableFiles")
+
+
+def test_the_installer_carries_the_saved_settings_across_an_upgrade():
+    """
+    **The other half of `test_config_json_still_never_ships`.** Keeping
+    `config.json` out of the archive stops a reinstall from *overwriting* the
+    saved settings; it does nothing about the `Remove-Item -Recurse` that
+    deletes the old installation a few lines further down. Both are needed, and
+    only one of them was checkable from Python until this parsed the script.
+
+    `config.json` is where the vocabulary table lives -- `Settings.vocabulary`,
+    serialised by `Settings.to_dict` -- and it is the part of it nobody can
+    reconstruct. A hotkey is retyped in a second; a table of replacement
+    phrases built up over months is not.
+    """
+    preserved, _ = installer_lists()
+
+    assert "config.json" in preserved
+    for name in ("concierge_memory.txt", "concierge_memory.prev.txt",
+                 "concierge_sessions.json"):
+        assert name in preserved, name
+
+
+def test_every_runtime_artifact_is_either_preserved_or_discarded():
+    """
+    The installer's two lists partition `build_portable.RUNTIME_ARTIFACTS`
+    exactly, which is what makes "never ships" and "survives an upgrade" one
+    list seen from two ends.
+
+    The failure this catches is a name added to `RUNTIME_ARTIFACTS` and to
+    neither installer list: the build keeps it out of the archive, the reinstall
+    deletes the user's copy, and nothing else in the suite reads both files.
+    That is precisely how the Concierge's memory note was lost -- excluded from
+    the package, and absent from the preserve list.
+    """
+    build = build_module()
+    preserved, disposable = installer_lists()
+
+    assert preserved | disposable == set(build.RUNTIME_ARTIFACTS)
+    assert not (preserved & disposable)
 
 
 def test_the_knowledge_pack_does_ship():

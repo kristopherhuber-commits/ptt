@@ -254,6 +254,67 @@ if (Test-Path $TargetDir) {
     if (Test-Path $PreserveDir) { Remove-Item -Path $PreserveDir -Recurse -Force -ErrorAction SilentlyContinue }
     New-Item -ItemType Directory -Path $PreserveDir -Force | Out-Null
 
+    # The small files first and app\models second. Nothing has been moved yet
+    # when the config.json branch below gives up, so an installation that stops
+    # there is an installation the user still has -- where the same abort after
+    # a 6.9 GB rename would leave the weights in %TEMP% and the application
+    # looking for them under Programs.
+    foreach ($Name in $PreservedFiles) {
+        if (Test-Path "$TargetDir\app\$Name") {
+            Write-Host "Setting aside $Name..." -ForegroundColor Gray
+            $SetAside = $false
+            try {
+                Move-Item -Path "$TargetDir\app\$Name" -Destination "$PreserveDir\$Name" -Force -ErrorAction Stop
+                $SetAside = $true
+            } catch {
+                # A rename can fail where a read succeeds: a file another
+                # process still holds open moves only if that handle was opened
+                # sharing delete, and a copy asks for less than that. The old
+                # installation is deleted a few lines below either way, so this
+                # fallback is the difference between keeping the file and
+                # losing it -- and the Stop-Process above is best-effort, so
+                # "the app is still holding it" is a real state to arrive in.
+                try {
+                    Copy-Item -Path "$TargetDir\app\$Name" -Destination "$PreserveDir\$Name" -Force -ErrorAction Stop
+                    $SetAside = $true
+                } catch {
+                    $SetAside = $false
+                }
+            }
+
+            if ($SetAside) {
+                $PreservedNames += $Name
+            } elseif ($Name -eq "config.json") {
+                # Every saved setting is in this one file, and the vocabulary
+                # rules are the part of it nobody can reconstruct -- a hotkey is
+                # retyped in a second, a table of replacement phrases built up
+                # over months is not. Losing it silently is the v2 defect this
+                # whole section exists to close, so the installer stops instead.
+                # Nothing has been moved or deleted at this point: the existing
+                # installation is untouched and still runs.
+                Write-Host ""
+                Write-Host "==================================================" -ForegroundColor Red
+                Write-Host "  Your settings could not be set aside.           " -ForegroundColor Red
+                Write-Host "==================================================" -ForegroundColor Red
+                Write-Host ""
+                Write-Host "  config.json holds every saved setting -- hotkey, microphone," -ForegroundColor Gray
+                Write-Host "  model, and your vocabulary rules. Installing over it would" -ForegroundColor Gray
+                Write-Host "  lose them, so nothing has been changed." -ForegroundColor Gray
+                Write-Host ""
+                Write-Host "  It is almost certainly still open in a running copy of the app." -ForegroundColor Gray
+                Write-Host "  Quit PTT Dictation from the tray icon and run install.bat again." -ForegroundColor Gray
+                Write-Host ""
+                Write-Host "  If that does not help, copy this file somewhere safe first:" -ForegroundColor Gray
+                Write-Host "      $TargetDir\app\config.json" -ForegroundColor Cyan
+                Write-Host ""
+                if (Test-Path $PreserveDir) { Remove-Item -Path $PreserveDir -Recurse -Force -ErrorAction SilentlyContinue }
+                Exit 1
+            } else {
+                Write-Host "Warning: could not set aside $Name; it will be lost." -ForegroundColor Yellow
+            }
+        }
+    }
+
     if (Test-Path "$TargetDir\app\models") {
         Write-Host "Setting aside downloaded models (they are not re-downloaded)..." -ForegroundColor Gray
         try {
@@ -261,17 +322,6 @@ if (Test-Path $TargetDir) {
             $PreservedModels = $true
         } catch {
             Write-Host "Warning: could not set aside app\models; it may be re-downloaded." -ForegroundColor Yellow
-        }
-    }
-    foreach ($Name in $PreservedFiles) {
-        if (Test-Path "$TargetDir\app\$Name") {
-            Write-Host "Setting aside $Name..." -ForegroundColor Gray
-            try {
-                Move-Item -Path "$TargetDir\app\$Name" -Destination "$PreserveDir\$Name" -Force -ErrorAction Stop
-                $PreservedNames += $Name
-            } catch {
-                Write-Host "Warning: could not set aside $Name; it will be lost." -ForegroundColor Yellow
-            }
         }
     }
 
