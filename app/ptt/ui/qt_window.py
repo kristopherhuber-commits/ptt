@@ -38,7 +38,7 @@ from PySide6.QtWidgets import (
     QTabWidget, QVBoxLayout, QWidget,
 )
 
-from ptt import config
+from ptt import __version__, config
 from ptt.ui.panels import InstantApplyPanel
 from ptt.ui.panels.advanced import AdvancedPanel
 from ptt.ui.panels.audio import AudioPanel
@@ -126,7 +126,7 @@ class SettingsWindow(QMainWindow):
 
     def __init__(self, settings, cuda_supported, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("PTT Dictation — Settings")
+        self.setWindowTitle(f"PTT Dictation — Settings — version {__version__}")
         self.resize(*WINDOW_SIZE)
         self.setMinimumSize(*MINIMUM_SIZE)
 
