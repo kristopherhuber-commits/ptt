@@ -10,7 +10,7 @@ Dictation doesn't use an LLM (large language model). It runs Whisper large-v3-tu
 
     p(y | x) = Π_t p(y_t | y_<t, x)        x = audio, y = text
 
-A short clip carries little sound evidence, so the habits the model learned from its training text win. PTT also gives the model no text hints: there is no prompt, and `condition_on_previous_text=False` is set (`app/ptt/transcribe.py:401`).
+A short clip carries little sound evidence, so the habits the model learned from its training text win. PTT also gives the model no text hints: there is no prompt, and `condition_on_previous_text=False` is set (`app/ptt/transcribe.py:406`).
 
 ## Facts checked (2026-11-03)
 
@@ -25,14 +25,14 @@ A short clip carries little sound evidence, so the habits the model learned from
 
 ## Proposed plan
 
-Each step is tried before the next.
+Each step is tried before the next. Steps 1 to 4 make up the trial: step 1 ships first, clips build up for about a week, then steps 2 to 4 follow.
 
 1. **Record.** An opt-in setting saves each clip and its transcript on the machine.
 2. **Label with little effort.**
    - Read-aloud clips come with their text, so they need no cleanup.
    - Natural clips get a second, slower pass: large-v3 with the hint prompt and the vocabulary rules.
    - Only clips where the two passes disagree, or the model is unsure, go to a review screen: play, fix the word, press Enter.
-3. **Measure the baseline** with the metrics below, on a held-out set of about 20% of the clips.
+3. **Measure the baseline** with the metrics below, on a held-out set of about 20% of the clips. The correct text for those clips must be checked by hand or come from read-aloud text. Using the second pass's labels would bias the comparison toward the hint prompt.
 4. **Try the hint prompt.** Pass the `typed` terms from `vocabulary.json` as `hotwords` or `initial_prompt`, then measure again. Stop here if that's good enough.
 5. **Fine-tune** on Darklord (see Training).
 6. **Ship it** as a separate choice in the Model tab, so the stock model stays one click away. Keep it only if it meets the success thresholds.
@@ -46,7 +46,7 @@ Each step is tried before the next.
 
   Reading sounds different from dictating, so read-aloud should stay the smaller share.
 - **Storage.** A plain local folder on each machine. It must not be inside this repo (which is public), the install folder (which the uninstaller deletes) or anything OneDrive syncs.
-  - Audio: 16 kHz mono WAV, the format the app records, at about 115 MB per hour.
+  - Audio: 16 kHz mono 16-bit WAV, at about 115 MB per hour. The app records at 16 kHz, as float32 in memory, and saves nothing to disk today.
   - One text record per clip: the transcript, the corrected text, the machine and the microphone.
 - **Two machines.** Both record.
   - Each saves locally first, then copies new clips to the NAS whenever it can reach it. Tailscale already works off-site.
@@ -74,6 +74,7 @@ Each step is tried before the next.
   - Train in a separate Python environment (PyTorch, `transformers`, `peft`).
   - Merge the LoRA weights into the model.
   - Convert it to float16 with `ct2-transformers-converter`. The app already requires float16 on this card, because int8 fails there (CON-4 in `app/ptt/transcribe.py`).
+  - Compare against a stock model converted the same way. The app's turbo model today is `mobiuslabsgmbh/faster-whisper-large-v3-turbo`, a conversion made by someone else. Converting the untouched `openai/whisper-large-v3-turbo` locally keeps the conversion from skewing the result.
 - **ECC** (error-correcting memory): leave it off. Runs are short, and every model is tested before use. Turning it on needs a reboot and may cost memory and speed; that hasn't been measured on this card.
 - **When.** The same GPU runs dictation and the Concierge's local LLM, so train when you aren't dictating.
 
@@ -94,7 +95,10 @@ The thresholds are set after the baseline.
 ## Versioning and process (proposals)
 
 - **Versioning.** PTT is at 3.2.1. Steps 1 to 4 (recording and hints) would ship as 3.x releases. The personalized model would be 4.0, following v2 (the Qt interface) and v3 (the Concierge).
-- **PRD (product requirements document).** Write it after the trial, once the baseline exists. The prd and builder skills are written for a new product (builder covers v1.0 only), so either adapt them or follow how v2 and v3 were done: a design doc in `docs/ptt-vN-*/`.
+- **PRD (product requirements document).** Write it after the trial, once the baseline exists. The prd and builder skills are written for a new product (builder covers v1.0 only), so either adapt them or follow how v2 and v3 were done.
+  - v2 and v3 each had a folder, `docs/ptt-vN-*/`. v3's holds requirements, design, handoff, verification and session-prompt documents, so that pattern already includes a requirements document much like a PRD.
+  - Both were built on a feature branch (`feature/qt-gui`, `feature/concierge`) and merged at release.
+  - The 3.x releases were committed straight to `main`.
 
 ## Open decisions
 
