@@ -62,7 +62,7 @@ Each machine writes only its own folder, so moving Nightlord's clips to Darklord
 
 **Agreed, the pause toggle:** a tray item. While it's on, dictation works as usual and nothing is saved.
 
-**Storage. Agreed (corrected 2026-11-04): no NAS.** Each machine keeps the clips it records. When it's time to train, Nightlord's clips are moved to Darklord, where training, the second pass and the review run.
+**Storage. Agreed (corrected 2026-11-04): no NAS.** Each machine keeps the clips it records. When it's time to train, Nightlord's clips are moved to Darklord, where training, the second pass and the review run. No backup for now (Kris, 2026-11-04).
 
 **Example:** one clip in this format is saved under `C:\Users\huber\tools\ptt-clips` (the benchmark clip, run through the model on 2026-11-04). Its `mic` is blank and its ID time is the clip's commit time, because the benchmark script recorded neither.
 
@@ -90,7 +90,14 @@ Training is supervised: each example is a pair (audio x, target y), and training
 | Second pass disagreed, resolved in review | what you confirmed |
 | Flagged, never corrected | none: left out of training |
 
-**The target is written the way you want it typed,** not spelled out as spoken. In the example clip, WER was 16/62 = 26% although every word was heard right: all 16 were formatting (digits against spelled-out numbers, "WSL" against "W S L", "push-to-talk"). Training on such a target would teach the model to type "forty-two" instead of "42". A short style guide fixes this (open decision 1); read-aloud scripts follow it.
+**The target is written the way you want it typed,** not spelled out as spoken. In the example clip, WER was 16/62 = 26% although every word was heard right: all 16 were formatting (digits against spelled-out numbers, "WSL" against "W S L", "push-to-talk"). Training on such a target would teach the model to type "forty-two" instead of "42".
+
+**Style guide. Agreed 2026-11-04.** Correct text is written by these rules, and so are read-aloud scripts:
+- **Fix wrong words, not formatting.** Keep the model's capitals, punctuation and number format unless they're wrong for Kris. Training then only has to learn the words, and there's less to type.
+- **Names** as in `vocabulary.json`'s `typed` column: MIND Technology, Seamap, GunLink, Claude Code, Darklord.
+- **Numbers as digits** (1, 42, 2026, v4), as the model already types them.
+- **Acronyms** in capitals with no spaces: WSL, CUDA, GPU.
+- **Fillers** ("um", "uh") and false starts left out, as the model already does.
 
 **The second pass.** A batch job on Darklord re-transcribes the day's clips overnight with a bigger, slower model. It never types into your terminal.
 
@@ -162,6 +169,6 @@ Superseded: the needs are in `docs/requirements.md` §8 and the build order in `
 
 ## Open decisions
 
-1. **The target style guide:** digits or words for numbers, how acronyms and product names are written.
-2. **The clip folder on Nightlord:** the same path, `C:\Users\huber\tools\ptt-clips`?
-3. Still open in `personalization.md`: running the trial (1), versioning (4), the PRD (5), ECC (6), success thresholds (7).
+1. ~~The target style guide.~~ Agreed 2026-11-04 (section 5).
+2. ~~The clip folder on Nightlord.~~ Agreed 2026-11-04: the same path, `C:\Users\huber\tools\ptt-clips`.
+3. Still open: ECC (can wait), and the success thresholds, set after the baseline (increment 6 in `docs/design.md` §11).

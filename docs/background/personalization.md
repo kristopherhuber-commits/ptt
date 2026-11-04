@@ -100,10 +100,10 @@ The thresholds are set after the baseline.
 
 ## Open decisions
 
-1. Run the one-week trial (steps 1 to 4)?
-2. ~~The name and path of the clip folder on each machine.~~ Answered 2026-11-04: `C:\Users\huber\tools\ptt-clips` on Darklord; Nightlord's path still to confirm.
+1. ~~Run the one-week trial (steps 1 to 4)?~~ Superseded 2026-11-04: v4 is being built, starting with a walking skeleton (`docs/design.md` §11).
+2. ~~The name and path of the clip folder on each machine.~~ Answered 2026-11-04: `C:\Users\huber\tools\ptt-clips` on both machines.
 3. ~~The NAS as the hub, or Nightlord copying straight to Darklord.~~ Answered 2026-11-04: no NAS; Nightlord's clips are moved to Darklord when it's time to train.
-4. Versioning: 3.x releases, then 4.0.
-5. When to write the PRD, and how: adapt the skills or follow the v2/v3 pattern.
+4. ~~Versioning: 3.x releases, then 4.0.~~ Answered 2026-11-04: all of this is v4, the training version.
+5. ~~When to write the PRD, and how.~~ Answered 2026-11-04: no PRD (PTT predates the prd and builder skills); v4's needs are in `docs/requirements.md` §8.
 6. Keep ECC off.
 7. The success thresholds, once the baseline is in.
