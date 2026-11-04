@@ -102,6 +102,8 @@ Training is supervised: each example is a pair (audio x, target y), and training
 **The second pass.** A batch job on Darklord re-transcribes the day's clips overnight with a bigger, slower model. It never types into your terminal.
 
 - **Agreed:** large-v3 first (1,550 M parameters against turbo's 809 M), given the vocabulary terms as a hint. A stronger model from another family later. Several newer open models beat large-v3 on the public Open ASR Leaderboard; secondary sources put them about 17 to 26% below its WER. The candidates are chosen by their results on the dev set.
+- **The hint:** the non-empty `typed` terms of `vocabulary.json`'s `always` rules, perhaps also `context[].means`, without common words such as "four" and "weights". Compare passing them as `hotwords` against `initial_prompt`; faster-whisper ignores `hotwords` when `prefix` is set. Dictation and the benchmark stay hint-free, as they already are for the vocabulary rules.
+- **Darklord sleeps.** The overnight pass needs a wake timer, or must run while Darklord is awake. Copying from Nightlord may have to wake it first; the herbert-network skill has the wake-on-LAN command.
 - **Agreed, the purpose is better targets:**
   - It compares its text with what was pasted, ignoring punctuation and case.
   - Where they agree, the pasted text is confirmed as the target.
