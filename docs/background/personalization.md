@@ -1,6 +1,6 @@
 # Personalizing PTT's speech model
 
-Concept note, 2026-11-03. This is exploration only: nothing here is decided unless it says so. The open decisions are listed at the end.
+Concept note, 2026-11-03. This is exploration only: nothing here is decided unless it says so. The open decisions are listed at the end. The data, labelling and measurement plan for steps 1 to 4 is in `training-data-plan.md`, which supersedes the Data and Measuring success sections where they differ.
 
 ## The problem
 
@@ -49,11 +49,9 @@ Each step is tried before the next. Steps 1 to 4 make up the trial: step 1 ships
   - Audio: 16 kHz mono 16-bit WAV, at about 115 MB per hour. The app records at 16 kHz, as float32 in memory, and saves nothing to disk today.
   - One text record per clip: the transcript, the corrected text, the machine and the microphone.
 - **Two machines.** Both record.
-  - Each saves locally first, then copies new clips to the NAS whenever it can reach it. Tailscale already works off-site.
-  - Darklord takes the clips from the NAS to train.
-  - The NAS is always on and doubles as the backup.
+  - Each saves locally. When it's time to train, Nightlord's clips are moved to Darklord. No NAS (Kris, 2026-11-04).
   - Not git: git keeps every audio file in its history forever and gains nothing for files that never change.
-- **Privacy.** The recordings hold whatever is dictated, including MIND MNPI (material non-public information). They stay on the home machines and the NAS: never in a cloud service, and never in this repo.
+- **Privacy.** The recordings hold whatever is dictated, including MIND MNPI (material non-public information). They stay on the home machines: never in a cloud service, and never in this repo.
 - **How much data.** Unknown until measured. A learning curve settles it: train on 25%, 50% and 100% of the clips and plot WER against data size. If WER is still falling at 100%, more data will help. At the rate above, a month on two machines gives several hours of audio.
 
 ## Training
@@ -85,7 +83,7 @@ The thresholds are set after the baseline.
 - **WER** (word error rate) = (S + D + I) / N: words substituted, deleted and inserted, over the number of words actually said. Measured on the held-out clips, overall and for clips under 3 s.
 - **Term accuracy:** the share of vocabulary terms typed correctly. Also count false alarms: a term typed when it wasn't said.
 - **No forgetting:** WER on a public English test set must not rise.
-- **Speed:** unchanged on the bundled benchmark clip.
+- **Speed:** unchanged on the bundled benchmark clip, measured on Nightlord, the slower machine.
 
 **Expectations.**
 - Good odds for the vocabulary terms, because they're consistent, repeated errors. The main risk is over-correction.
@@ -103,8 +101,8 @@ The thresholds are set after the baseline.
 ## Open decisions
 
 1. Run the one-week trial (steps 1 to 4)?
-2. The name and path of the clip folder on each machine.
-3. The NAS as the hub, or Nightlord copying straight to Darklord.
+2. ~~The name and path of the clip folder on each machine.~~ Answered 2026-11-04: `C:\Users\huber\tools\ptt-clips` on Darklord; Nightlord's path still to confirm.
+3. ~~The NAS as the hub, or Nightlord copying straight to Darklord.~~ Answered 2026-11-04: no NAS; Nightlord's clips are moved to Darklord when it's time to train.
 4. Versioning: 3.x releases, then 4.0.
 5. When to write the PRD, and how: adapt the skills or follow the v2/v3 pattern.
 6. Keep ECC off.

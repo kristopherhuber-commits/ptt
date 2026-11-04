@@ -17,7 +17,7 @@ the transcribed text appears at the cursor in whatever application has focus.
 
 **Non-goals:**
 
-- No cloud transcription. Audio never leaves the machine.
+- No cloud transcription. Audio never leaves the user's own machines.
 - No always-on listening. The microphone is only sampled while the chord is held.
 - Not a voice-command system. The output is text, never actions.
 - Not cross-platform. See `CON-1`.
@@ -154,3 +154,48 @@ appear as a requirement here or be a pure implementation defect.
 | #9 | `FR-C3` |
 | #10 | Build-script defect. No requirement. |
 | #11 | `FR-C3`, `FR-4`, `OBS-1`, `OBS-2` |
+
+---
+
+## 8. v4 — Training the model on the user's own speech
+
+*Added for v4. Background: [personalization.md](background/personalization.md) and
+[training-data-plan.md](background/training-data-plan.md).*
+
+On short replies the model often types what it expects to hear rather than what was said,
+such as "cloud code" for "Claude Code": a short clip gives it little sound to go on. v4
+saves the user's dictation, gets each clip's correct text for as little of the user's effort
+as possible, fine-tunes the dictation model (`large-v3-turbo`) on it, and ships the result
+only if it measurably beats the stock model.
+
+Each *threshold* below is set once the stock model has been measured on the user's own
+clips. *Held-out clips* are kept out of training and used only to measure.
+
+| ID | Need | Judged by |
+|---|---|---|
+| `FR-11` | When saving is on, every dictation is saved: its audio, what the model typed, what was pasted, and the settings in force. They go to a clips folder set per machine, outside this repo and the install folder. | Dictate ten clips: ten audio files and ten records appear, each matching what was pasted. |
+| `FR-12` | Saving can be paused from the tray. While paused, dictation works as usual and nothing is saved. | Pause, dictate three clips, resume, dictate one: only the last is saved. |
+| `FR-13` | Double-tapping the dictation key marks the last clip as wrong. The taps type nothing (`FR-3`) and make no sound; a red mark over the terminal's text cursor confirms the flag for half a second. | After a wrong paste in the terminal, double-tap: the mark shows on the cursor, nothing is typed, and the clip is flagged. |
+| `FR-14` | A review window gives clips their correct text, flagged clips first. It plays the clip and shows what was typed with a suggested correction; Enter saves the suggestion, an edit replaces it, and a clip can be discarded. | Review ten flagged clips: each ends with correct text or discarded, most with one key press. |
+| `FR-15` | Errors the user didn't flag are found without their effort: on Darklord, clips get a second, slower transcription overnight, and a clip where it disagrees with what was pasted joins the review queue. | After a week, the review queue holds unflagged clips whose pasted text was wrong. |
+| `FR-16` | A read-aloud mode shows one line of a script at a time and records the user reading it, so the clip's correct text is known. | Record a ten-line script: ten clips, each with its line as its correct text. |
+| `FR-17` | The user can train a model from the clips collected so far. The result is a separate choice in the Model tab on both machines; the stock model stays one click away. | Run a training: the new model appears in the Model tab on both machines, and switching between it and the stock model works. |
+| `FR-18` | A report compares two models on the held-out clips, for each measure in `NFR-8` to `NFR-13`, with how certain each difference is. | The report for the stock and trained models shows every measure and whether each difference is real or within chance. |
+| `NFR-8` | Short replies (1 to 7 words) are typed as said. | The share of held-out short replies typed exactly right, ignoring capitals and punctuation, beats the stock model by the threshold. In a week of real use, flags per 100 clips fall. |
+| `NFR-9` | Vocabulary terms (Claude Code, MIND Technology, Seamap, GunLink, ...) are typed right without the vocabulary rules. | The share of terms typed right in the read-aloud test beats the stock model by the threshold. In a week of real use, the rules fire less often per 100 words. |
+| `NFR-10` | No over-correction: everyday words that sound like a term ("cloud", "boy", "mind") are still typed when said. | In the read-aloud test, terms typed where they weren't said stay within the threshold. |
+| `NFR-11` | Fewer errors overall. | The word error rate on held-out clips is lower than the stock model's. |
+| `NFR-12` | General English no worse. | The word error rate on a public English test set rises by no more than the threshold. |
+| `NFR-13` | No slower: `NFR-1` still holds on both machines. | Latency on the benchmark clip on Nightlord, the slower machine, stays within the threshold of the stock model's. |
+| `NFR-14` | Saving, the overnight pass and training never delay dictation. | Dictate during an overnight pass and during training: `NFR-1` holds. |
+| `OBS-5` | A clip that fails to save is logged and shown, never silent. | Make the clips folder unwritable and dictate: the failure is shown. |
+
+| ID | Constraint |
+|---|---|
+| `CON-6` | Saved clips stay on the user's own machines: never on the NAS or a cloud service, and never in this repo, which is public. They hold whatever was dictated, including MIND's non-public information. Each machine keeps its own clips; when it's time to train, Nightlord's are moved to Darklord, where training runs. |
+| `CON-7` | The trained model is `large-v3-turbo`, fine-tuned and converted to run under `CON-4`. |
+
+**Out of scope for v4:** training anywhere but Darklord; a dictation model other than
+`large-v3-turbo`; the confirming mark outside the terminal (the flag itself works
+anywhere); recording which application the text went to; capturing edits made after
+pasting; retraining on a schedule.
