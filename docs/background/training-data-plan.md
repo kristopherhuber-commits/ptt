@@ -33,11 +33,12 @@ Every field is saved from day one, even those not needed yet: none can be recove
 
 ```
 ptt-clips\
-  labels.jsonl                    correct text, written later (section 5)
-  <machine>\<yyyy-mm>\
-    <id>.wav                      the audio
-    recordings.jsonl              one record per clip, written at dictation time
-    flags.jsonl                   one line per flag (section 4)
+  <machine>\
+    labels.jsonl                  correct text, written later (section 5)
+    <yyyy-mm>\
+      <id>.wav                    the audio
+      recordings.jsonl            one record per clip, written at dictation time
+      flags.jsonl                 one line per flag (section 4)
 ```
 
 Each machine writes only its own folder, so moving Nightlord's clips to Darklord never collides. The recordings file is only ever appended to.
@@ -157,11 +158,7 @@ Ship thresholds are set after the baseline (open decision 7 in `personalization.
 
 ## 9. Order of work
 
-1. **Saving** (a 3.x release): section 3, the double-tap flag with its cursor mark, the pause toggle.
-2. **Read-aloud script,** following the style guide: drafted, approved, recorded.
-3. **Second pass and review window,** once clips have built up.
-4. **Baseline and hints** measured on the test set.
-5. **Training,** when there is enough data.
+Superseded: the needs are in `docs/requirements.md` §8 and the build order in `docs/design.md` §11.
 
 ## Open decisions
 

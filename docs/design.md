@@ -595,3 +595,70 @@ put `NFR-6`/`NFR-7` back in play for no gain.
    a machine with no CUDA device and criterion 10 a clean Windows 11 machine and a run of
    `install.bat`. §7 of that document is the list, and it ends with the steps a person
    has to take.
+
+---
+
+## 11. v4 — Training (planned)
+
+Builds the needs in [requirements.md](requirements.md) §8. The data, labelling and
+measurement detail is in [training-data-plan.md](background/training-data-plan.md).
+Built on the `feature/training` branch and merged into `main` at the v4.0 release.
+
+### 11.1 Parts
+
+| Part | Where | Does | Needs |
+|---|---|---|---|
+| Clip saver | `app/ptt/clips.py` (new), called from the engine after each paste | Writes each clip's WAV and record to `<clips folder>\<machine>\<yyyy-mm>\` | `FR-11`, `OBS-5` |
+| Flag and mark | engine (double-tap = two discarded holds, `FR-3`), a Qt overlay, the caret position from UI Automation | Marks the last clip wrong; draws the red mark on the terminal's cursor | `FR-13` |
+| Pause | tray menu | Turns saving off and on | `FR-12` |
+| Review window | a PTT window, opened from the tray | Plays a clip, shows what was typed and a suggestion, saves the correct text | `FR-14` |
+| Read-aloud mode | a PTT window, opened from the tray | Shows a script line, records it with the hotkey, saves the line as correct text | `FR-16` |
+| Trained-model choice | `transcribe.py`, `config.FIELDS`, the Model panel | Lists the models in the trained-models folder beside the stock tiers | `FR-17`, `CON-7` |
+| Training tools | `training/` in this repo (code only) | Labelling for the skeleton, LoRA training, merge and float16 conversion, the overnight second pass, the comparison report, moving Nightlord's clips | `FR-15`, `FR-17`, `FR-18` |
+
+### 11.2 Where things live
+
+- **Clips:** `C:\Users\huber\tools\ptt-clips` on both machines. Each machine's folder
+  holds its own `labels.jsonl` and flags, so moving Nightlord's folder to Darklord carries
+  everything with it. (This replaces the single root `labels.jsonl` in the data plan.)
+- **Training environment and trained models:** `C:\Users\huber\tools\ptt-train\`, with its
+  own `.venv` (PyTorch, `transformers`, `peft`, `ctranslate2`, `faster-whisper`). Never in
+  the app's `.venv`: `build_portable.py` zips that wholesale (§8), so PyTorch would ship to
+  every install.
+- **Trained models** in `ptt-train\models\<name>\` on both machines; PTT reads that folder.
+- **Reports** in `ptt-train\reports\`, never in this repo: they quote what was dictated
+  (`CON-6`).
+- **Moving files:** from Nightlord, over its existing SSH link to Darklord (Tailscale):
+  Nightlord's clips to Darklord, trained models back.
+- **Trying a build:** each increment is built with `build_portable.py` and installed with
+  `install.bat`. The v3.2.1 archive is kept, so rolling back takes about a minute.
+
+### 11.3 Increments
+
+Each ends with something the user tries on the real machines from written steps.
+
+1. **Walking skeleton:** the trained model, end to end, as thin as it can be. Saving is
+   installed first, so clips pile up while the rest is built. Then: a few dozen clips get
+   correct text from a command-line labeller; a tiny LoRA run on Darklord; merge and
+   convert to float16; the result appears in the Model tab on both machines; a first
+   report compares it with stock on a few held-out clips. The numbers will mean nothing
+   yet; the chain working is the point. **Unknowns:** PyTorch training on the Blackwell
+   card under Windows; converting the merged model.
+2. **Flag, mark and pause** (`FR-12`, `FR-13`, `OBS-5`). **Unknown:** reading the caret
+   position from Python, either with a small new dependency or plain Windows calls.
+3. **Review window** (`FR-14`), with the style guide on screen. Until the second pass
+   exists, the suggestion is the clip dictated right after a flag.
+4. **Second pass and moving clips** (`FR-15`, `NFR-14`): large-v3 with the vocabulary
+   terms as a hint, overnight on Darklord; disagreements join the review queue.
+   **Unknown:** sharing the GPU with dictation and the Concierge's model.
+5. **Read-aloud mode and the test script** (`FR-16`): Claude drafts the script (terms and
+   look-alike words, in the style guide); the user approves and records it.
+6. **Data sets and the baseline** (`FR-18`, `NFR-8` to `NFR-13`): the whole-day split, the
+   full report with its uncertainty, and the stock model measured with and without hints,
+   including the public English set and latency on Nightlord. The user then sets the
+   thresholds.
+7. **Training for real** (`FR-17`): full runs once there is enough data, LoRA against
+   decoder-only, the learning curve; the best model offered on both machines.
+
+**Release v4.0:** a week of real use with the trained model, the final report, the
+changelog's first entry, and the merge into `main`.
