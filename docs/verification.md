@@ -695,6 +695,8 @@ unknowns `design.md` §11.3 names for this increment are `V-M-108` and `V-M-110`
 | `V-M-112` | **The labeller** with scripted input and sound stubbed | ✅ pass. Enter accepted, `?` replayed, text replaced, `-` discarded, `q` stopped; three labels appended |
 | `V-M-113` | **The double-tap mark on the real desktop** (4.0.0.dev2; the same window in dev3): `TapMark.flash()` with Windows Terminal in front, then a screen grab | ✅ pass. Terminal owns no caret, so the mark sat at the window's centre: physical (971, 753) → logical (647, 502) at 150 %. A red asterisk with a white halo, drawn over the text; visible at 150 ms, gone by 650 ms; the foreground window unchanged throughout |
 | `V-M-114` | **The labeller puts flagged clips first** (4.0.0.dev3): three clips saved with the app's code, the newest flagged with `flag_last`, then `label.py` | ✅ pass. "3 to do, 1 of them flagged"; the newest clip shown first, marked FLAGGED |
+| `V-M-115` | **The dev3 archive** | ✅ pass. `build_portable.py`'s own archive audit passed; the zip (1,785,416,875 bytes) holds `__version__ = "4.0.0.dev3"`, `clips.flag_last` and no `delete_last`, and `paths.py` names `ptt-v4-training` |
+| `V-M-116` | **The flag on Darklord, by the user** (dev3 installed 2026-11-05 09:11) | ✅ pass. Three dictations, each double-tapped: `flags.jsonl` holds exactly their three ids, every WAV and record kept, the log says "flagged … as wrong" for each; the red asterisk seen, in the middle of Windows Terminal. Two double-taps before saving was switched on logged "saving is off" and flagged nothing |
 
 Not yet run, and the user's to run (§7): `FR-11`'s ten clips on each machine, the
 double-tap on each machine, `FR-17` on both machines, and the first report on real clips.
@@ -829,7 +831,7 @@ question. If any of them is a box, the fix is a text label.
 
 | Date | Commit | Change |
 |---|---|---|
-| 2026-11-05 | (this commit) | **4.0.0.dev3: the double-tap flags the newest clip instead (`FR-13` as written)**, after the user reconsidered; a tap with another key pressed is no longer a tap; the labeller shows flagged clips first. `V-CL-06` and `V-CL-07` rewritten; §5.7 `V-M-114`. Suite 928 → 934 |
+| 2026-11-05 | `4bfae4d` | **4.0.0.dev3: the double-tap flags the newest clip instead (`FR-13` as written)**, after the user reconsidered; a tap with another key pressed is no longer a tap; the labeller shows flagged clips first. `V-CL-06` and `V-CL-07` rewritten; §5.7 `V-M-114`. Suite 928 → 934 |
 | 2026-11-05 | `bbbc101` | **4.0.0.dev2: the double-tap deletes the newest clip**, at the user's request, ahead of increment 2. §3.5 gains `V-CL-06` … `V-CL-08`; §5.7 `V-M-113`. Suite 913 → 928 |
 | 2026-11-04 | `86d6ed3` … `c67dfad` | **v4 increment 1 (4.0.0.dev1): saving, trained models in the Model tab, the training tools.** §3.5 added with `V-CL-01` … `V-CL-05` and `V-TM-01` … `V-TM-03`; §5.7 with `V-M-107` … `V-M-112`. Suite 881 → 913 |
 | 2026-10-20 | `955268b` | **v3.2.1: uninstall frees the shared blob store.** The Whisper weights in `hub\blobs` whose `.refs` name only `faster-whisper` repositories are removed too. `V-M-104` … `V-M-106`, `development_history.md` #66 |
