@@ -20,7 +20,7 @@ import wave
 import numpy as np
 
 REPO_APP = r"C:\Users\huber\git\ptt\app"
-CLIP_ROOT = r"C:\Users\huber\tools\ptt-clips"
+CLIP_ROOT = r"C:\Users\huber\tools\ptt-v4-training\ptt-clips"
 VOCAB = r"C:\Users\huber\agent-configs\vocabulary.json"
 MACHINE = "darklord"
 # The benchmark clip's commit time (0f70a76); the real recording time isn't stored.

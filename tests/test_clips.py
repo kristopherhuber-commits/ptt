@@ -179,9 +179,9 @@ def test_the_concierge_cannot_switch_saving_on_or_move_the_clips():
 
 def test_the_clips_folder_is_stored_unexpanded_and_expanded_when_used(monkeypatch):
     monkeypatch.setenv("USERPROFILE", r"C:\Users\someone")
-    assert config.Settings().clips_folder == r"%USERPROFILE%\tools\ptt-clips"
+    assert config.Settings().clips_folder == r"%USERPROFILE%\tools\ptt-v4-training\ptt-clips"
     assert paths.user_folder(paths.DEFAULT_CLIPS_FOLDER) == \
-        os.path.abspath(r"C:\Users\someone\tools\ptt-clips")
+        os.path.abspath(r"C:\Users\someone\tools\ptt-v4-training\ptt-clips")
 
 
 def test_an_empty_clips_folder_is_refused(tmp_path):

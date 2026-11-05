@@ -22,11 +22,15 @@ import re
 
 HOME = os.path.expanduser("~")
 
+#: Everything v4's training keeps outside the repo: clips, the training
+#: environment, models, runs and reports.
+TRAINING_HOME = os.path.join(HOME, "tools", "ptt-v4-training")
+
 #: The defaults the app uses too (`app/ptt/paths.py`, `config.FIELDS`).
-CLIPS_ROOT = os.path.join(HOME, "tools", "ptt-clips")
+CLIPS_ROOT = os.path.join(TRAINING_HOME, "ptt-clips")
 #: `PTT_TRAIN_ROOT` moves models, runs and reports, for a dry run that must not
 #: put a model in PTT's Model tab.
-TRAIN_ROOT = os.environ.get("PTT_TRAIN_ROOT") or os.path.join(HOME, "tools", "ptt-train")
+TRAIN_ROOT = os.environ.get("PTT_TRAIN_ROOT") or os.path.join(TRAINING_HOME, "ptt-train")
 MODELS_DIR = os.path.join(TRAIN_ROOT, "models")
 RUNS_DIR = os.path.join(TRAIN_ROOT, "runs")
 REPORTS_DIR = os.path.join(TRAIN_ROOT, "reports")
@@ -34,7 +38,7 @@ REPORTS_DIR = os.path.join(TRAIN_ROOT, "reports")
 #: The stock model, converted by the same converter as every trained one, so
 #: the conversion cannot skew a comparison (training-data-plan.md section 8).
 #: Outside MODELS_DIR, so it does not appear in PTT's Model tab.
-STOCK_CT2 = os.path.join(HOME, "tools", "ptt-train", "baseline", "stock-large-v3-turbo-f16")
+STOCK_CT2 = os.path.join(TRAINING_HOME, "ptt-train", "baseline", "stock-large-v3-turbo-f16")
 
 BASE_MODEL = "openai/whisper-large-v3-turbo"
 

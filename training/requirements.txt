@@ -1,8 +1,8 @@
-# The training environment (v4): C:\Users\huber\tools\ptt-train\.venv, never the
+# The training environment (v4): C:\Users\huber\tools\ptt-v4-training\ptt-train\.venv, never the
 # repo's .venv, which build_portable.py zips into every install (design.md 8, 11.2).
 #
-#   uv venv --python 3.14 C:\Users\huber\tools\ptt-train\.venv
-#   uv pip install --python C:\Users\huber\tools\ptt-train\.venv\Scripts\python.exe ^
+#   uv venv --python 3.14 C:\Users\huber\tools\ptt-v4-training\ptt-train\.venv
+#   uv pip install --python C:\Users\huber\tools\ptt-v4-training\ptt-train\.venv\Scripts\python.exe ^
 #       -r training\requirements.txt --index-strategy unsafe-best-match
 #
 # PyTorch's CUDA 13.0 build runs on the RTX PRO 6000 Blackwell (checked 2026-11-04).

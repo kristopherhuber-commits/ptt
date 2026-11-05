@@ -110,7 +110,7 @@ These are the complete settings this application has. There are no others. A nam
 ### `clips_folder`
 
 - **Type:** text
-- **Default:** `%USERPROFILE%\tools\ptt-clips`
+- **Default:** `%USERPROFILE%\tools\ptt-v4-training\ptt-clips`
 - **The Concierge may change it:** no
 - **What it does:** Where saved dictations go. Each machine writes its own <machine> subfolder, one <yyyy-mm> folder per month. %USERPROFILE% and ~ are expanded when it is used.
 - **When to change it:** Change it only to move the clips to another local disk.
@@ -119,7 +119,7 @@ These are the complete settings this application has. There are no others. A nam
 ### `trained_models_folder`
 
 - **Type:** text
-- **Default:** `%USERPROFILE%\tools\ptt-train\models`
+- **Default:** `%USERPROFILE%\tools\ptt-v4-training\ptt-train\models`
 - **The Concierge may change it:** no
 - **What it does:** Where models trained on your speech are (FR-17). Each folder in it holding a model.bin is listed in the Model tab as trained:<folder>. %USERPROFILE% and ~ are expanded when it is used.
 - **When to change it:** Leave it unless the training tools write somewhere else.

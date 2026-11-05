@@ -1,7 +1,7 @@
 """
 Compare a trained model with stock on the held-out clips (FR-18, crude).
 
-    C:\\Users\\huber\\tools\\ptt-train\\.venv\\Scripts\\python.exe training\\report.py
+    C:\\Users\\huber\\tools\\ptt-v4-training\\ptt-train\\.venv\\Scripts\\python.exe training\\report.py
 
 Three columns, each decoded exactly as PTT dictates (the app's own
 `transcribe_clip`: same beam, same silence filter, same cleanup):

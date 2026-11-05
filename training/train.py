@@ -1,7 +1,7 @@
 """
 Train a LoRA on the labelled clips, merge it, and convert the result for PTT.
 
-    C:\\Users\\huber\\tools\\ptt-train\\.venv\\Scripts\\python.exe training\\train.py
+    C:\\Users\\huber\\tools\\ptt-v4-training\\ptt-train\\.venv\\Scripts\\python.exe training\\train.py
 
 1. **Data:** every labelled clip from every machine under the clips folder,
    except the held-out ones (`common.is_held_out`) and clips over 30 s, which
@@ -183,8 +183,11 @@ def main():
     torch.cuda.empty_cache()
 
     print(f"Converting to float16 CTranslate2 in {out_dir}...")
-    converter = os.path.join(os.path.dirname(sys.executable), "ct2-transformers-converter.exe")
-    subprocess.run([converter, "--model", merged_dir, "--output_dir", out_dir,
+    # `ct2-transformers-converter` run as a module, not through its .exe: a
+    # launcher has the venv's path baked in, so a moved venv breaks it, and
+    # Smart App Control blocks a freshly written one.
+    converter = [sys.executable, "-m", "ctranslate2.converters.transformers"]
+    subprocess.run([*converter, "--model", merged_dir, "--output_dir", out_dir,
                     "--copy_files", "tokenizer.json", "preprocessor_config.json",
                     "--quantization", "float16"], check=True)
 

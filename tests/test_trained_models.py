@@ -69,10 +69,10 @@ def test_the_model_setting_still_refuses_an_unknown_name(tmp_path):
 
 def test_the_trained_models_folder_is_not_the_concierges_to_move():
     assert "trained_models_folder" not in config.WRITABLE_KEYS
-    assert config.Settings().trained_models_folder == r"%USERPROFILE%\tools\ptt-train\models"
+    assert config.Settings().trained_models_folder == r"%USERPROFILE%\tools\ptt-v4-training\ptt-train\models"
 
 
 def test_the_trained_models_folder_expands_to_the_users_tools(monkeypatch):
     monkeypatch.setenv("USERPROFILE", r"C:\Users\someone")
     assert paths.user_folder(paths.DEFAULT_TRAINED_MODELS_FOLDER) == \
-        os.path.abspath(r"C:\Users\someone\tools\ptt-train\models")
+        os.path.abspath(r"C:\Users\someone\tools\ptt-v4-training\ptt-train\models")

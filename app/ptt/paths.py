@@ -74,10 +74,10 @@ def local_model_dir(model_size):
 # names no machine's paths, and one config.json means the same on every machine.
 
 #: Where saved dictations go (FR-11): `<this>\<machine>\<yyyy-mm>\`.
-DEFAULT_CLIPS_FOLDER = r"%USERPROFILE%\tools\ptt-clips"
+DEFAULT_CLIPS_FOLDER = r"%USERPROFILE%\tools\ptt-v4-training\ptt-clips"
 
 #: Where trained models are (FR-17): one folder each, `<this>\<name>\`.
-DEFAULT_TRAINED_MODELS_FOLDER = r"%USERPROFILE%\tools\ptt-train\models"
+DEFAULT_TRAINED_MODELS_FOLDER = r"%USERPROFILE%\tools\ptt-v4-training\ptt-train\models"
 
 
 def user_folder(setting):
