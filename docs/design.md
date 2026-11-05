@@ -609,7 +609,7 @@ Built on the `feature/training` branch and merged into `main` at the v4.0 releas
 | Part | Where | Does | Needs |
 |---|---|---|---|
 | Clip saver | `app/ptt/clips.py` (new), called from the engine after each paste | Writes each clip's WAV and record to `<clips folder>\<machine>\<yyyy-mm>\` | `FR-11`, `OBS-5` |
-| Flag and mark | engine (double-tap = two discarded holds, `FR-3`), a Qt overlay, the caret position from UI Automation | Marks the last clip wrong; draws the red mark on the terminal's cursor | `FR-13` |
+| Flag and mark | engine (double-tap = two discarded holds, `FR-3`, with no other key pressed), `clips.flag_last`, a Qt overlay (`ui/qt_tapmark.py`) | Flags the newest clip as wrong in its month's `flags.jsonl`; draws the red mark over the caret Windows reports, else the window's centre. On the terminal's own cursor, from UI Automation: increment 2 | `FR-13` |
 | Pause | tray menu | Turns saving off and on | `FR-12` |
 | Review window | a PTT window, opened from the tray | Plays a clip, shows what was typed and a suggestion, saves the correct text | `FR-14` |
 | Read-aloud mode | a PTT window, opened from the tray | Shows a script line, records it with the hotkey, saves the line as correct text | `FR-16` |
@@ -618,10 +618,13 @@ Built on the `feature/training` branch and merged into `main` at the v4.0 releas
 
 ### 11.2 Where things live
 
-- **Clips:** `C:\Users\huber\tools\ptt-clips` on both machines. Each machine's folder
+- **One folder for everything v4 keeps outside the repo:** `C:\Users\huber\tools\ptt-v4-training\`
+  on both machines (moved there 2026-11-05), holding `ptt-clips`, `ptt-train` and
+  `ptt-spike-example`.
+- **Clips:** `ptt-v4-training\ptt-clips` on both machines. Each machine's folder
   holds its own `labels.jsonl` and flags, so moving Nightlord's folder to Darklord carries
   everything with it. (This replaces the single root `labels.jsonl` in the data plan.)
-- **Training environment and trained models:** `C:\Users\huber\tools\ptt-train\`, with its
+- **Training environment and trained models:** `ptt-v4-training\ptt-train\`, with its
   own `.venv` (PyTorch, `transformers`, `peft`, `ctranslate2`, `faster-whisper`). Never in
   the app's `.venv`: `build_portable.py` zips that wholesale (§8), so PyTorch would ship to
   every install.
@@ -643,9 +646,13 @@ Each ends with something the user tries on the real machines from written steps.
    convert to float16; the result appears in the Model tab on both machines; a first
    report compares it with stock on a few held-out clips. The numbers will mean nothing
    yet; the chain working is the point. **Unknowns:** PyTorch training on the Blackwell
-   card under Windows; converting the merged model.
-2. **Flag, mark and pause** (`FR-12`, `FR-13`, `OBS-5`). **Unknown:** reading the caret
-   position from Python, either with a small new dependency or plain Windows calls.
+   card under Windows; converting the merged model. The flag (`FR-13`) was brought
+   forward into this increment on 2026-11-05: the double-tap flags the newest clip, with
+   the red mark, and the labeller shows flagged clips first.
+2. **Pause, the mark on the cursor, and failures shown** (`FR-12`, `FR-13`'s mark on the
+   terminal's cursor, `OBS-5`). **Unknown:** reading the terminal's cursor position from
+   Python through UI Automation, either with a small new dependency or plain Windows
+   calls.
 3. **Review window** (`FR-14`), with the style guide on screen. Until the second pass
    exists, the suggestion is the clip dictated right after a flag.
 4. **Second pass and moving clips** (`FR-15`, `NFR-14`): large-v3 with the vocabulary

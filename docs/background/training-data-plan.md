@@ -25,7 +25,7 @@ Everyday signs of success: the vocabulary rules fire less often, and you flag fe
 
 ## 3. What gets saved
 
-**Agreed:** clips live in `C:\Users\huber\tools\ptt-clips` (beside `gpu-bench`), outside this repo. The path is a setting, so Nightlord's can differ.
+**Agreed:** clips live in `C:\Users\huber\tools\ptt-v4-training\ptt-clips`, outside this repo, beside the training environment (`ptt-train`) in one folder for everything v4 keeps outside the repo (moved there 2026-11-05). The path is a setting, so Nightlord's can differ.
 
 Every field is saved from day one, even those not needed yet: none can be recovered later. Saving the audio is what lets every future model be re-run on the same clips and compared fairly.
 
@@ -64,7 +64,7 @@ Each machine writes only its own folder, so moving Nightlord's clips to Darklord
 
 **Storage. Agreed (corrected 2026-11-04): no NAS.** Each machine keeps the clips it records. When it's time to train, Nightlord's clips are moved to Darklord, where training, the second pass and the review run. No backup for now (Kris, 2026-11-04).
 
-**Example:** one clip in this format is saved under `C:\Users\huber\tools\ptt-clips` (the benchmark clip, run through the model on 2026-11-04). Its `mic` is blank and its ID time is the clip's commit time, because the benchmark script recorded neither.
+**Example:** one clip in this format is kept in `C:\Users\huber\tools\ptt-v4-training\ptt-spike-example` (the benchmark clip, run through the model on 2026-11-04), outside the clips folder so training never reads it. Its `mic` is blank and its ID time is the clip's commit time, because the benchmark script recorded neither.
 
 ## 4. Flagging a wrong clip
 
@@ -172,5 +172,5 @@ Superseded: the needs are in `docs/requirements.md` §8 and the build order in `
 ## Open decisions
 
 1. ~~The target style guide.~~ Agreed 2026-11-04 (section 5).
-2. ~~The clip folder on Nightlord.~~ Agreed 2026-11-04: the same path, `C:\Users\huber\tools\ptt-clips`.
+2. ~~The clip folder on Nightlord.~~ Agreed 2026-11-04: the same path, `C:\Users\huber\tools\ptt-clips`; moved 2026-11-05 to `C:\Users\huber\tools\ptt-v4-training\ptt-clips` on both.
 3. Still open: ECC (can wait), and the success thresholds, set after the baseline (increment 6 in `docs/design.md` §11).
