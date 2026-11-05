@@ -26,13 +26,13 @@ Click Yes on the UAC prompt. The installer should say "Installing PTT Dictation 
 Dictate something, read it, then tap the dictation key twice quickly: two short taps, the second within half a second of the first, no other key. Two red asterisks show for half a second: a small one right at the text cursor, like a typed `*`, and a big one in the middle of the window. Nothing is typed. Do it for two or three dictations, then:
 
 ```powershell
-$m = "$env:USERPROFILE\tools\ptt-v4-training\ptt-clips\darklord\2026-11"
+$m = "$env:USERPROFILE\tools\ptt-v4-training\ptt-clips\$($env:COMPUTERNAME.ToLower())\$((Get-Date).ToUniversalTime().ToString('yyyy-MM'))"
 Get-Content $m\recordings.jsonl | Select-Object -Last 3 | ForEach-Object { $r = $_ | ConvertFrom-Json; "$($r.id)  $($r.pasted_text)" }
 Get-Content $m\flags.jsonl | ForEach-Object { ($_ | ConvertFrom-Json).id }
 (Get-ChildItem $m -Filter *.wav).Count; (Get-Content $m\recordings.jsonl).Count
 ```
 
-Each flagged id is the dictation just before its double-tap. The two counts at the end are equal and go up by one per dictation: every WAV has its record and nothing was deleted. `debug_log.txt` says "Double-tap: flagged <id> as wrong" for each. A second double-tap on the same clip adds nothing ("already flagged").
+Each flagged id is the dictation just before its double-tap. The two counts at the end are equal and go up by one per dictation: every WAV has its record and nothing was deleted. `debug_log.txt` says "Double-tap: flagged <id> as wrong" for each. A second double-tap on the same clip adds nothing ("already flagged"). If the four lines just sit at the prompt after pasting, press Enter. The first line finds this machine's folder for this month by itself.
 
 ## Step 3 — Darklord: check right Ctrl+C is not a flag (no commands)
 
@@ -53,13 +53,13 @@ Then right-click the tray icon and switch on **Save clips for training** (it sho
 ## Step 5 — Nightlord: dictate, flag, check
 
 ```powershell
-$m = "$env:USERPROFILE\tools\ptt-v4-training\ptt-clips\nightlord\2026-11"
+$m = "$env:USERPROFILE\tools\ptt-v4-training\ptt-clips\$($env:COMPUTERNAME.ToLower())\$((Get-Date).ToUniversalTime().ToString('yyyy-MM'))"
 Get-Content $m\recordings.jsonl | Select-Object -Last 3 | ForEach-Object { $r = $_ | ConvertFrom-Json; "$($r.id)  $($r.pasted_text)" }
 Get-Content $m\flags.jsonl | ForEach-Object { ($_ | ConvertFrom-Json).id }
 (Get-ChildItem $m -Filter *.wav).Count; (Get-Content $m\recordings.jsonl).Count
 ```
 
-Dictate and double-tap first, as in Step 2. Then dictate normally on both machines, flagging anything that comes out wrong.
+Dictate and double-tap first, as in Step 2, then run the check (the same lines as Step 2). If it says it cannot find the path, Nightlord's PTT is saving somewhere else (an older build there would have kept the old folders): tell Claude. Then dictate normally on both machines, flagging anything that comes out wrong.
 
 # Part B: label, train, compare (Darklord, once it has a few dozen clips)
 

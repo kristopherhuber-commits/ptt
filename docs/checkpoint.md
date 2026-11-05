@@ -12,7 +12,7 @@ This session (named `v4inc1`): "Read the checkpoint, then build v4 increment 1, 
 
 ## Status
 
-**Increment 1 is built as 4.0.0.dev4 and installed on Darklord (09:29, 2026-11-05), saving on. Part A steps 1–3 passed on Darklord (`V-M-116`, `V-M-119`, `V-M-120`). Still to come: Part A steps 4–5 on Nightlord, then Part B. Kris stepped away to other tasks on 2026-11-05 and will finish later.** Everything Claude can do before the rest of his try-out is done.
+**Increment 1 is built as 4.0.0.dev4 and installed on Darklord (09:29, 2026-11-05), saving on. Part A steps 1–3 passed on Darklord on dev4 (`V-M-119`, `V-M-120`; `V-M-116` was the same flag test on dev3). Still to come: Part A steps 4–5 on Nightlord, then Part B. Kris stepped away to other tasks on 2026-11-05 and will finish later.** Everything Claude can do before the rest of his try-out is done.
 
 Commits on `feature/training`, oldest first:
 - `86d6ed3` saving (`FR-11`): `app/ptt/clips.py` (new), `transcribe.transcribe_clip` + `Transcript` + `model_identity`, `vocabulary.apply_rules_traced`, settings `save_clips` / `clips_folder`, tray item "Save clips for training" (`app/ptt/ui/qt_tray.py`), engine hook after the paste (`Engine._save_clip`), knowledge pack regenerated.
@@ -44,8 +44,8 @@ Commits on `feature/training`, oldest first:
 
 ## Next action
 
-Wait for Kris to come back with the rest of the try-out, then act on what he reports:
-1. **Steps 4–5 (Nightlord):** if anything failed, fix, rebuild and say what to reinstall. **Build on Darklord**, the only machine that has built: close anything running from `.venv`, then `.venv\Scripts\python.exe build_portable.py`. A fresh clone elsewhere would first need `.venv` from `requirements.txt` and `python build_llama_runtime.py` (README §2); never tried. Install is always `install.bat`; the installed `config.json` survives an upgrade. Update `docs/script-v4inc1.md` for any change (bump the dev number in it).
+Work on Darklord: building, the training environment, the clips and the reports exist only there (from Nightlord, `ssh darklord` works over Tailscale; Darklord cannot reach Nightlord). As of 10:40, 2026-11-05 Kris had reported nothing beyond Darklord's steps 1–3. Wait for him to come back with the rest of the try-out, then act on what he reports:
+1. **Steps 4–5 (Nightlord):** if anything failed, fix, rebuild and say what to reinstall. **Build on Darklord**, the only machine that has built: close anything running from `.venv`, then `.venv\Scripts\python.exe build_portable.py`. A fresh clone elsewhere would first need `.venv` from `requirements.txt` and `python build_llama_runtime.py` (`build_portable.py` refuses without the llama runtime it fetches; README §2 omits that step); never tried. Install is always `install.bat`; the installed `config.json` survives an upgrade. Update `docs/script-v4inc1.md` for any change (bump the dev number in it).
 2. **Part B:** read the newest report in `C:\Users\huber\tools\ptt-v4-training\ptt-train\reports\` (it quotes dictation: never publish it as an Artifact or copy it into the repo, `CON-6`), fix anything that failed.
 3. Record each result in `docs/verification.md` §5.7 as `V-M-121` onwards; close the §7 row "v4 increment 1 on the real machines" when all are in.
 
@@ -61,7 +61,7 @@ Done = Kris has run Part A and Part B on both machines. Then: ask his OK for the
 - **Kris switches saving off himself** at times (both times it was found off on 2026-11-05: "No, I switched it off"). Not an installer fault.
 - **Save switch = a checkable tray item, "Save clips for training"** (Kris, "okay" to the plan, 2026-11-04). Increment 2's pause (`FR-12`) is this same `save_clips` setting.
 - **Dev-time defects** in v4's own unfinished code are recorded in `docs/verification.md` §5.7, not `docs/development_history.md`, which is for defects in built or shipped code (Claude's call, 2026-11-04).
-- **Increment builds carry `__version__ = "4.0.0.devN"`**, N counting builds within v4 (now 4); the release is `4.0.0`. `tests/test_concierge_layering.py` accepts `\d+\.\d+\.\d+(\.dev\d+)?`.
+- **Development builds carry `__version__ = "4.0.0.devN"`**, N counting builds within v4 (now 4, so the next is dev5); the release is `4.0.0`. `tests/test_concierge_layering.py` accepts `\d+\.\d+\.\d+(\.dev\d+)?`.
 - **Folder settings are stored unexpanded** (`%USERPROFILE%\tools\ptt-v4-training\ptt-clips`, `...\ptt-train\models`) and expanded by `paths.user_folder`, so the generated knowledge pack (public repo) names no machine path.
 - **Record fields:** `model` is the HF repo id for stock (`mobiuslabsgmbh/faster-whisper-large-v3-turbo`), `trained:<name>` for a trained model; `model_revision` is the cache's `main` commit for stock, `ptt_model.json`'s `created_utc` for trained. Clip month folder is by UTC. Empty transcriptions are saved too (a hold with no speech is a clip with empty text); holds too short to transcribe are not.
 - **Labels:** `<clips>\<machine>\labels.jsonl`, rows `{"id", "reference", "source": accepted|corrected|discarded, "labelled_at"}`; `reference` is null when discarded; a later row for the same id overrides. Increment 1's held-out set is `sha256(id) % 5 == 0` (`training/common.py`); the whole-day split comes in increment 6. Increment 1 labels Darklord's clips only; moving Nightlord's clips is increment 4.
@@ -71,9 +71,11 @@ Done = Kris has run Part A and Part B on both machines. Then: ask his OK for the
 - **Docs behind the code, to fix with Kris's OK at the increment 1 wrap-up** (his rule for design files):
   - `docs/design.md` §7/§7.1: `model` is said to be validated only against `transcribe.MODEL_NAMES`; it also accepts `trained:<name>`.
   - `docs/design.md` §2 and §4 module tables omit `clips.py`, `caret.py`, `ui/qt_tapmark.py` and `training/`; §4.1 says the tray has no Pause and exiting is the pause, but `FR-12`'s pause is now the "Save clips for training" item.
-  - `docs/design.md` §11.1's Flag row and §11.3 item 2 put the mark on the terminal's cursor in increment 2; dev4 built it, so item 2 is now pause and showing failures.
+  - `docs/design.md` §11.1's Flag row describes one mark (at the caret, else the window's centre) and §11.3 item 2 puts the mark on the terminal's cursor in increment 2; dev4 draws two marks (small at the cursor, big at the centre), so item 2 is now pause and showing failures.
+  - `docs/requirements.md` `FR-13` describes one red mark over the terminal's cursor, and §8 puts "the confirming mark outside the terminal" out of scope; dev4 draws both marks in any window.
+  - `docs/background/training-data-plan.md` §4 says "Still to confirm by eye that the block lands on the cursor"; done (`V-M-117`, `V-M-119`).
   - `docs/background/training-data-plan.md` §3: the saved buffer is said to be the one handed to `transcribe_audio` at `engine.py:457`; it is `transcribe_clip`, in `Engine.run`'s release branch.
-  - Code, for increment 2: with `start_click` on (off by default) each tap of a double-tap plays the start click, against `FR-13`'s "no sound".
+  - Code, for increment 2: with `start_click` on (off by default) each tap of a double-tap plays the start click, against `FR-13`'s "no sound". And the marks show on every double-tap while saving is on, even when nothing gets flagged (no clip yet, or the last save failed, in which case the older clip is the one flagged); showing that is `OBS-5`'s job. Raise with Kris when planning increment 2.
 - Carried over: v4 doesn't use the prd or builder skills (needs in `docs/requirements.md`, plan in `docs/design.md`, tests in `docs/verification.md`, bugs in `docs/development_history.md`, `docs/changelog.md` at release). One session per increment; Kris tries each from written steps; write the next session's start prompt at the end. Every build is installed with `install.bat`. Clips stay on each machine, no NAS, no backup. No sounds. The model trained is `large-v3-turbo`. Ask Kris before editing `docs/requirements.md` or `docs/design.md`. Don't touch the prd/builder skills (session "skills-rework").
 
 ## Dead ends
@@ -99,13 +101,13 @@ None.
 
 - `C:\Users\huber\git\ptt\ptt_dictate_dist.zip`: the 4.0.0.dev4 build (git-ignored; every build overwrites it). The v3.2.1 zip is the GitHub release asset of tag `v3.2.1`.
 - Installed PTT on Darklord: 4.0.0.dev4 at `C:\Users\huber\AppData\Local\Programs\ptt_dictate`, saving on. Its `app\debug_log.txt` logs every save and double-tap ("Saved clip", "Double-tap: flagged … as wrong"); installing clears it.
-- `C:\Users\huber\tools\ptt-v4-training\ptt-clips\darklord\2026-11\`: empty. Kris cleared his test clips at 09:47, 2026-11-05, after Darklord's steps 1–3; real collection starts from here.
+- `C:\Users\huber\tools\ptt-v4-training\ptt-clips\darklord\2026-11\`: empty. Kris cleared his test clips at 09:47, 2026-11-05, after Darklord's steps 1–3. Whether he now collects for real or keeps clearing test clips is his call; Part B waits for about 30 clips worth labelling.
 - `C:\Users\huber\tools\ptt-v4-training\ptt-train\`: `.venv`, `baseline\stock-large-v3-turbo-f16\` (+ `baseline\convert-stock.log`), empty `models\`, `runs\`, `reports\`. The Hugging Face cache also holds `openai/whisper-large-v3-turbo`.
 - `C:\Users\huber\tools\ptt-v4-training\ptt-spike-example\`: the spike's fake example clip, kept out of the clips folder so training never sees it. Kris may delete it.
 - `C:\Users\huber\Downloads\script-v4inc1.md`: a stale copy of `docs/script-v4inc1.md`; not updated any more.
 - `docs/development_history.html`: untracked, owner unknown. Don't touch or commit it without asking.
 - `C:\Users\huber\agent-configs`: `settings/windows.json` has an uncommitted change that isn't from this session; left alone.
-- **Nightlord:** RTX 3080 Ti Laptop GPU, 16 GB. Its PTT version and whether it runs turbo in float16 are unchecked; UI Automation for the cursor mark is untried there; a trained model has never run on it (step 11 is the first).
+- **Nightlord:** RTX 3080 Ti Laptop GPU, 16 GB. Its PTT version and whether it runs turbo in float16 are unchecked. If dev1 was ever installed there, its `config.json` holds the old default folders (`%USERPROFILE%\tools\ptt-clips`, `...\ptt-train\models`) and nothing moves them; step 5's check then cannot find the path, and the fix is to set `clips_folder` and `trained_models_folder` to the `ptt-v4-training` ones. Its clip folder is `%COMPUTERNAME%` lower-cased (the check computes it); UI Automation for the cursor mark is untried there; a trained model has never run on it (step 11 is the first).
 - **Darklord's GPU** (RTX PRO 6000 Blackwell, 97,887 MiB) is shared by dictation, the Concierge's `llama-server` (port chosen at each launch, `app/ptt/concierge/server.py:97`, so check `nvidia-smi` rather than a port) and training. Training while PTT dictates is untested (`NFR-14`; increment 4's concern).
 - `C:\Users\huber\agent-configs\vocabulary.json`: 51 `always` rules at last read.
 

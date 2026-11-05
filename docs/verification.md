@@ -705,8 +705,8 @@ unknowns `design.md` §11.3 names for this increment are `V-M-108` and `V-M-110`
 | `V-M-119` | **Both marks and the step 2 check on Darklord, by the user** (dev4 installed 2026-11-05 09:29) | ✅ pass. The user saw both asterisks. Two dev4 dictations double-tapped; each flagged id was the dictation just before its double-tap; 10 WAVs and 10 records. The user's first run of the check printed nothing; Claude's run of the same lines printed the expected output (probably the pasted block waiting at the prompt for Enter) |
 | `V-M-120` | **Right Ctrl+C is not a flag, by the user** | ✅ pass. No asterisk, no new flag; the terminal received Ctrl+C as usual (PTT never blocks keys). Holding right Ctrl through both presses was one 2.3 s hold, so it was saved as an ordinary dictation with empty text, as designed |
 
-Not yet run, and the user's to run (§7): `FR-11`'s ten clips on each machine, the
-double-tap on each machine, `FR-17` on both machines, and the first report on real clips.
+Not yet run, and the user's to run (§7): on Nightlord, `FR-11`'s counts and the double-tap
+(Darklord's passed: `V-M-119`, `V-M-120`); `FR-17` on both machines; the first report on real clips.
 
 
 ---
@@ -838,6 +838,7 @@ question. If any of them is a box, the fix is a text label.
 
 | Date | Commit | Change |
 |---|---|---|
+| 2026-11-05 | `1905668` | The user's Darklord steps 2–3 on dev4: §5.7 `V-M-119`, `V-M-120`. The try-out steps move into git as `docs/script-v4inc1.md` |
 | 2026-11-05 | `0a08e9e` | **4.0.0.dev4: a small asterisk at the text cursor as well as the big one**, at the user's request. `caret.py` (UI Automation, else the system caret); comtypes pinned in `requirements.txt`. §3.5 `V-CL-09`; §5.7 `V-M-115` … `V-M-118` (`V-M-115`, `V-M-116` in `832c15a`). Suite 934 → 940 |
 | 2026-11-05 | `4bfae4d` | **4.0.0.dev3: the double-tap flags the newest clip instead (`FR-13` as written)**, after the user reconsidered; a tap with another key pressed is no longer a tap; the labeller shows flagged clips first. `V-CL-06` and `V-CL-07` rewritten; §5.7 `V-M-114`. Suite 928 → 934 |
 | 2026-11-05 | `bbbc101` | **4.0.0.dev2: the double-tap deletes the newest clip**, at the user's request, ahead of increment 2. §3.5 gains `V-CL-06` … `V-CL-08`; §5.7 `V-M-113`. Suite 913 → 928 |
