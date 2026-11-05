@@ -264,6 +264,27 @@ def poll_vks(vks):
         return set()
 
 
+#: Every keyboard virtual key, for `other_key_down`: from VK_BACK, so the
+#: mouse buttons are not keys, and without the unsided Shift, Ctrl and Alt,
+#: which are down whenever a sided one is -- the sided ones are checked.
+_KEYBOARD_VKS = tuple(vk for vk in range(0x07, 0xFF) if vk not in (0x10, 0x11, 0x12))
+
+
+def other_key_down(chord):
+    """
+    True if any keyboard key outside `chord` is down: a hold of the dictation
+    key with another key pressed is a shortcut, not a tap (the double-tap,
+    training-data-plan.md section 4). False if Win32 is unavailable.
+    """
+    try:
+        own = {vk for k in chord for vk in _BY_NAME[k].vks}
+        get_state = _key_state()
+        return any((get_state(vk) & 0x8000) != 0
+                   for vk in _KEYBOARD_VKS if vk not in own)
+    except Exception:
+        return False
+
+
 def chord_held(chord):
     """True while every key in `chord` is reported down (FR-C2)."""
     try:

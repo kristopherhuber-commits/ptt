@@ -11,6 +11,7 @@ Clips are laid out as `docs/background/training-data-plan.md` section 3 and
     <clips>\\<machine>\\labels.jsonl
     <clips>\\<machine>\\<yyyy-mm>\\<id>.wav
     <clips>\\<machine>\\<yyyy-mm>\\recordings.jsonl
+    <clips>\\<machine>\\<yyyy-mm>\\flags.jsonl
 """
 
 import datetime
@@ -47,6 +48,7 @@ REPO_APP = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__
 
 LABELS_FILE = "labels.jsonl"
 RECORDINGS_FILE = "recordings.jsonl"
+FLAGS_FILE = "flags.jsonl"
 
 #: Increment 1's held-out set: a fixed 1 in HELD_OUT_EVERY of the labelled
 #: clips, chosen by a hash of the clip id, so a clip never changes side as more
@@ -107,6 +109,12 @@ def recordings(machine_dir):
 def labels(machine_dir):
     """The latest label per clip id: a later line overrides an earlier one."""
     return {row["id"]: row for row in read_jsonl(os.path.join(machine_dir, LABELS_FILE))}
+
+
+def flagged(machine_dir):
+    """The ids of the clips flagged as wrong with the double-tap (FR-13)."""
+    return {row["id"] for path in glob.glob(os.path.join(machine_dir, "*", FLAGS_FILE))
+            for row in read_jsonl(path)}
 
 
 def labelled_clips(clips_root):

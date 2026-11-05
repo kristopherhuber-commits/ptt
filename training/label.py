@@ -1,7 +1,8 @@
 """
 Give saved clips their correct text, from the command line (v4 increment 1).
 
-Plays each unlabelled clip and shows what was pasted. Then:
+Plays each unlabelled clip and shows what was pasted, the clips flagged as
+wrong with the double-tap first (FR-13). Then:
 
     Enter        the pasted text was right
     any text     replaces it: that is the correct text
@@ -49,10 +50,15 @@ def main():
     machine_dir = os.path.join(args.clips, args.machine)
     labels_path = os.path.join(machine_dir, common.LABELS_FILE)
     done = common.labels(machine_dir)
+    flagged = common.flagged(machine_dir)
     todo = [r for r in common.recordings(machine_dir)
             if r["id"] not in done and os.path.exists(r["wav"])]
+    # Flagged first, each group oldest first (a stable sort).
+    todo.sort(key=lambda r: r["id"] not in flagged)
+    first = sum(r["id"] in flagged for r in todo)
 
-    print(f"{machine_dir}: {len(done)} labelled, {len(todo)} to do.\n")
+    print(f"{machine_dir}: {len(done)} labelled, {len(todo)} to do, "
+          f"{first} of them flagged.\n")
     print(STYLE)
     if not todo:
         return
@@ -60,7 +66,8 @@ def main():
     labelled = 0
     try:
         for n, record in enumerate(todo, 1):
-            print(f"[{n}/{len(todo)}] {record['id']}  {record['duration_s']} s")
+            mark = "  FLAGGED" if record["id"] in flagged else ""
+            print(f"[{n}/{len(todo)}] {record['id']}  {record['duration_s']} s{mark}")
             print(f"  pasted: {record['pasted_text']}")
             play(record["wav"])
             while True:

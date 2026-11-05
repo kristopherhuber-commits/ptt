@@ -54,10 +54,16 @@ IDLE_THRESHOLD_SEC = 240.0
 #: Applies only while `settings.ignore_short_holds` is on; see `run`.
 MIN_RECORD_SEC = 0.3
 
-#: Two taps (holds discarded as too short) count as a double-tap when the
-#: second starts within this long of the first ending. A double-tap deletes the
-#: newest saved clip (v4). Taps exist only while `ignore_short_holds` is on.
-DOUBLE_TAP_GAP_SEC = 0.4
+#: Two taps count as a double-tap when the second starts within this long of
+#: the first ending. A tap is a hold discarded as too short with no other key
+#: pressed, so taps exist only while `ignore_short_holds` is on. A double-tap
+#: flags the newest saved clip as wrong (FR-13, training-data-plan.md
+#: section 4), however long after its dictation.
+DOUBLE_TAP_GAP_SEC = 0.5
+
+#: Polls into a hold during which other keys are checked for: past
+#: MIN_RECORD_SEC a hold cannot be a tap, so checking stops there.
+OTHER_KEY_POLLS = int(MIN_RECORD_SEC / POLL_SEC) + 1
 
 #: How many transcription times are kept for the Diagnostics panel's median.
 #: Enough to be a median rather than a mood, few enough that a model change
@@ -91,17 +97,18 @@ def _error_text(headline, exc):
 class Engine:
     def __init__(self, settings, cuda_supported, on_state,
                  on_text=None, on_benchmark=None, chord_held=None,
-                 on_double_tap=None, clock=None):
+                 on_double_tap=None, clock=None, other_key_down=None):
         """
         `settings` is held by reference and re-read as the loop runs; see `run`.
 
         `chord_held` is a seam so the loop can be driven without a keyboard in
-        step 2's tests. It defaults to the real detector. `clock` is the same
-        kind of seam for how long a hold lasted: `time.monotonic` by default.
+        step 2's tests. It defaults to the real detector. `clock` (how long a
+        hold lasted, `time.monotonic` by default) and `other_key_down` (a key
+        outside the chord pressed during it) are seams of the same kind.
 
         `on_double_tap()` reports a double-tap, from the engine thread, so a
-        frontend can show that it was received. The deletion itself is queued
-        here and needs no frontend.
+        frontend can show that it was received. The flag itself is queued here
+        and needs no frontend.
 
         `on_benchmark(model, device, seconds)` reports a latency measurement.
         Like `on_state` it is called from the engine thread, and like
@@ -141,6 +148,7 @@ class Engine:
         self._on_double_tap = on_double_tap or (lambda: None)
         self._chord_held = chord_held or hotkey_mod.chord_held
         self._clock = clock or time.monotonic
+        self._other_key_down = other_key_down or hotkey_mod.other_key_down
 
         self._model = None
         self._running = True
@@ -375,18 +383,22 @@ class Engine:
 
     def _double_tap(self):
         """
-        Delete the newest saved clip, and say so (v4). Never raises.
+        Flag the newest saved clip as wrong, and say so (FR-13). Never raises.
 
-        Whether or not saving is on: the user is asking for a clip already on
-        disk to go. The delete is queued behind any save still in flight, so a
-        double-tap straight after a dictation deletes that dictation.
+        Only while saving is on: with it off the last dictation was not saved,
+        and the newest clip on disk is some older one. The flag is queued behind
+        any save still in flight, so a double-tap straight after a dictation
+        flags that dictation.
         """
-        log_debug("Double-tap: deleting the last clip.")
+        if not self._settings.save_clips:
+            log_debug("Double-tap: saving is off, so no clip is flagged.")
+            return
+        log_debug("Double-tap: flagging the last clip.")
         try:
-            self._clip_saver.delete_last(
+            self._clip_saver.flag_last(
                 paths.user_folder(self._settings.clips_folder), paths.machine_name())
         except Exception as e:
-            log_debug(f"ERROR: the last clip was not deleted: {str(e)}")
+            log_debug(f"ERROR: the last clip was not flagged: {str(e)}")
         try:
             self._on_double_tap()
         except Exception as e:
@@ -431,9 +443,12 @@ class Engine:
         recording = False
         stream_open = False
         started = None
-        # The double-tap: when the hold now in progress began, and when the
+        # The double-tap: when the hold now in progress began, whether another
+        # key was pressed during it, how many polls it has lasted, and when the
         # last tap ended (None unless the previous hold was a tap).
         pressed_at = 0.0
+        other_key = False
+        hold_polls = 0
         last_tap_end = None
 
         try:
@@ -528,6 +543,8 @@ class Engine:
                         if held and not recording:
                             recording = True
                             pressed_at = self._clock()
+                            other_key = self._other_key_down(self._settings.hotkey)
+                            hold_polls = 0
                             started = clips.utc_now()
                             # Break up the Alt press now, while it is still held: once the
                             # user releases it the menu has already taken focus.
@@ -542,6 +559,12 @@ class Engine:
                             self._emit("recording", "Recording...")
                             log_debug("Recording started...")
 
+                        elif held and recording:
+                            # Right Ctrl+C is a shortcut, not a tap.
+                            if not other_key and hold_polls < OTHER_KEY_POLLS:
+                                hold_polls += 1
+                                other_key = self._other_key_down(self._settings.hotkey)
+
                         elif not held and recording:
                             recording = False
                             released_at = self._clock()
@@ -549,21 +572,24 @@ class Engine:
                             self._emit("transcribing", "Transcribing...")
                             log_debug(f"Recording stopped. Audio samples: {samples.size}")
 
-                            # A tap: a hold shorter than the minimum, by the
-                            # clock or by the buffer. The clock is the one
+                            # Too short (FR-3): a hold under the minimum, by
+                            # the clock or by the buffer. The clock is the one
                             # that counts for a quick tap: the buffer carries
-                            # the pre-roll, so it outlasts the key.
-                            tap = self._settings.ignore_short_holds and (
+                            # the pre-roll, so it outlasts the key. A short hold
+                            # with no other key pressed is a tap.
+                            short = self._settings.ignore_short_holds and (
                                 released_at - pressed_at < MIN_RECORD_SEC
                                 or samples.size < audio_mod.SAMPLE_RATE * MIN_RECORD_SEC)
-                            if tap:
-                                if (last_tap_end is not None
+                            if short:
+                                if other_key:
+                                    last_tap_end = None
+                                elif (last_tap_end is not None
                                         and pressed_at - last_tap_end <= DOUBLE_TAP_GAP_SEC):
                                     last_tap_end = None
                                     self._double_tap()
                                 else:
                                     last_tap_end = released_at
-                                    log_debug("Recording too short, skipping transcription.")
+                                log_debug("Recording too short, skipping transcription.")
                                 self._emit("idle", self._ready_text())
                                 continue
                             last_tap_end = None

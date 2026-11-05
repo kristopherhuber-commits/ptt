@@ -97,6 +97,7 @@ def harness(monkeypatch, tmp_path):
         # `times` if a test set any, else a second on from the last reading,
         # so every hold is long and no test makes a tap by accident.
         "times": [],
+        "others": False,        # whether a key outside the chord is down
     }
     clock = [0.0]
 
@@ -152,6 +153,7 @@ def harness(monkeypatch, tmp_path):
         chord_held=chord_held,
         on_double_tap=lambda: state["double_taps"].append(1),
         clock=fake_clock,
+        other_key_down=lambda chord: state["others"],
     )
     thread = threading.Thread(target=engine.run, daemon=True)
     thread.start()
@@ -511,14 +513,16 @@ def test_a_clip_that_cannot_be_saved_is_logged_and_dictation_goes_on(
     assert any("not saved" in line for line in log_lines())
 
 
-# -- the double-tap deletes the newest clip (v4) --------------------------------
+# -- the double-tap flags the newest clip (FR-13) -------------------------------
 
-def _tap(harness):
+def _tap(harness, other_key=False):
+    harness["others"] = other_key
     harness["down"].add("rctrl")
     wait_for(lambda: harness["recorder"].recording, what="recording to start")
     harness["down"].clear()
     wait_for(lambda: not harness["recorder"].recording
              and harness["states"][-1][0] == "idle", what="a return to idle")
+    harness["others"] = False
 
 
 def _double_tap(harness, start):
@@ -542,28 +546,44 @@ def _ids(harness):
     return [record["id"] for record, _ in _saved(harness["root"])]
 
 
-def test_a_double_tap_deletes_the_newest_clip_and_says_so(saving):
+def _flagged(harness):
+    harness["engine"]._clip_saver.flush()
+    found = []
+    for folder, _dirs, files in os.walk(harness["root"]):
+        if "flags.jsonl" in files:
+            with open(os.path.join(folder, "flags.jsonl"), encoding="utf-8") as f:
+                found += [json.loads(line)["id"] for line in f]
+    return found
+
+
+def test_a_double_tap_flags_the_newest_clip_and_says_so(saving):
+    """However long after the dictation: the clips are at 1 to 6 s, the taps at 1000 s."""
     for _ in range(3):
         _dictate(saving)
-    first, second, _third = _ids(saving)
+    first, second, third = _ids(saving)
 
-    _double_tap(saving, 100.0)
-    assert _ids(saving) == [first, second]
+    _double_tap(saving, 1000.0)
+    assert _flagged(saving) == [third]
+    assert _ids(saving) == [first, second, third]
     assert saving["double_taps"] == [1]
-
-    _double_tap(saving, 200.0)
-    assert _ids(saving) == [first]
-    assert saving["double_taps"] == [1, 1]
     assert saving["pasted"] == ["hello there"] * 3
 
 
-def test_two_taps_too_far_apart_delete_nothing(saving):
+def test_a_second_double_tap_flags_the_same_clip_once(saving):
+    _dictate(saving)
+    _double_tap(saving, 100.0)
+    _double_tap(saving, 200.0)
+    assert len(_flagged(saving)) == 1
+    assert saving["double_taps"] == [1, 1]
+
+
+def test_two_taps_too_far_apart_flag_nothing(saving):
     _dictate(saving)
     gap = engine_mod.DOUBLE_TAP_GAP_SEC + 0.1
     saving["times"] = [100.0, 100.1, 100.1 + gap, 100.2 + gap]
     _tap(saving)
     _tap(saving)
-    assert len(_ids(saving)) == 1
+    assert _flagged(saving) == []
     assert saving["double_taps"] == []
 
 
@@ -574,17 +594,31 @@ def test_a_dictation_between_two_taps_is_not_a_double_tap(saving):
     _dictate(saving)   # 101.1 to 102.1: a long hold
     saving["times"] = [102.2, 102.3]
     _tap(saving)
-    assert len(_ids(saving)) == 2
+    assert _flagged(saving) == []
     assert saving["double_taps"] == []
 
 
-def test_a_double_tap_deletes_while_saving_is_off(saving):
-    """It deletes a clip already on disk; the save switch is about new ones."""
+def test_a_tap_with_another_key_pressed_is_a_shortcut_not_a_tap(saving):
+    """Right Ctrl+C twice is not a double-tap (training-data-plan.md section 4)."""
+    _dictate(saving)
+    saving["times"] = [100.0, 100.1, 100.2, 100.3]
+    _tap(saving, other_key=True)
+    _tap(saving)
+    saving["times"] = [200.0, 200.1, 200.2, 200.3]
+    _tap(saving)
+    _tap(saving, other_key=True)
+    assert _flagged(saving) == []
+    assert saving["double_taps"] == []
+
+
+def test_with_saving_off_a_double_tap_flags_nothing(saving, log_lines):
+    """The last dictation was not saved, so the newest clip on disk is not it."""
     _dictate(saving)
     saving["settings"].save_clips = False
     _double_tap(saving, 100.0)
-    assert _ids(saving) == []
-    assert saving["double_taps"] == [1]
+    assert _flagged(saving) == []
+    assert saving["double_taps"] == []
+    assert any("saving is off" in line for line in log_lines())
 
 
 def test_with_short_holds_kept_there_is_no_double_tap(saving):
@@ -593,7 +627,7 @@ def test_with_short_holds_kept_there_is_no_double_tap(saving):
     _dictate(saving)
     _double_tap(saving, 100.0)
     wait_for(lambda: len(saving["pasted"]) == 3, what="both taps to be transcribed")
-    assert len(_ids(saving)) == 3
+    assert _flagged(saving) == []
     assert saving["double_taps"] == []
 
 

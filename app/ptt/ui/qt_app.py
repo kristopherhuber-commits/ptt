@@ -76,7 +76,7 @@ class EngineBridge(QObject):
     state_changed = Signal(str, str)     # state, status_text
     text_ready = Signal(str)             # wired to the engine in session 2
     benchmark_done = Signal(str, str, float)  # model, device, seconds
-    double_tapped = Signal()             # the newest clip is being deleted (v4)
+    double_tapped = Signal()             # the newest clip is flagged as wrong (FR-13)
 
     def __init__(self, parent=None):
         super().__init__(parent)

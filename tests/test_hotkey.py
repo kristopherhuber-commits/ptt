@@ -333,3 +333,31 @@ def test_every_warning_is_a_non_empty_string():
 def test_the_panel_facing_strings_exist():
     assert hotkey.SAFE_NOTE.strip()
     assert hotkey.WARNING_PREFIX.strip()
+
+
+# -- another key during a hold: a shortcut, not a tap (the double-tap, FR-13) --
+
+def _keys_down(monkeypatch, *vks):
+    monkeypatch.setattr(hotkey, "_key_state",
+                        lambda: (lambda vk: -32768 if vk in vks else 0))
+
+
+def test_the_chord_alone_is_no_other_key(monkeypatch):
+    # Right Ctrl, and the unsided Ctrl Windows reports alongside it.
+    _keys_down(monkeypatch, 0xA3, 0x11)
+    assert hotkey.other_key_down(("rctrl",)) is False
+
+
+def test_a_letter_during_the_chord_is_another_key(monkeypatch):
+    _keys_down(monkeypatch, 0xA3, 0x11, 0x43)   # Right Ctrl + C
+    assert hotkey.other_key_down(("rctrl",)) is True
+
+
+def test_the_other_ctrl_is_another_key(monkeypatch):
+    _keys_down(monkeypatch, 0xA3, 0xA2)
+    assert hotkey.other_key_down(("rctrl",)) is True
+
+
+def test_a_mouse_button_is_not_a_key(monkeypatch):
+    _keys_down(monkeypatch, 0xA3, 0x01)
+    assert hotkey.other_key_down(("rctrl",)) is False

@@ -1,6 +1,6 @@
 """
-The red asterisk that confirms a double-tap (v4): the newest clip is being
-deleted.
+The red asterisk that confirms a double-tap (FR-13): the newest clip is being
+flagged as wrong.
 
 A small frameless window, on top of everything, that never takes focus and lets
 every click through, so the next paste still lands where the user is typing.
