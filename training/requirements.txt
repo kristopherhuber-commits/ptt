@@ -1,0 +1,23 @@
+# The training environment (v4): C:\Users\huber\tools\ptt-train\.venv, never the
+# repo's .venv, which build_portable.py zips into every install (design.md 8, 11.2).
+#
+#   uv venv --python 3.14 C:\Users\huber\tools\ptt-train\.venv
+#   uv pip install --python C:\Users\huber\tools\ptt-train\.venv\Scripts\python.exe ^
+#       -r training\requirements.txt --index-strategy unsafe-best-match
+#
+# PyTorch's CUDA 13.0 build runs on the RTX PRO 6000 Blackwell (checked 2026-11-04).
+# ctranslate2 and faster-whisper match the app's pins, so a converted model loads
+# in PTT; the nvidia-*-cu12 wheels are the CUDA 12 libraries CTranslate2 uses in
+# report.py, which never imports torch.
+
+--extra-index-url https://download.pytorch.org/whl/cu130
+torch==2.14.1+cu130
+transformers==5.22.1
+peft==0.21.2
+accelerate==1.15.0
+ctranslate2==4.7.2
+faster-whisper==1.2.1
+numpy==2.5.4
+nvidia-cublas-cu12==12.9.2.10
+nvidia-cuda-nvrtc-cu12==12.9.86
+nvidia-cudnn-cu12==9.23.0.39
