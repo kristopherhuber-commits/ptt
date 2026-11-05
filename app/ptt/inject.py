@@ -118,34 +118,16 @@ class _RECT(ctypes.Structure):
                 ("right", ctypes.c_long), ("bottom", ctypes.c_long)]
 
 
-class _POINT(ctypes.Structure):
-    _fields_ = [("x", ctypes.c_long), ("y", ctypes.c_long)]
-
-
-def mark_point():
+def window_centre():
     """
-    Where on screen to confirm a double-tap, in physical pixels: the centre of
-    the text caret when the focused window has one, else the centre of the
-    foreground window. None when there is no foreground window.
-
-    Plain Windows calls. Consoles that draw their own cursor (Windows Terminal,
-    see `target_accepts_keys`) own no caret, so they get the window's centre.
+    The centre of the foreground window in physical pixels, where the
+    double-tap's big mark goes; None when there is no foreground window.
     """
     try:
         user32 = ctypes.windll.user32
         hwnd = user32.GetForegroundWindow()
-        if not hwnd:
-            return None
-        gti = GUITHREADINFO()
-        gti.cbSize = ctypes.sizeof(GUITHREADINFO)
-        tid = user32.GetWindowThreadProcessId(hwnd, None)
-        if user32.GetGUIThreadInfo(tid, ctypes.byref(gti)) and gti.hwndCaret:
-            left, top, right, bottom = gti.rcCaret
-            point = _POINT((left + right) // 2, (top + bottom) // 2)
-            if user32.ClientToScreen(ctypes.c_void_p(gti.hwndCaret), ctypes.byref(point)):
-                return point.x, point.y
         rect = _RECT()
-        if user32.GetWindowRect(ctypes.c_void_p(hwnd), ctypes.byref(rect)):
+        if hwnd and user32.GetWindowRect(ctypes.c_void_p(hwnd), ctypes.byref(rect)):
             return (rect.left + rect.right) // 2, (rect.top + rect.bottom) // 2
     except Exception:
         pass

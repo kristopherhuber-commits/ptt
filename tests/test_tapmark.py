@@ -1,12 +1,12 @@
 """
-Where the double-tap's red mark goes (v4).
+Where the double-tap's red marks go (FR-13).
 
 Windows reports the caret in physical pixels and Qt places windows in logical
 ones; `to_logical` is the mapping. The window itself needs a QApplication, so
 it is checked by hand (verification.md section 5.7).
 """
 
-from ptt.ui.qt_tapmark import to_logical
+from ptt.ui.qt_tapmark import ratio_at, to_logical
 
 
 def test_at_100_percent_a_point_is_unchanged():
@@ -26,3 +26,10 @@ def test_a_point_on_the_second_screen_uses_that_screens_scale():
 
 def test_a_point_on_no_screen_uses_the_first():
     assert to_logical((-30, -30), [(0, 0, 1920, 1080, 2.0)]) == (-15, -15)
+
+
+def test_the_scale_is_the_screen_the_point_is_on():
+    screens = [(0, 0, 2560, 1440, 1.5), (3840, 0, 1920, 1080, 1.0)]
+    assert ratio_at((300, 150), screens) == 1.5
+    assert ratio_at((4000, 100), screens) == 1.0
+    assert ratio_at((5, 5), []) == 1.0
