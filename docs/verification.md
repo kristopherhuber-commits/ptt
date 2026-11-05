@@ -279,14 +279,16 @@ tests yet; §5.7's dry run is their evidence.
 | `V-TM-03` | `FIELDS["model"]`, `trained_models_folder` — **the settings** | `model` takes `trained:<name>` and still refuses unknown names; the folder is not writable by the Concierge | `test_trained_models.py` (settings section) | `FR-17` |
 | `V-CL-06` | `clips.flag_last`, `ClipSaver.flag_last` — **flagging the newest clip** | One line `{id, flagged_at}` in the newest clip's month `flags.jsonl`; every WAV and record stays; flagging the same clip again adds nothing; a new clip is the next flagged; the newest may be in an earlier month; nothing to flag is None; a flag queued after a save flags that save | `test_clips.py` (flagging section) | `FR-13` |
 | `V-CL-07` | `Engine`, `hotkey.other_key_down` — **the double-tap** | Two taps (holds under `MIN_RECORD_SEC` by the clock or the buffer, with no key outside the chord pressed) with the second starting within `DOUBLE_TAP_GAP_SEC` (0.5 s) flag the newest clip and report it to the frontend, however long after the dictation; a second double-tap flags it once; taps too far apart, a dictation between them, or another key during either (right Ctrl+C) flag nothing; with saving off nothing is flagged and no mark shows; with `ignore_short_holds` off there are no taps. Another key: a letter or the other Ctrl counts, the unsided Ctrl and the mouse do not | `test_engine.py` (double-tap section), `test_hotkey.py` (another-key section) | `FR-13`, `FR-3` |
-| `V-CL-08` | `qt_tapmark.to_logical` — **where the mark goes** | A physical-pixel point maps by its own screen's scale from that screen's corner, at 100 %, 150 % and across two screens | `test_tapmark.py` | `FR-13` |
+| `V-CL-08` | `qt_tapmark.to_logical`, `ratio_at` — **where the marks go** | A physical-pixel point maps by its own screen's scale from that screen's corner, at 100 %, 150 % and across two screens; the cursor mark is sized by that screen's scale | `test_tapmark.py` | `FR-13` |
+| `V-CL-09` | `caret` — **the text cursor's cell** | UI Automation's first non-empty rectangle is the cell; none is no cell; the system caret's cell is the square of its height just right of it; a lookup that does not answer within its time limit gives none and says so | `test_caret.py` | `FR-13` |
 
 ---
 
 ## 4. Automated tests
 
-**934 tests, ~6 s.** Last run **2026-11-05** at 4.0.0.dev3 (v4 increment 1, the
-double-tap flag added): **934 passed, 0 failed, in 6.2 s.** Before that, 4.0.0.dev2
+**940 tests, ~7 s.** Last run **2026-11-05** at 4.0.0.dev4 (v4 increment 1, the
+cursor mark added): **940 passed, 0 failed, in 6.51 s.** Before that, 4.0.0.dev3: 934
+passed, in 6.2 s; 4.0.0.dev2
 (the double-tap deleting): 928 passed, in 6.12 s; **2026-11-04** at 4.0.0.dev1: 913 passed, in 4.97 s; **2026-10-20** at v3.2.1: 881 passed, in 5.09 s. v3.0 session 5 ended at 845 on 2026-08-29; session 4 at 838; session 2 at 646;
 session 1 at 612; the v2.0 acceptance pass on 2026-08-24 ran 333, also all passing.
 It stood at 877 at v3.1.1, the installer's two preserve-list tests included; v3.2.0
@@ -313,7 +315,8 @@ added four for the uninstaller.
 | `tests/test_engine.py` | 40 | `V-EN-01` … `V-EN-10`, `V-CL-03`, `V-CL-07`, `V-TM-02` |
 | `tests/test_clips.py` | 18 | `V-CL-01` … `V-CL-06` |
 | `tests/test_trained_models.py` | 9 | `V-TM-01`, `V-TM-03` |
-| `tests/test_tapmark.py` | 4 | `V-CL-08` |
+| `tests/test_tapmark.py` | 5 | `V-CL-08` |
+| `tests/test_caret.py` | 5 | `V-CL-09` |
 | `tests/test_statusview.py` | 25 | `V-UI-01` … `V-UI-03` |
 | `tests/test_concierge_pack.py` | 17 | `V-CG-69` … `V-CG-78` |
 | `tests/test_uninstall.py` | 4 | `V-IN-02` … `V-IN-04` |
@@ -697,6 +700,8 @@ unknowns `design.md` §11.3 names for this increment are `V-M-108` and `V-M-110`
 | `V-M-114` | **The labeller puts flagged clips first** (4.0.0.dev3): three clips saved with the app's code, the newest flagged with `flag_last`, then `label.py` | ✅ pass. "3 to do, 1 of them flagged"; the newest clip shown first, marked FLAGGED |
 | `V-M-115` | **The dev3 archive** | ✅ pass. `build_portable.py`'s own archive audit passed; the zip (1,785,416,875 bytes) holds `__version__ = "4.0.0.dev3"`, `clips.flag_last` and no `delete_last`, and `paths.py` names `ptt-v4-training` |
 | `V-M-116` | **The flag on Darklord, by the user** (dev3 installed 2026-11-05 09:11) | ✅ pass. Three dictations, each double-tapped: `flags.jsonl` holds exactly their three ids, every WAV and record kept, the log says "flagged … as wrong" for each; the red asterisk seen, in the middle of Windows Terminal. Two double-taps before saving was switched on logged "saving is off" and flagged nothing |
+| `V-M-117` | **Both marks on the real desktop** (4.0.0.dev4): `TapMark.flash()` with Windows Terminal in front, then screen grabs | ✅ pass. UI Automation gave the terminal's cursor cell, 14 × 28 px, in 56 ms on the first lookup of a process and 2 ms after; the system caret gave none, as the spike found. The small asterisk (19 px logical at 150 %) sat on the prompt's cursor, the big one (44 px) at the window's centre; the foreground window unchanged; both gone by 800 ms. First try failed once: the thread that first imports comtypes is initialised by the import, so initialising it again was refused; now tolerated |
+| `V-M-118` | **The dev4 archive** | ✅ pass. The build's audit passed; the zip (1,785,465,679 bytes) holds `__version__ = "4.0.0.dev4"`, `ptt/caret.py`, and comtypes' generated UI Automation wrapper |
 
 Not yet run, and the user's to run (§7): `FR-11`'s ten clips on each machine, the
 double-tap on each machine, `FR-17` on both machines, and the first report on real clips.
@@ -796,7 +801,7 @@ Stated rather than omitted. Anything here is a known hole, not an oversight.
 | **`FR-CG-4`'s guided setup has no L3 evidence** | Session 4 pinned that the kickoff is sent once, to whoever accepted, at the right moment; `sel-11` scores the shape of the dialogue at L2 with `dialogue_tools`. What nobody has done is accept the card on a fresh install and walk the four steps with a real model in front of them | next desktop session |
 | **The shared vocabulary file on a second machine** (`FR-10`) | L1 covers the file's rules and an offscreen check covered the tab's one-second watch. What no single machine shows is the real path: a rule added on one machine, committed and pushed in `agent-configs`, pulled on the other, and picked up by a running PTT without a restart | Nightlord, after installing v3.1.0 |
 | **Uninstall from Settings > Apps on a real installation** | `V-M-104` ran the Advanced tab's path. The Installed apps path starts `uninstall.ps1` unelevated, so it relaunches itself through UAC and asks before deleting — neither of which the scratch runs exercised, since a scratch run does not elevate | next uninstall |
-| **v4 increment 1 on the real machines** | `FR-11`: ten dictations give ten WAVs and ten matching records, on Darklord and on Nightlord. The double-tap (`FR-13`): each one flags the last dictation, keeps every clip and shows the red mark, on both machines; right Ctrl+C flags nothing. `FR-17`: the trained model appears in the Model tab on both and switching works; the first trained model on Nightlord's GPU. `FR-18`: the first report on real held-out clips | the user, from `script-v4inc1.md` |
+| **v4 increment 1 on the real machines** | `FR-11`: ten dictations give ten WAVs and ten matching records, on Darklord and on Nightlord. The double-tap (`FR-13`): each one flags the last dictation, keeps every clip and shows both red marks (the cursor and the window's centre), on both machines; right Ctrl+C flags nothing. `FR-17`: the trained model appears in the Model tab on both and switching works; the first trained model on Nightlord's GPU. `FR-18`: the first report on real held-out clips | the user, from `script-v4inc1.md` |
 | Per-application vocabulary scopes | `gui_handoff` §11 puts them out of scope for the first pass. The field is stored and validated and one value is accepted; a rule with any other scope is dropped and logged, so nothing silently applies more widely than it was written | — |
 | Making an Advanced value editable | Every one of them fixed a documented failure, so none is exposed. §6.5's rule stands: exposing one makes it a validated `Settings` field with a logged fallback, and `Shift+Insert` additionally has to warn on change | — |
 | "Start with Windows" as a control rather than a readout | Setting it means creating a `.lnk` through COM and re-applying `install.ps1`'s run-as-admin byte patch — the installer's logic, duplicated in the app | — |
@@ -831,6 +836,7 @@ question. If any of them is a box, the fix is a text label.
 
 | Date | Commit | Change |
 |---|---|---|
+| 2026-11-05 | `0a08e9e` | **4.0.0.dev4: a small asterisk at the text cursor as well as the big one**, at the user's request. `caret.py` (UI Automation, else the system caret); comtypes pinned in `requirements.txt`. §3.5 `V-CL-09`; §5.7 `V-M-115` … `V-M-118` (`V-M-115`, `V-M-116` in `832c15a`). Suite 934 → 940 |
 | 2026-11-05 | `4bfae4d` | **4.0.0.dev3: the double-tap flags the newest clip instead (`FR-13` as written)**, after the user reconsidered; a tap with another key pressed is no longer a tap; the labeller shows flagged clips first. `V-CL-06` and `V-CL-07` rewritten; §5.7 `V-M-114`. Suite 928 → 934 |
 | 2026-11-05 | `bbbc101` | **4.0.0.dev2: the double-tap deletes the newest clip**, at the user's request, ahead of increment 2. §3.5 gains `V-CL-06` … `V-CL-08`; §5.7 `V-M-113`. Suite 913 → 928 |
 | 2026-11-04 | `86d6ed3` … `c67dfad` | **v4 increment 1 (4.0.0.dev1): saving, trained models in the Model tab, the training tools.** §3.5 added with `V-CL-01` … `V-CL-05` and `V-TM-01` … `V-TM-03`; §5.7 with `V-M-107` … `V-M-112`. Suite 881 → 913 |
