@@ -262,12 +262,29 @@ No requirement or design section names these yet; the source column is the scrip
 The script's behaviour is §5.6's: it deletes files and stops processes, which the unit
 suite does not do.
 
+### 3.5 v4 — training — `design.md` §11
+
+Increment 1 (the walking skeleton). The training tools under `training/` have no unit
+tests yet; §5.7's dry run is their evidence.
+
+| ID | Element | What it guarantees | Verified by | Req. |
+|---|---|---|---|---|
+| `V-CL-01` | `clips.clip_id`, `clips.save` — **the layout** | `<machine>-<UTC to the ms>Z`; `<root>\<machine>\<yyyy-mm>\<id>.wav` and an append-only `recordings.jsonl`; the record holds every field of the data plan §3, in order | `test_clips.py` (first five) | `FR-11` |
+| `V-CL-02` | `clips.write_wav` — **the audio** | 16 kHz mono 16-bit, within one step of the float buffer the model was given; full scale clips rather than wrapping | `test_clips.py::test_a_clip_is_saved_in_the_machine_and_month_folder`, `::test_full_scale_audio_does_not_wrap_around` | `FR-11` |
+| `V-CL-03` | `ClipSaver` and `Engine._save_clip` — **saving on, off, and failing** | Off saves nothing; on saves one WAV and one record per dictation, matching what was pasted; a folder that cannot be written logs "not saved" and the paste still happens | `test_engine.py::test_nothing_is_saved_while_saving_is_off`, `::test_every_dictation_is_saved_while_saving_is_on`, `::test_a_clip_that_cannot_be_saved_is_logged_and_dictation_goes_on`, `test_clips.py::test_the_saver_writes_on_its_own_thread_and_logs_a_failure` | `FR-11`, `NFR-14`, `OBS-1` |
+| `V-CL-04` | `transcribe_clip`, `vocabulary.apply_rules_traced` — **what the record says** | The raw text before cleanup and rules, the pasted text, each rule that fired, and one score set per segment; `transcribe_audio` is the same call reduced to the text | `test_transcribe.py` (`transcribe_clip` section), `test_vocabulary.py` (`which rules fired` section) | `FR-11` |
+| `V-CL-05` | `save_clips`, `clips_folder` — **the settings** | Off by default; the folder stored as `%USERPROFILE%\tools\ptt-clips` and expanded when used; empty refused; neither writable by the Concierge | `test_clips.py` (settings section) | `FR-11`, `CON-6` |
+| `V-TM-01` | `transcribe.trained_models` — **the listing** | Each folder holding `model.bin` is `trained:<folder>`, with its `ptt_model.json` if readable; a missing folder lists nothing | `test_trained_models.py` (first five) | `FR-17` |
+| `V-TM-02` | `Engine._reload` — **loading one** | A trained model loads from its folder; a missing one loads `large-v3-turbo` and logs why, never a download by name | `test_engine.py::test_a_trained_model_is_loaded_from_its_folder`, `::test_a_missing_trained_model_loads_stock_and_says_why` | `FR-17` |
+| `V-TM-03` | `FIELDS["model"]`, `trained_models_folder` — **the settings** | `model` takes `trained:<name>` and still refuses unknown names; the folder is not writable by the Concierge | `test_trained_models.py` (settings section) | `FR-17` |
+
 ---
 
 ## 4. Automated tests
 
-**881 tests, ~5 s.** Last run **2026-10-20** at v3.2.1: **881 passed, 0 failed, in
-5.09 s.** v3.0 session 5 ended at 845 on 2026-08-29; session 4 at 838; session 2 at 646;
+**913 tests, ~5 s.** Last run **2026-11-04** at 4.0.0.dev1 (v4 increment 1): **913
+passed, 0 failed, in 4.97 s.** Before that, **2026-10-20** at v3.2.1: 881 passed, in
+5.09 s. v3.0 session 5 ended at 845 on 2026-08-29; session 4 at 838; session 2 at 646;
 session 1 at 612; the v2.0 acceptance pass on 2026-08-24 ran 333, also all passing.
 It stood at 877 at v3.1.1, the installer's two preserve-list tests included; v3.2.0
 added four for the uninstaller.
@@ -288,9 +305,11 @@ added four for the uninstaller.
 | `tests/test_concierge_llm.py` | 41 | `V-CG-20` … `V-CG-29` |
 | `tests/test_concierge_layering.py` | 37 | `V-CG-79` … `V-CG-88`, `V-CG-134` … `V-CG-137`, `V-IN-01` |
 | `tests/test_audio.py` | 32 | `V-AU-01` … `V-AU-07` |
-| `tests/test_transcribe.py` | 32 | `V-TR-01` … `V-TR-08` |
-| `tests/test_vocabulary.py` | 31 | `V-VC-01` … `V-VC-04` |
-| `tests/test_engine.py` | 28 | `V-EN-01` … `V-EN-10` |
+| `tests/test_transcribe.py` | 35 | `V-TR-01` … `V-TR-08`, `V-CL-04` |
+| `tests/test_vocabulary.py` | 34 | `V-VC-01` … `V-VC-04`, `V-CL-04` |
+| `tests/test_engine.py` | 33 | `V-EN-01` … `V-EN-10`, `V-CL-03`, `V-TM-02` |
+| `tests/test_clips.py` | 12 | `V-CL-01` … `V-CL-05` |
+| `tests/test_trained_models.py` | 9 | `V-TM-01`, `V-TM-03` |
 | `tests/test_statusview.py` | 25 | `V-UI-01` … `V-UI-03` |
 | `tests/test_concierge_pack.py` | 17 | `V-CG-69` … `V-CG-78` |
 | `tests/test_uninstall.py` | 4 | `V-IN-02` … `V-IN-04` |
@@ -657,6 +676,23 @@ parameters exist for that — and then against the real machine.
 Not run: an uninstall started from **Settings > Apps** on a real installation, which
 is the path that elevates for itself (§7).
 
+### 5.7 v4 increment 1 — the walking skeleton · 2026-11-04
+
+Run on Darklord by Claude before the user's try-out (`script-v4inc1.md`). The two
+unknowns `design.md` §11.3 names for this increment are `V-M-108` and `V-M-110`.
+
+| ID | Test | Result |
+|---|---|---|
+| `V-M-107` | **A real dictation path saved**: the benchmark clip through `transcribe_clip` with the stock model on CUDA, then `clips.save` to a scratch folder | ✅ pass. WAV and record written; raw text, pasted text and segment scores filled. `model_identity` names `mobiuslabsgmbh/faster-whisper-large-v3-turbo` at `0a363e9` |
+| `V-M-108` | **PyTorch on the Blackwell card under Windows**: torch 2.14.1+cu130 on Python 3.14, a bfloat16 matrix product | ✅ pass. Compute capability (12, 0) |
+| `V-M-109` | **Stock converted locally**: `ct2-transformers-converter` (transformers 5.22.1) on `openai/whisper-large-v3-turbo`, float16, loaded with the app's own code and environment (CTranslate2 4.7.2) | ✅ pass. 1.62 GB; 128 mel bins; the benchmark clip typed identically to the app's model, 0.44 s warm |
+| `V-M-110` | **The chain, dry run**: 39 synthetic clips cut from the benchmark clip (33 trained, 6 held out), LoRA rank 32 on encoder and decoder attention, 2 epochs, merge, float16, report | ✅ after one fix. transformers 5 saves the processor as `processor_config.json`; the converter wants `preprocessor_config.json`, so `train.py` now writes it. Held-out loss 0.398 → 0.305; the report's three columns and per-clip table written |
+| `V-M-111` | **The Model panel with a trained model**, offscreen | ✅ pass. Seventh row, "turbo, trained", its real size, selected when it is the setting; the table refits to seven rows |
+| `V-M-112` | **The labeller** with scripted input and sound stubbed | ✅ pass. Enter accepted, `?` replayed, text replaced, `-` discarded, `q` stopped; three labels appended |
+
+Not yet run, and the user's to run (§7): `FR-11`'s ten clips on each machine, `FR-17` on
+both machines, and the first report on real clips.
+
 
 ---
 
@@ -752,6 +788,7 @@ Stated rather than omitted. Anything here is a known hole, not an oversight.
 | **`FR-CG-4`'s guided setup has no L3 evidence** | Session 4 pinned that the kickoff is sent once, to whoever accepted, at the right moment; `sel-11` scores the shape of the dialogue at L2 with `dialogue_tools`. What nobody has done is accept the card on a fresh install and walk the four steps with a real model in front of them | next desktop session |
 | **The shared vocabulary file on a second machine** (`FR-10`) | L1 covers the file's rules and an offscreen check covered the tab's one-second watch. What no single machine shows is the real path: a rule added on one machine, committed and pushed in `agent-configs`, pulled on the other, and picked up by a running PTT without a restart | Nightlord, after installing v3.1.0 |
 | **Uninstall from Settings > Apps on a real installation** | `V-M-104` ran the Advanced tab's path. The Installed apps path starts `uninstall.ps1` unelevated, so it relaunches itself through UAC and asks before deleting — neither of which the scratch runs exercised, since a scratch run does not elevate | next uninstall |
+| **v4 increment 1 on the real machines** | `FR-11`: ten dictations give ten WAVs and ten matching records, on Darklord and on Nightlord. `FR-17`: the trained model appears in the Model tab on both and switching works; the first trained model on Nightlord's GPU. `FR-18`: the first report on real held-out clips | the user, from `script-v4inc1.md` |
 | Per-application vocabulary scopes | `gui_handoff` §11 puts them out of scope for the first pass. The field is stored and validated and one value is accepted; a rule with any other scope is dropped and logged, so nothing silently applies more widely than it was written | — |
 | Making an Advanced value editable | Every one of them fixed a documented failure, so none is exposed. §6.5's rule stands: exposing one makes it a validated `Settings` field with a logged fallback, and `Shift+Insert` additionally has to warn on change | — |
 | "Start with Windows" as a control rather than a readout | Setting it means creating a `.lnk` through COM and re-applying `install.ps1`'s run-as-admin byte patch — the installer's logic, duplicated in the app | — |
@@ -786,6 +823,7 @@ question. If any of them is a box, the fix is a text label.
 
 | Date | Commit | Change |
 |---|---|---|
+| 2026-11-04 | `86d6ed3` … `c67dfad` | **v4 increment 1 (4.0.0.dev1): saving, trained models in the Model tab, the training tools.** §3.5 added with `V-CL-01` … `V-CL-05` and `V-TM-01` … `V-TM-03`; §5.7 with `V-M-107` … `V-M-112`. Suite 881 → 913 |
 | 2026-10-20 | `955268b` | **v3.2.1: uninstall frees the shared blob store.** The Whisper weights in `hub\blobs` whose `.refs` name only `faster-whisper` repositories are removed too. `V-M-104` … `V-M-106`, `development_history.md` #66 |
 | 2026-10-20 | `5984cff` | **v3.2.0: uninstall**, from the Advanced tab and from Settings > Apps. `_internal/uninstall.ps1`, its registration in `install.ps1`, §3.4 and the `V-IN` prefix added; `V-IN-02` … `V-IN-04`, `V-M-100` … `V-M-103`; `development_history.md` #64, #65. Suite 877 → 881 |
 | 2026-10-20 | `90c69ad`, `088b961` | **v3.1.1.** The installer keeps `config.json` across an upgrade or stops (`V-IN-01`, #63); the settings window's title shows the version (`V-M-99`). Release notes rewritten as four steps (#62) |
