@@ -685,7 +685,7 @@ is the path that elevates for itself (§7).
 
 ### 5.7 v4 increment 1 — the walking skeleton · 2026-11-04
 
-Run on Darklord by Claude before the user's try-out (`script-v4inc1.md`). The two
+Run on Darklord by Claude before the user's try-out (`docs/script-v4inc1.md`), then the user's results as they come. The two
 unknowns `design.md` §11.3 names for this increment are `V-M-108` and `V-M-110`.
 
 | ID | Test | Result |
@@ -702,6 +702,8 @@ unknowns `design.md` §11.3 names for this increment are `V-M-108` and `V-M-110`
 | `V-M-116` | **The flag on Darklord, by the user** (dev3 installed 2026-11-05 09:11) | ✅ pass. Three dictations, each double-tapped: `flags.jsonl` holds exactly their three ids, every WAV and record kept, the log says "flagged … as wrong" for each; the red asterisk seen, in the middle of Windows Terminal. Two double-taps before saving was switched on logged "saving is off" and flagged nothing |
 | `V-M-117` | **Both marks on the real desktop** (4.0.0.dev4): `TapMark.flash()` with Windows Terminal in front, then screen grabs | ✅ pass. UI Automation gave the terminal's cursor cell, 14 × 28 px, in 56 ms on the first lookup of a process and 2 ms after; the system caret gave none, as the spike found. The small asterisk (19 px logical at 150 %) sat on the prompt's cursor, the big one (44 px) at the window's centre; the foreground window unchanged; both gone by 800 ms. First try failed once: the thread that first imports comtypes is initialised by the import, so initialising it again was refused; now tolerated |
 | `V-M-118` | **The dev4 archive** | ✅ pass. The build's audit passed; the zip (1,785,465,679 bytes) holds `__version__ = "4.0.0.dev4"`, `ptt/caret.py`, and comtypes' generated UI Automation wrapper |
+| `V-M-119` | **Both marks and the step 2 check on Darklord, by the user** (dev4 installed 2026-11-05 09:29) | ✅ pass. The user saw both asterisks. Two dev4 dictations double-tapped; each flagged id was the dictation just before its double-tap; 10 WAVs and 10 records. The user's first run of the check printed nothing; Claude's run of the same lines printed the expected output (probably the pasted block waiting at the prompt for Enter) |
+| `V-M-120` | **Right Ctrl+C is not a flag, by the user** | ✅ pass. No asterisk, no new flag; the terminal received Ctrl+C as usual (PTT never blocks keys). Holding right Ctrl through both presses was one 2.3 s hold, so it was saved as an ordinary dictation with empty text, as designed |
 
 Not yet run, and the user's to run (§7): `FR-11`'s ten clips on each machine, the
 double-tap on each machine, `FR-17` on both machines, and the first report on real clips.
