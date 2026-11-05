@@ -40,9 +40,9 @@ These are the complete settings this application has. There are no others. A nam
 - **Type:** true or false
 - **Default:** `True`
 - **The Concierge may change it:** yes
-- **What it does:** Discard a hold shorter than engine.MIN_RECORD_SEC as an accidental tap (FR-3).
+- **What it does:** Discard a hold shorter than engine.MIN_RECORD_SEC as an accidental tap (FR-3). Two taps in quick succession are a double-tap, which deletes the newest saved clip.
 - **When to change it:** Turn it off if you dictate single words and they are being swallowed.
-- **What can go wrong:** Off means a brushed key transcribes whatever the microphone caught. An empty buffer is still never transcribed.
+- **What can go wrong:** Off means a brushed key transcribes whatever the microphone caught, and the double-tap no longer deletes a clip. An empty buffer is still never transcribed.
 
 ### `start_click`
 

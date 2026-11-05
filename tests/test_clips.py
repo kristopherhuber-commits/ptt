@@ -91,6 +91,79 @@ def test_the_saver_writes_on_its_own_thread_and_logs_a_failure(tmp_path, log_lin
     assert any("darklord-20261104T153012.345Z not saved" in line for line in log_lines())
 
 
+# -- deleting the newest clip (the double-tap) ----------------------------------
+
+def _save_at(root, *minutes, month=11):
+    """Save one clip per minute given, in that order; return their ids."""
+    samples = np.zeros(1600, np.float32)
+    ids = []
+    for minute in minutes:
+        record = _record(samples)
+        started = datetime.datetime(2026, month, 4, 15, minute, 0, tzinfo=datetime.timezone.utc)
+        record["id"] = clips.clip_id("darklord", started)
+        clips.save(str(root), record, samples)
+        ids.append(record["id"])
+    return ids
+
+
+def _left(root, month="2026-11"):
+    folder = root / "darklord" / month
+    records = [json.loads(line)["id"] for line in
+               (folder / "recordings.jsonl").read_text(encoding="utf-8").splitlines()]
+    wavs = sorted(p.stem for p in folder.glob("*.wav"))
+    return records, wavs
+
+
+def test_deleting_removes_the_newest_record_and_its_wav(tmp_path):
+    first, second, third = _save_at(tmp_path, 1, 2, 3)
+    assert clips.delete_last(str(tmp_path), "darklord") == third
+    assert _left(tmp_path) == ([first, second], [first, second])
+
+
+def test_deleting_again_walks_back_one_clip_at_a_time(tmp_path):
+    first, second, third = _save_at(tmp_path, 1, 2, 3)
+    assert clips.delete_last(str(tmp_path), "darklord") == third
+    assert clips.delete_last(str(tmp_path), "darklord") == second
+    assert _left(tmp_path) == ([first], [first])
+    assert clips.delete_last(str(tmp_path), "darklord") == first
+    assert _left(tmp_path) == ([], [])
+    assert clips.delete_last(str(tmp_path), "darklord") is None
+
+
+def test_deleting_crosses_into_the_previous_month(tmp_path):
+    (october,) = _save_at(tmp_path, 1, month=10)
+    (november,) = _save_at(tmp_path, 1)
+    assert clips.delete_last(str(tmp_path), "darklord") == november
+    assert clips.delete_last(str(tmp_path), "darklord") == october
+    assert _left(tmp_path, "2026-10") == ([], [])
+
+
+def test_there_is_nothing_to_delete_in_a_missing_folder(tmp_path):
+    assert clips.delete_last(str(tmp_path / "nothing"), "darklord") is None
+
+
+def test_a_record_whose_wav_is_already_gone_is_still_deleted(tmp_path):
+    first, second = _save_at(tmp_path, 1, 2)
+    os.remove(tmp_path / "darklord" / "2026-11" / f"{second}.wav")
+    assert clips.delete_last(str(tmp_path), "darklord") == second
+    assert _left(tmp_path) == ([first], [first])
+
+
+def test_the_saver_deletes_after_the_saves_queued_before_it(tmp_path, log_lines):
+    """A double-tap straight after a dictation deletes that dictation."""
+    (first,) = _save_at(tmp_path, 1)
+    saver = clips.ClipSaver()
+    samples = np.zeros(1600, np.float32)
+    record = _record(samples)
+    saver.submit(str(tmp_path), record, samples)
+    saver.delete_last(str(tmp_path), "darklord")
+    saver.flush()
+
+    assert (saver.saved, saver.deleted) == (1, 1)
+    assert _left(tmp_path) == ([first], [first])
+    assert any(f"deleted {record['id']}" in line for line in log_lines())
+
+
 # -- the two settings ---------------------------------------------------------
 
 def test_saving_is_off_until_switched_on():

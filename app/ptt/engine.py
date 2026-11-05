@@ -54,6 +54,11 @@ IDLE_THRESHOLD_SEC = 240.0
 #: Applies only while `settings.ignore_short_holds` is on; see `run`.
 MIN_RECORD_SEC = 0.3
 
+#: Two taps (holds discarded as too short) count as a double-tap when the
+#: second starts within this long of the first ending. A double-tap deletes the
+#: newest saved clip (v4). Taps exist only while `ignore_short_holds` is on.
+DOUBLE_TAP_GAP_SEC = 0.4
+
 #: How many transcription times are kept for the Diagnostics panel's median.
 #: Enough to be a median rather than a mood, few enough that a model change
 #: half an hour ago is not still dragging the figure around.
@@ -85,12 +90,18 @@ def _error_text(headline, exc):
 
 class Engine:
     def __init__(self, settings, cuda_supported, on_state,
-                 on_text=None, on_benchmark=None, chord_held=None):
+                 on_text=None, on_benchmark=None, chord_held=None,
+                 on_double_tap=None, clock=None):
         """
         `settings` is held by reference and re-read as the loop runs; see `run`.
 
         `chord_held` is a seam so the loop can be driven without a keyboard in
-        step 2's tests. It defaults to the real detector.
+        step 2's tests. It defaults to the real detector. `clock` is the same
+        kind of seam for how long a hold lasted: `time.monotonic` by default.
+
+        `on_double_tap()` reports a double-tap, from the engine thread, so a
+        frontend can show that it was received. The deletion itself is queued
+        here and needs no frontend.
 
         `on_benchmark(model, device, seconds)` reports a latency measurement.
         Like `on_state` it is called from the engine thread, and like
@@ -127,7 +138,9 @@ class Engine:
         self._on_state = on_state
         self._on_text = on_text or (lambda _text: None)
         self._on_benchmark = on_benchmark or (lambda _m, _d, _s: None)
+        self._on_double_tap = on_double_tap or (lambda: None)
         self._chord_held = chord_held or hotkey_mod.chord_held
+        self._clock = clock or time.monotonic
 
         self._model = None
         self._running = True
@@ -360,6 +373,25 @@ class Engine:
             log_debug(f"ERROR: the clip was not saved: {str(e)}")
             log_debug(traceback.format_exc())
 
+    def _double_tap(self):
+        """
+        Delete the newest saved clip, and say so (v4). Never raises.
+
+        Whether or not saving is on: the user is asking for a clip already on
+        disk to go. The delete is queued behind any save still in flight, so a
+        double-tap straight after a dictation deletes that dictation.
+        """
+        log_debug("Double-tap: deleting the last clip.")
+        try:
+            self._clip_saver.delete_last(
+                paths.user_folder(self._settings.clips_folder), paths.machine_name())
+        except Exception as e:
+            log_debug(f"ERROR: the last clip was not deleted: {str(e)}")
+        try:
+            self._on_double_tap()
+        except Exception as e:
+            log_debug(f"ERROR in on_double_tap callback: {str(e)}")
+
     def _record_transcription(self, seconds, text):
         """
         Remember what the last dictation cost, for the two UI surfaces that
@@ -399,6 +431,10 @@ class Engine:
         recording = False
         stream_open = False
         started = None
+        # The double-tap: when the hold now in progress began, and when the
+        # last tap ended (None unless the previous hold was a tap).
+        pressed_at = 0.0
+        last_tap_end = None
 
         try:
             while self._running:
@@ -491,6 +527,7 @@ class Engine:
 
                         if held and not recording:
                             recording = True
+                            pressed_at = self._clock()
                             started = clips.utc_now()
                             # Break up the Alt press now, while it is still held: once the
                             # user releases it the menu has already taken focus.
@@ -507,19 +544,36 @@ class Engine:
 
                         elif not held and recording:
                             recording = False
+                            released_at = self._clock()
                             samples = rec.stop()
                             self._emit("transcribing", "Transcribing...")
                             log_debug(f"Recording stopped. Audio samples: {samples.size}")
+
+                            # A tap: a hold shorter than the minimum, by the
+                            # clock or by the buffer. The clock is the one
+                            # that counts for a quick tap: the buffer carries
+                            # the pre-roll, so it outlasts the key.
+                            tap = self._settings.ignore_short_holds and (
+                                released_at - pressed_at < MIN_RECORD_SEC
+                                or samples.size < audio_mod.SAMPLE_RATE * MIN_RECORD_SEC)
+                            if tap:
+                                if (last_tap_end is not None
+                                        and pressed_at - last_tap_end <= DOUBLE_TAP_GAP_SEC):
+                                    last_tap_end = None
+                                    self._double_tap()
+                                else:
+                                    last_tap_end = released_at
+                                    log_debug("Recording too short, skipping transcription.")
+                                self._emit("idle", self._ready_text())
+                                continue
+                            last_tap_end = None
 
                             # An empty buffer is skipped whatever the setting
                             # says: turning the minimum hold off means "do not
                             # discard short recordings", not "hand nothing at
                             # all to inference", and an empty array is the one
                             # input transcribe_audio has no answer for.
-                            minimum = (MIN_RECORD_SEC
-                                       if self._settings.ignore_short_holds else 0.0)
-                            if (samples.size == 0
-                                    or samples.size < audio_mod.SAMPLE_RATE * minimum):
+                            if samples.size == 0:
                                 log_debug("Recording too short, skipping transcription.")
                                 self._emit("idle", self._ready_text())
                                 continue

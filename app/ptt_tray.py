@@ -70,6 +70,7 @@ def main():
         settings, cuda_supported,
         on_state=app.bridge.on_state,
         on_benchmark=app.bridge.on_benchmark,
+        on_double_tap=app.bridge.on_double_tap,
     )
     app.attach(engine)
 

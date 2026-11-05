@@ -400,11 +400,13 @@ FIELDS = {
     "ignore_short_holds": Field(
         "bool", True,
         does="Discard a hold shorter than engine.MIN_RECORD_SEC as an "
-             "accidental tap (FR-3).",
+             "accidental tap (FR-3). Two taps in quick succession are a "
+             "double-tap, which deletes the newest saved clip.",
         when="Turn it off if you dictate single words and they are being "
              "swallowed.",
         risk="Off means a brushed key transcribes whatever the microphone "
-             "caught. An empty buffer is still never transcribed.",
+             "caught, and the double-tap no longer deletes a clip. An empty "
+             "buffer is still never transcribed.",
     ),
     "start_click": Field(
         "bool", False,

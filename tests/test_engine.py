@@ -92,7 +92,17 @@ def harness(monkeypatch, tmp_path):
         "loads": [],            # every (model, use_gpu) the loader was asked for
         "rules": [],            # the vocabulary each transcription was given
         "clicks": [],           # every start-of-recording click played
+        "double_taps": [],      # every double-tap reported to the frontend
+        # The engine's clock, read at each press and each release: the next of
+        # `times` if a test set any, else a second on from the last reading,
+        # so every hold is long and no test makes a tap by accident.
+        "times": [],
     }
+    clock = [0.0]
+
+    def fake_clock():
+        clock[0] = state["times"].pop(0) if state["times"] else clock[0] + 1.0
+        return clock[0]
     recorder = FakeRecorder()
 
     def fake_load(model_size, use_gpu, cuda_supported, on_fallback=None):
@@ -140,6 +150,8 @@ def harness(monkeypatch, tmp_path):
         on_text=state["texts"].append,
         on_benchmark=lambda m, d, s: state["benchmarks"].append((m, d, s)),
         chord_held=chord_held,
+        on_double_tap=lambda: state["double_taps"].append(1),
+        clock=fake_clock,
     )
     thread = threading.Thread(target=engine.run, daemon=True)
     thread.start()
@@ -497,6 +509,92 @@ def test_a_clip_that_cannot_be_saved_is_logged_and_dictation_goes_on(
 
     assert harness["pasted"] == ["hello there"]
     assert any("not saved" in line for line in log_lines())
+
+
+# -- the double-tap deletes the newest clip (v4) --------------------------------
+
+def _tap(harness):
+    harness["down"].add("rctrl")
+    wait_for(lambda: harness["recorder"].recording, what="recording to start")
+    harness["down"].clear()
+    wait_for(lambda: not harness["recorder"].recording
+             and harness["states"][-1][0] == "idle", what="a return to idle")
+
+
+def _double_tap(harness, start):
+    """Two 0.1 s taps 0.1 s apart, starting at `start` on the engine's clock."""
+    harness["times"] = [start, start + 0.1, start + 0.2, start + 0.3]
+    _tap(harness)
+    _tap(harness)
+
+
+@pytest.fixture
+def saving(harness, tmp_path, monkeypatch):
+    monkeypatch.setenv("COMPUTERNAME", "TESTBOX")
+    harness["root"] = tmp_path / "clips"
+    harness["settings"].clips_folder = str(harness["root"])
+    harness["settings"].save_clips = True
+    return harness
+
+
+def _ids(harness):
+    harness["engine"]._clip_saver.flush()
+    return [record["id"] for record, _ in _saved(harness["root"])]
+
+
+def test_a_double_tap_deletes_the_newest_clip_and_says_so(saving):
+    for _ in range(3):
+        _dictate(saving)
+    first, second, _third = _ids(saving)
+
+    _double_tap(saving, 100.0)
+    assert _ids(saving) == [first, second]
+    assert saving["double_taps"] == [1]
+
+    _double_tap(saving, 200.0)
+    assert _ids(saving) == [first]
+    assert saving["double_taps"] == [1, 1]
+    assert saving["pasted"] == ["hello there"] * 3
+
+
+def test_two_taps_too_far_apart_delete_nothing(saving):
+    _dictate(saving)
+    gap = engine_mod.DOUBLE_TAP_GAP_SEC + 0.1
+    saving["times"] = [100.0, 100.1, 100.1 + gap, 100.2 + gap]
+    _tap(saving)
+    _tap(saving)
+    assert len(_ids(saving)) == 1
+    assert saving["double_taps"] == []
+
+
+def test_a_dictation_between_two_taps_is_not_a_double_tap(saving):
+    _dictate(saving)
+    saving["times"] = [100.0, 100.1]
+    _tap(saving)
+    _dictate(saving)   # 101.1 to 102.1: a long hold
+    saving["times"] = [102.2, 102.3]
+    _tap(saving)
+    assert len(_ids(saving)) == 2
+    assert saving["double_taps"] == []
+
+
+def test_a_double_tap_deletes_while_saving_is_off(saving):
+    """It deletes a clip already on disk; the save switch is about new ones."""
+    _dictate(saving)
+    saving["settings"].save_clips = False
+    _double_tap(saving, 100.0)
+    assert _ids(saving) == []
+    assert saving["double_taps"] == [1]
+
+
+def test_with_short_holds_kept_there_is_no_double_tap(saving):
+    """Taps are holds discarded as too short (FR-3); with that off there are none."""
+    saving["settings"].ignore_short_holds = False
+    _dictate(saving)
+    _double_tap(saving, 100.0)
+    wait_for(lambda: len(saving["pasted"]) == 3, what="both taps to be transcribed")
+    assert len(_ids(saving)) == 3
+    assert saving["double_taps"] == []
 
 
 # -- trained models (v4, FR-17) ------------------------------------------------

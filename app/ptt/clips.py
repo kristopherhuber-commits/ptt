@@ -6,7 +6,10 @@ folder as a WAV and one JSON line, laid out as `training-data-plan.md` section 3
 describes:
 
     <clips folder>\\<machine>\\<yyyy-mm>\\<id>.wav
-    <clips folder>\\<machine>\\<yyyy-mm>\\recordings.jsonl     (append-only)
+    <clips folder>\\<machine>\\<yyyy-mm>\\recordings.jsonl
+
+`recordings.jsonl` is appended to, and rewritten only by `delete_last`: the
+double-tap that deletes the newest clip, WAV and record together.
 
 The audio is the exact buffer the model was given -- pre-roll included, before
 the model's own silence trimming -- as 16 kHz mono 16-bit PCM.
@@ -23,6 +26,7 @@ import datetime
 import json
 import os
 import queue
+import re
 import threading
 import wave
 
@@ -35,6 +39,9 @@ SAMPLE_RATE = 16_000
 
 RECORDINGS_FILE = "recordings.jsonl"
 LABELS_FILE = "labels.jsonl"
+
+#: A month folder's name, `2026-11`.
+MONTH_PATTERN = re.compile(r"\d{4}-\d{2}")
 
 
 def utc_now():
@@ -124,33 +131,92 @@ def save(root, record, samples):
     return folder
 
 
+def delete_last(root, machine):
+    """
+    Delete this machine's newest clip: its line in `recordings.jsonl`, then its
+    WAV. Returns the clip's id, or None when there is nothing to delete.
+
+    Newest means the last line of the newest month that has one, so deleting
+    again and again walks back through the clips, across a month boundary too.
+    The record goes first, so a failure part-way leaves a WAV with no record --
+    which nothing reads -- never a record pointing at missing audio. Raises on
+    failure; `ClipSaver` is what catches and logs.
+    """
+    machine_dir = os.path.join(root, machine)
+    try:
+        months = sorted((m for m in os.listdir(machine_dir)
+                         if MONTH_PATTERN.fullmatch(m)), reverse=True)
+    except FileNotFoundError:
+        return None
+    for month in months:
+        path = os.path.join(machine_dir, month, RECORDINGS_FILE)
+        try:
+            with open(path, encoding="utf-8") as f:
+                lines = [line for line in f.read().splitlines() if line.strip()]
+        except FileNotFoundError:
+            continue
+        if not lines:
+            continue
+        try:
+            clip = str(json.loads(lines[-1])["id"])
+        except (ValueError, KeyError, TypeError):
+            clip = None
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8", newline="\n") as f:
+            f.write("".join(line + "\n" for line in lines[:-1]))
+        os.replace(tmp, path)
+        if clip is None:
+            return "an unreadable line"
+        try:
+            os.remove(os.path.join(machine_dir, month, clip + ".wav"))
+        except FileNotFoundError:
+            pass
+        return clip
+    return None
+
+
 class ClipSaver:
     """
-    One background thread that writes queued clips, in order.
+    One background thread that writes queued clips, and deletes them, in order.
 
-    `submit` never blocks and never raises. The thread is a daemon, started on
-    the first submit, so a frontend that never saves never starts it.
+    In order matters: a double-tap straight after a dictation deletes that
+    dictation, because its save is ahead of the delete in the queue.
+
+    `submit` and `delete_last` never block and never raise. The thread is a
+    daemon, started on first use, so a frontend that never saves never starts it.
     """
 
     def __init__(self):
         self._queue = queue.Queue()
         self._thread = None
         self._lock = threading.Lock()
-        #: Clips written and clips lost since start, for the tests and the log.
+        #: Clips written, lost and deleted since start, for the tests and the log.
         self.saved = 0
         self.failed = 0
+        self.deleted = 0
+
+    def _start(self):
+        with self._lock:
+            if self._thread is None:
+                self._thread = threading.Thread(
+                    target=self._run, name="clip-saver", daemon=True)
+                self._thread.start()
 
     def submit(self, root, record, samples):
         try:
-            with self._lock:
-                if self._thread is None:
-                    self._thread = threading.Thread(
-                        target=self._run, name="clip-saver", daemon=True)
-                    self._thread.start()
+            self._start()
             self._queue.put((root, record, samples))
         except Exception as e:
             self.failed += 1
             log_debug(f"ERROR: clip {record.get('id', '?')} not saved: {e}")
+
+    def delete_last(self, root, machine):
+        """Queue the deletion of this machine's newest clip (the double-tap)."""
+        try:
+            self._start()
+            self._queue.put(("delete", root, machine))
+        except Exception as e:
+            log_debug(f"ERROR: the last clip was not deleted: {e}")
 
     def flush(self, timeout=5.0):
         """Wait until every queued clip is written or `timeout` passes."""
@@ -165,6 +231,9 @@ class ClipSaver:
             if isinstance(item, threading.Event):
                 item.set()
                 continue
+            if item[0] == "delete":
+                self._delete(item[1], item[2])
+                continue
             root, record, samples = item
             try:
                 folder = save(root, record, samples)
@@ -174,3 +243,16 @@ class ClipSaver:
                 self.failed += 1
                 log_debug(f"ERROR: clip {record.get('id', '?')} not saved "
                           f"to {root}: {e}")
+
+    def _delete(self, root, machine):
+        folder = os.path.join(root, machine)
+        try:
+            clip = delete_last(root, machine)
+        except Exception as e:
+            log_debug(f"ERROR: the last clip in {folder} was not deleted: {e}")
+            return
+        if clip is None:
+            log_debug(f"Double-tap: no clip to delete in {folder}.")
+        else:
+            self.deleted += 1
+            log_debug(f"Double-tap: deleted {clip} from {folder}.")

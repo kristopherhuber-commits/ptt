@@ -48,6 +48,7 @@ from ptt.ui import qt_theme
 from ptt.ui.qt_concierge_worker import ConciergeController
 from ptt.ui.qt_popover import Popover
 from ptt.ui.qt_statusview import UNKNOWN, UiState
+from ptt.ui.qt_tapmark import TapMark
 from ptt.ui.qt_threadcheck import log_thread
 from ptt.ui.qt_tray import QtTray
 from ptt.ui.qt_window import SettingsWindow
@@ -75,6 +76,7 @@ class EngineBridge(QObject):
     state_changed = Signal(str, str)     # state, status_text
     text_ready = Signal(str)             # wired to the engine in session 2
     benchmark_done = Signal(str, str, float)  # model, device, seconds
+    double_tapped = Signal()             # the newest clip is being deleted (v4)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -88,6 +90,10 @@ class EngineBridge(QObject):
 
     def on_text(self, text):
         self.text_ready.emit(text)
+
+    def on_double_tap(self):
+        """A double-tap, from the engine thread. Emits and nothing else."""
+        self.double_tapped.emit()
 
     def on_benchmark(self, model_name, device, seconds):
         """
@@ -175,6 +181,10 @@ class QtApp:
         self._window.quit_requested.connect(self._tray.exit_app)
         self.bridge.benchmark_done.connect(
             self._on_benchmark_done, Qt.ConnectionType.QueuedConnection
+        )
+        self._tap_mark = TapMark()
+        self.bridge.double_tapped.connect(
+            self._tap_mark.flash, Qt.ConnectionType.QueuedConnection
         )
 
         # The Concierge (v3.0). Everything about the worker thread lives in the
