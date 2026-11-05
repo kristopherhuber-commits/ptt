@@ -76,6 +76,9 @@ def local_model_dir(model_size):
 #: Where saved dictations go (FR-11): `<this>\<machine>\<yyyy-mm>\`.
 DEFAULT_CLIPS_FOLDER = r"%USERPROFILE%\tools\ptt-clips"
 
+#: Where trained models are (FR-17): one folder each, `<this>\<name>\`.
+DEFAULT_TRAINED_MODELS_FOLDER = r"%USERPROFILE%\tools\ptt-train\models"
+
 
 def user_folder(setting):
     """

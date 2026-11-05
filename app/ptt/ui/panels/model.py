@@ -79,12 +79,26 @@ class ModelTableModel(QAbstractTableModel):
         self._rows = []
         self.refresh({}, "cpu", "")
 
-    def refresh(self, benchmarks, device, clip_id):
-        """Rebuild every row: disk state is filesystem truth and can change."""
+    def refresh(self, benchmarks, device, clip_id, trained=()):
+        """
+        Rebuild every row: disk state is filesystem truth and can change.
+
+        `trained` is `transcribe.trained_models(...)`: models trained on the
+        user's speech (FR-17), listed after the stock tiers.
+        """
         self.beginResetModel()
         self._rows = []
         installed = transcribe.installed_sizes()
-        for info in transcribe.MODELS:
+        catalogue = list(transcribe.MODELS)
+        for model in trained:
+            meta = model.meta
+            when = str(meta.get("created_utc", ""))[:10]
+            clips = meta.get("clips_trained")
+            catalogue.append(transcribe.ModelInfo(
+                model.name, "turbo, trained",
+                "", f"trained on {clips} of your clips, {when}" if clips else "trained"))
+            installed[model.name] = transcribe.directory_size(model.path)
+        for info in catalogue:
             local = installed.get(info.name)
             entry = benchmarks.get(benchmark_key(info.name, device)) or {}
             # A measurement taken against a different recording of the sample
@@ -93,6 +107,9 @@ class ModelTableModel(QAbstractTableModel):
             seconds = entry.get("seconds") if entry.get("clip") == clip_id else None
             self._rows.append({
                 "name": info.name,
+                # A trained model shows its folder; "turbo, trained" under it
+                # says the rest, in a column 150 px wide.
+                "label": info.name.removeprefix(transcribe.TRAINED_PREFIX),
                 "params": info.params,
                 "character": info.character,
                 "disk": _format_bytes(local) if local is not None else info.disk,
@@ -137,7 +154,7 @@ class ModelTableModel(QAbstractTableModel):
 
         if role == Qt.ItemDataRole.DisplayRole:
             return (
-                row["name"], row["disk"],
+                row["label"], row["disk"],
                 f"{row['seconds']:.2f} s" if row["seconds"] else UNMEASURED,
                 row["character"],
                 "Downloaded" if row["local"] else "Not on disk",
@@ -438,16 +455,21 @@ class ModelPanel(InstantApplyPanel):
                 self._table.setColumnWidth(column, width)
 
         self._table.selectionModel().selectionChanged.connect(self._on_row_selected)
-
-        # Exactly tall enough for every tier at once, and no taller. Six rows
-        # is the whole list and it is not going to grow, so scrolling them
-        # would hide part of a comparison whose entire job is to be seen side
-        # by side -- and letting the view stretch instead leaves an empty band
-        # under the last row that reads as a missing tier.
-        self._table.setFixedHeight(
-            header.sizeHint().height() + self._model.rowCount() * ROW_HEIGHT_PX + 2
-        )
+        self._fit_table_height()
         return self._table
+
+    def _fit_table_height(self):
+        """
+        Exactly tall enough for every row at once, and no taller. Scrolling
+        would hide part of a comparison whose entire job is to be seen side by
+        side, and letting the view stretch leaves an empty band under the last
+        row that reads as a missing tier. Refitted on every refresh, because
+        trained models (FR-17) come and go.
+        """
+        self._table.setFixedHeight(
+            self._table.horizontalHeader().sizeHint().height()
+            + self._model.rowCount() * ROW_HEIGHT_PX + 2
+        )
 
     def _build_buttons(self):
         row = QHBoxLayout()
@@ -505,8 +527,11 @@ class ModelPanel(InstantApplyPanel):
             on_gpu = bool(self._settings.use_gpu) and self.cuda_supported
             (self._gpu if on_gpu else self._cpu).setChecked(True)
             self._model.refresh(
-                self._settings.benchmarks, self.device(), transcribe.benchmark_clip_id()
+                self._settings.benchmarks, self.device(), transcribe.benchmark_clip_id(),
+                transcribe.trained_models(
+                    paths.user_folder(self._settings.trained_models_folder)),
             )
+            self._fit_table_height()
             row = self._model.row_of(self._settings.model)
             if row >= 0:
                 self._table.selectRow(row)
@@ -573,9 +598,12 @@ class ModelPanel(InstantApplyPanel):
         """
         rows = self._table.selectionModel().selectedRows()
         name = self._model.name_at(rows[0].row()) if rows else self._settings.model
+        where = (transcribe.trained_model_dir(
+                     paths.user_folder(self._settings.trained_models_folder), name)
+                 if transcribe.is_trained(name) else None) or paths.local_model_dir(name)
         self.message.emit(
             f"Deleting a downloaded model is not implemented yet — remove "
-            f"{paths.local_model_dir(name)} by hand."
+            f"{where} by hand."
         )
 
     # -- lifecycle ----------------------------------------------------------

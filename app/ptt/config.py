@@ -31,6 +31,7 @@ table costs.
 
 import json
 import os
+import re
 import threading
 from dataclasses import dataclass, field
 from typing import Any, Callable, NamedTuple
@@ -51,6 +52,7 @@ _KNOWN_KEYS = (
     "version", "use_gpu", "hotkey", "model", "benchmarks",
     "audio_device", "keep_stream_warm", "ignore_short_holds", "start_click",
     "vocabulary", "concierge", "save_clips", "clips_folder",
+    "trained_models_folder",
 )
 
 #: Serialises writers of config.json. See `Settings.save`.
@@ -102,6 +104,11 @@ class Field(NamedTuple):
     agent_readable: bool = True
     agent_writable: bool = True
     internal: bool = False
+    #: A `str` with `choices` also accepts a value matching this regular
+    #: expression -- how `model` accepts `trained:<name>` (FR-17), whose names
+    #: are not known at import. `pattern_hint` says it in words.
+    pattern: str = ""
+    pattern_hint: str = ""
 
     @property
     def note(self):
@@ -147,7 +154,10 @@ class Field(NamedTuple):
             if not isinstance(raw, str):
                 return None, f"is not a string ({raw!r})"
             if self.choices and raw not in self.choices:
-                return None, f"{raw!r} is not one of {list(self.choices)}"
+                if self.pattern and re.fullmatch(self.pattern, raw):
+                    return raw, None
+                hint = f" or {self.pattern_hint}" if self.pattern_hint else ""
+                return None, f"{raw!r} is not one of {list(self.choices)}{hint}"
             return raw, None
 
         return self.parse(raw, note, strict)
@@ -417,7 +427,10 @@ FIELDS = {
     ),
     "model": Field(
         "str", transcribe.DEFAULT_MODEL, choices=transcribe.MODEL_NAMES,
-        does="Which Whisper size tier transcribes (FR-5). Changing it **is** "
+        pattern=transcribe.TRAINED_PATTERN,
+        pattern_hint="trained:<name>, a model in trained_models_folder",
+        does="Which Whisper size tier transcribes (FR-5), or a model trained on "
+             "your own speech, named trained:<its folder>. Changing it **is** "
              "loading it: the engine rebuilds the model on its next poll "
              "iteration, which takes a few seconds and needs no restart and no "
              "separate load step.",
@@ -425,7 +438,9 @@ FIELDS = {
              "accuracy at about half the time, which is why it is the default.",
         risk="Validated against the catalogue, because an unrecognised name "
              "would be handed to faster-whisper, which tries to fetch it from "
-             "Hugging Face by name.",
+             "Hugging Face by name. A trained model whose folder is missing "
+             "loads large-v3-turbo instead and says so in the log; it is never "
+             "downloaded.",
     ),
     "benchmarks": Field(
         "parsed", {}, parse=_parse_benchmarks, json_type="object",
@@ -485,6 +500,16 @@ FIELDS = {
         when="Change it only to move the clips to another local disk.",
         risk="Never inside this repo (it is public), the install folder (the "
              "uninstaller deletes it), or anything synced to a cloud (CON-6).",
+    ),
+    "trained_models_folder": Field(
+        "parsed", paths.DEFAULT_TRAINED_MODELS_FOLDER, parse=_parse_folder,
+        json_type="string", agent_writable=False,
+        does="Where models trained on your speech are (FR-17). Each folder in it "
+             "holding a model.bin is listed in the Model tab as trained:<folder>. "
+             "%USERPROFILE% and ~ are expanded when it is used.",
+        when="Leave it unless the training tools write somewhere else.",
+        risk="The same path on every machine, so a model copied there appears "
+             "the same everywhere.",
     ),
     "concierge.opt_in": Field(
         "str", "unset", choices=OPT_IN_STATES, agent_writable=False,
@@ -685,6 +710,7 @@ class Settings:
     concierge: ConciergeSettings = field(default_factory=ConciergeSettings)
     save_clips: bool = False
     clips_folder: str = paths.DEFAULT_CLIPS_FOLDER
+    trained_models_folder: str = paths.DEFAULT_TRAINED_MODELS_FOLDER
 
     version: int = CONFIG_VERSION
     extra: dict = field(default_factory=dict, repr=False)
@@ -902,6 +928,7 @@ class Settings:
             "concierge": self.concierge.to_dict(),
             "save_clips": bool(self.save_clips),
             "clips_folder": str(self.clips_folder),
+            "trained_models_folder": str(self.trained_models_folder),
         }
 
     def save(self):

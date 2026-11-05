@@ -265,8 +265,18 @@ class Engine:
         # selection takes effect on the next reload with no restart.
         requested = self._settings.model
         self._identity = None
+        target = requested
+        if transcribe.is_trained(requested):
+            # Loaded from its folder, never by name: a name faster-whisper does
+            # not know is a Hugging Face download (FR-17).
+            folder = paths.user_folder(self._settings.trained_models_folder)
+            target = transcribe.trained_model_dir(folder, requested)
+            if target is None:
+                log_debug(f"{requested} is not in {folder}; loading "
+                          f"{transcribe.DEFAULT_MODEL} instead.")
+                requested = target = transcribe.DEFAULT_MODEL
         self._model, self.current_device, status_text = transcribe.load_model_with_fallback(
-            requested, self._settings.use_gpu, self.cuda_supported,
+            target, self._settings.use_gpu, self.cuda_supported,
             on_fallback=self._persist_cpu_fallback,
         )
         self.current_model = requested if self._model is not None else ""
@@ -331,7 +341,9 @@ class Engine:
             return
         try:
             if self._identity is None:
-                self._identity = transcribe.model_identity(self.current_model)
+                self._identity = transcribe.model_identity(
+                    self.current_model,
+                    paths.user_folder(self._settings.trained_models_folder))
             model, revision = self._identity
             record = clips.build_record(
                 machine=paths.machine_name(), started=started, samples=samples,

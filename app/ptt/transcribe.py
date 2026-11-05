@@ -16,6 +16,7 @@ refactor to hoist.
 this module.
 """
 
+import json
 import os
 import re
 import sys
@@ -65,6 +66,62 @@ MODEL_NAMES = tuple(m.name for m in MODELS)
 
 #: What ships, and what an unrecognised `model` in config.json falls back to.
 DEFAULT_MODEL = "large-v3-turbo"
+
+#: A model trained on the user's own speech (v4, FR-17) is named
+#: `trained:<folder>`, where <folder> is its directory in the trained-models
+#: folder (`config.FIELDS["trained_models_folder"]`).
+TRAINED_PREFIX = "trained:"
+
+#: What a trained model's folder name may be.
+TRAINED_PATTERN = TRAINED_PREFIX + r"[A-Za-z0-9._-]+"
+
+#: The file the training tools write beside each trained model.
+TRAINED_META = "ptt_model.json"
+
+
+class TrainedModel(NamedTuple):
+    """One model in the trained-models folder."""
+    name: str           # trained:<folder>
+    path: str
+    meta: dict
+
+
+def is_trained(model_name):
+    return str(model_name).startswith(TRAINED_PREFIX)
+
+
+def trained_models(folder):
+    """
+    The trained models in `folder`, by name: each subfolder holding a
+    CTranslate2 `model.bin`. Never raises; a folder that is not there has none.
+    """
+    found = []
+    try:
+        entries = sorted(os.listdir(folder))
+    except OSError:
+        return ()
+    for entry in entries:
+        path = os.path.join(folder, entry)
+        name = TRAINED_PREFIX + entry
+        if not (re.fullmatch(TRAINED_PATTERN, name)
+                and os.path.isfile(os.path.join(path, "model.bin"))):
+            continue
+        meta = {}
+        try:
+            with open(os.path.join(path, TRAINED_META), encoding="utf-8") as f:
+                meta = json.load(f)
+        except Exception as e:
+            log_debug(f"{path} has no readable {TRAINED_META} ({e}).")
+        found.append(TrainedModel(name, path, meta if isinstance(meta, dict) else {}))
+    return tuple(found)
+
+
+def trained_model_dir(folder, model_name):
+    """The directory a `trained:` name loads from, or None if it is not there."""
+    for model in trained_models(folder):
+        if model.name == model_name:
+            return model.path
+    return None
 
 LANGUAGE = "en"          # None for autodetect
 BEAM_SIZE = 5
@@ -176,7 +233,14 @@ def _whisper_model_cls():
 
 
 def resolve_model_path(model_size):
-    """Prefer a model bundled next to the app; otherwise let faster-whisper fetch it."""
+    """
+    A model directory as given; else a model bundled next to the app; otherwise
+    the name, which faster-whisper fetches. A trained model arrives here as its
+    directory (`Engine._reload`), so it is never looked up by name online.
+    """
+    if os.path.isabs(model_size) and os.path.isdir(model_size):
+        log_debug(f"Using model directory: {model_size}")
+        return model_size
     local_model_path = paths.local_model_dir(model_size)
     if os.path.isdir(local_model_path):
         log_debug(f"Using local bundled model directory: {local_model_path}")
@@ -254,7 +318,7 @@ def load_model_with_fallback(model_size, use_gpu, cuda_supported, on_fallback=No
             return None, "cpu", "Error loading model"
 
 
-def _directory_size(path):
+def directory_size(path):
     """Total bytes under `path`, or 0 if it is not there."""
     if not os.path.isdir(path):
         return 0
@@ -291,7 +355,7 @@ def installed_sizes():
     """
     sizes = {}
     for info in MODELS:
-        bundled = _directory_size(paths.local_model_dir(info.name))
+        bundled = directory_size(paths.local_model_dir(info.name))
         if bundled:
             sizes[info.name] = bundled
 
@@ -424,17 +488,23 @@ def transcribe_clip(model, audio, rules=()):
     return Transcript(raw_text, text, fired, tuple(_segment_scores(s) for s in segments))
 
 
-def model_identity(model_size):
+def model_identity(model_size, trained_folder=None):
     """
     `(model, revision)` naming the weights `model_size` resolves to, for a saved
     clip's record: the text depends on them, so a change mid-collection must be
     visible (training-data-plan.md section 3).
 
-    A bundled directory is named by its tier with no revision. Otherwise it is
-    the Hugging Face repository faster-whisper fetches the tier from, at the
-    commit its cache's `main` points to. Never raises: an unknown answer is
+    A trained model is its name, at the time its training finished. A bundled
+    directory is named by its tier with no revision. Otherwise it is the Hugging
+    Face repository faster-whisper fetches the tier from, at the commit its
+    cache's `main` points to. Never raises: an unknown answer is
     `(model_size, "")`, logged.
     """
+    if is_trained(model_size):
+        for model in trained_models(trained_folder or ""):
+            if model.name == model_size:
+                return model_size, str(model.meta.get("created_utc", ""))
+        return model_size, ""
     if os.path.isdir(paths.local_model_dir(model_size)):
         return model_size, ""
     try:

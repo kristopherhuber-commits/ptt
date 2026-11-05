@@ -148,7 +148,8 @@ def settings_section():
 
 def _type_note(rule):
     if rule.choices:
-        return f"one of {', '.join(f'`{c}`' for c in rule.choices)}"
+        note = f"one of {', '.join(f'`{c}`' for c in rule.choices)}"
+        return note + (f", or {rule.pattern_hint}" if rule.pattern_hint else "")
     if rule.kind == "bool":
         return "true or false"
     if rule.kind == "int":

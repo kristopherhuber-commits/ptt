@@ -114,7 +114,7 @@ def harness(monkeypatch, tmp_path):
     monkeypatch.setattr(transcribe, "transcribe_audio", fake_transcribe)
     monkeypatch.setattr(transcribe, "transcribe_clip", fake_transcribe_clip)
     monkeypatch.setattr(transcribe, "model_identity",
-                        lambda name: (f"repo/{name}", "abc123"))
+                        lambda name, folder=None: (f"repo/{name}", "abc123"))
     monkeypatch.setattr(transcribe, "load_benchmark_clip",
                         lambda: np.zeros(16_000, np.float32))
     monkeypatch.setattr(audio_mod, "get_idle_duration", lambda: 0.0)
@@ -497,6 +497,36 @@ def test_a_clip_that_cannot_be_saved_is_logged_and_dictation_goes_on(
 
     assert harness["pasted"] == ["hello there"]
     assert any("not saved" in line for line in log_lines())
+
+
+# -- trained models (v4, FR-17) ------------------------------------------------
+
+def test_a_trained_model_is_loaded_from_its_folder(harness, tmp_path):
+    folder = tmp_path / "models"
+    (folder / "lora-a").mkdir(parents=True)
+    (folder / "lora-a" / "model.bin").write_bytes(b"0")
+    harness["settings"].trained_models_folder = str(folder)
+    harness["settings"].model = "trained:lora-a"
+    harness["engine"].request_model_reload()
+
+    wait_for(lambda: harness["loads"][-1][0] == str(folder / "lora-a"),
+             what="the trained model's folder to be loaded")
+    wait_for(lambda: harness["engine"].current_model == "trained:lora-a",
+             what="the trained model to be resident")
+
+
+def test_a_missing_trained_model_loads_stock_and_says_why(harness, tmp_path, log_lines):
+    """Never a download by name, and never the use_gpu fallback (FR-17)."""
+    harness["settings"].trained_models_folder = str(tmp_path / "nothing-here")
+    harness["settings"].model = "trained:gone"
+    before = len(harness["loads"])
+    harness["engine"].request_model_reload()
+
+    wait_for(lambda: len(harness["loads"]) > before, what="a reload")
+    assert harness["loads"][-1][0] == transcribe.DEFAULT_MODEL
+    wait_for(lambda: harness["engine"].current_model == transcribe.DEFAULT_MODEL,
+             what="stock to be resident")
+    assert any("trained:gone is not in" in line for line in log_lines())
 
 
 # -- what the diagnostics panel reads ----------------------------------------

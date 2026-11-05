@@ -64,12 +64,12 @@ These are the complete settings this application has. There are no others. A nam
 
 ### `model`
 
-- **Type:** one of `tiny.en`, `base.en`, `small.en`, `medium.en`, `large-v3`, `large-v3-turbo`
+- **Type:** one of `tiny.en`, `base.en`, `small.en`, `medium.en`, `large-v3`, `large-v3-turbo`, or trained:<name>, a model in trained_models_folder
 - **Default:** `large-v3-turbo`
 - **The Concierge may change it:** yes
-- **What it does:** Which Whisper size tier transcribes (FR-5). Changing it **is** loading it: the engine rebuilds the model on its next poll iteration, which takes a few seconds and needs no restart and no separate load step.
+- **What it does:** Which Whisper size tier transcribes (FR-5), or a model trained on your own speech, named trained:<its folder>. Changing it **is** loading it: the engine rebuilds the model on its next poll iteration, which takes a few seconds and needs no restart and no separate load step.
 - **When to change it:** Larger is more accurate and slower; large-v3-turbo is near-large accuracy at about half the time, which is why it is the default.
-- **What can go wrong:** Validated against the catalogue, because an unrecognised name would be handed to faster-whisper, which tries to fetch it from Hugging Face by name.
+- **What can go wrong:** Validated against the catalogue, because an unrecognised name would be handed to faster-whisper, which tries to fetch it from Hugging Face by name. A trained model whose folder is missing loads large-v3-turbo instead and says so in the log; it is never downloaded.
 
 ### `benchmarks`
 
@@ -115,6 +115,15 @@ These are the complete settings this application has. There are no others. A nam
 - **What it does:** Where saved dictations go. Each machine writes its own <machine> subfolder, one <yyyy-mm> folder per month. %USERPROFILE% and ~ are expanded when it is used.
 - **When to change it:** Change it only to move the clips to another local disk.
 - **What can go wrong:** Never inside this repo (it is public), the install folder (the uninstaller deletes it), or anything synced to a cloud (CON-6).
+
+### `trained_models_folder`
+
+- **Type:** text
+- **Default:** `%USERPROFILE%\tools\ptt-train\models`
+- **The Concierge may change it:** no
+- **What it does:** Where models trained on your speech are (FR-17). Each folder in it holding a model.bin is listed in the Model tab as trained:<folder>. %USERPROFILE% and ~ are expanded when it is used.
+- **When to change it:** Leave it unless the training tools write somewhere else.
+- **What can go wrong:** The same path on every machine, so a model copied there appears the same everywhere.
 
 ### `concierge.opt_in`
 
