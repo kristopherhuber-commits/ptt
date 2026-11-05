@@ -57,7 +57,7 @@ Done = Kris has run Part A and Part B on both machines. Then: update this checkp
 - **Two marks per double-tap** (Kris, 2026-11-05): a small red asterisk at the text cursor, the size of a typed character, and the big one (44 px) in the middle of the active window. Each lasts 500 ms. No cursor found means no small mark, never a misplaced one.
 - **Kris deletes his test clips by hand** until the feature works ("I want the functionality to be correct before I save them", 2026-11-05). Missing clips in `ptt-clips` are not a PTT fault; nothing in PTT deletes clips.
 - **The double-tap flags; it never deletes** (Kris, 2026-11-05). He first asked for delete-last-clip (built as dev2, `bbbc101`), then: "I don't necessarily think I wanted to delete it", and accepted Claude's recommendation to flag per `FR-13` as written. What he wants, in his words: dictate, read the output, double-tap whenever (no time limit after the dictation), the most recent logged clip is marked erroneous, and a unique, visually clear mark confirms it; a misclick is fixed in review (today: Enter on it in `label.py` keeps the pasted text). Rules as built: two taps under `MIN_RECORD_SEC` (0.3 s), the second starting within `DOUBLE_TAP_GAP_SEC` = 0.5 s of the first ending, no key outside the chord pressed (`hotkey.other_key_down`, checked for the first `OTHER_KEY_POLLS` polls); a second double-tap flags the same clip once; with `save_clips` off nothing is flagged and no mark shows; only while `ignore_short_holds` is on. Flag = `{"id", "flagged_at"}` appended to `<clips>\<machine>\<yyyy-mm>\flags.jsonl` (the data plan's layout). Marks: red asterisks with a white halo, click-through and never focused (see Two marks).
-- **Save switch in increment 1 = a checkable tray item, "Save clips for training"** (Claude's recommended option; Kris answered the plan with "okay", 2026-11-04). Increment 2's pause (`FR-12`) is this same `save_clips` setting; increment 2 adds the mark on the terminal's cursor and showing failures (`OBS-5`).
+- **Save switch in increment 1 = a checkable tray item, "Save clips for training"** (Claude's recommended option; Kris answered the plan with "okay", 2026-11-04). Increment 2's pause (`FR-12`) is this same `save_clips` setting; increment 2 adds showing failures (`OBS-5`); the mark on the cursor was built in dev4.
 - **One build instead of two** (Claude's call, 2026-11-04; moot once Kris installed dev1): build 1 wasn't installed yet when the trained-model listing was finished, so the zip was rebuilt with both and Kris installs once. Same version, 4.0.0.dev1. Design §11.3's "saving installed first" was so clips pile up while the rest is built; the rest was built before any install, so no clips were lost by it.
 - **Dev-time defects** in v4's own unfinished code (e.g. the `preprocessor_config.json` fix) are recorded in `docs/verification.md` §5.7, not `docs/development_history.md`, which is for defects in built or shipped code (Claude's call, 2026-11-04).
 - **Increment builds carry `__version__ = "4.0.0.devN"`** (N = increment); the release is `4.0.0`. `tests/test_concierge_layering.py::test_the_version_is_read_without_importing_the_package` now accepts `\d+\.\d+\.\d+(\.dev\d+)?`.
@@ -81,7 +81,7 @@ Done = Kris has run Part A and Part B on both machines. Then: update this checkp
 
 ## Waiting on the user
 
-- **The increment 1 try-out**, Parts A (now dev3, with the flag) and B of `C:\Users\huber\Downloads\script-v4inc1.md`; since 2026-11-04, Part A rewritten 2026-11-05.
+- **The increment 1 try-out**, Parts A (now dev4, with the flag and both marks) and B of `C:\Users\huber\Downloads\script-v4inc1.md`; since 2026-11-04, Part A rewritten 2026-11-05.
 - **ECC** on the GPU: recommendation is to leave it off. Can wait; since 2026-11-03.
 - **Success thresholds:** set after the baseline (increment 6). Can wait.
 
@@ -91,7 +91,7 @@ None.
 
 ## Not in git
 
-- `C:\Users\huber\git\ptt\ptt_dictate_dist.zip`: the 4.0.0.dev3 build (git-ignored; every build overwrites it). The v3.2.1 zip is the GitHub release asset of tag `v3.2.1`.
+- `C:\Users\huber\git\ptt\ptt_dictate_dist.zip`: the 4.0.0.dev4 build (git-ignored; every build overwrites it). The v3.2.1 zip is the GitHub release asset of tag `v3.2.1`.
 - `C:\Users\huber\tools\ptt-v4-training\ptt-train\`: `.venv`, `baseline\stock-large-v3-turbo-f16\` (+ `baseline\convert-stock.log`), empty `models\`, `runs\`, `reports\`. Hugging Face cache now also holds `openai/whisper-large-v3-turbo`.
 - `C:\Users\huber\tools\ptt-v4-training\ptt-clips\darklord\2026-11\`: Kris's test clips from dev3 (5 at 09:13, 2026-11-05) and `flags.jsonl`; he deletes test clips by hand, so expect any number.
 - `C:\Users\huber\tools\ptt-v4-training\ptt-spike-example\`: the spike's fake example clip (labels.jsonl, `2026-08\` with its WAV and record), moved out of the clips folder so training never sees it. Kris may delete it.
@@ -112,5 +112,5 @@ None.
 6. `training/common.py`, `training/train.py`, `training/report.py`, `training/label.py`.
 7. `C:\Users\huber\Downloads\script-v4inc1.md` (on Darklord): the steps Kris is running.
 8. `README.md` §2: building and installing (its Option 2 omits `python build_llama_runtime.py`, which `build_portable.py` needs first on a fresh clone).
-9. For increment 2: `spike/v4_caret_probe.ps1` (UI Automation gives Windows Terminal's cursor cell; the system caret gives nothing), the input to its open unknown. A new setting touches `config.FIELDS`, the `Settings` dataclass, `_KNOWN_KEYS` and `to_dict()`, then `build_knowledge_pack.py` (see `86d6ed3` for `save_clips`).
+9. `spike/v4_caret_probe.ps1` (UI Automation gives Windows Terminal's cursor cell; the system caret gives nothing): the spike behind `app/ptt/caret.py`. For increment 2: A new setting touches `config.FIELDS`, the `Settings` dataclass, `_KNOWN_KEYS` and `to_dict()`, then `build_knowledge_pack.py` (see `86d6ed3` for `save_clips`).
 10. For increment 7: `docs/background/personalization.md` (the LoRA maths, encoder and decoder).
