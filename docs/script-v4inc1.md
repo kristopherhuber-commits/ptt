@@ -1,5 +1,11 @@
 # v4 increment 1: the walking skeleton (build 4.0.0.dev4)
 
+**Where things are:**
+- This file: `C:\Users\huber\git\ptt\docs\script-v4inc1.md`, in git (branch `feature/training`), so it is the same on both machines after a `git pull`.
+- The training tools it runs: `C:\Users\huber\git\ptt\training\` (`label.py`, `train.py`, `report.py`).
+- The build it installs: `C:\Users\huber\git\ptt\ptt_dictate_dist.zip` on Darklord (Nightlord copies it with `scp`).
+- Clips, the training environment, models and reports: `C:\Users\huber\tools\ptt-v4-training\` on each machine.
+
 Part A now; Part B once Darklord has a few dozen clips. 4.0.0.dev4 adds the flag: after a dictation, tap the dictation key twice quickly and the newest clip is flagged as wrong, with two red asterisks for half a second: a small one at the text cursor and a big one in the middle of the window. Nothing is deleted. There is no time limit after the dictation; only the two taps must be close together.
 
 # Part A: saving and the flag, on both machines
