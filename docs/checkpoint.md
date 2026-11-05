@@ -99,7 +99,7 @@ None.
 
 - `C:\Users\huber\git\ptt\ptt_dictate_dist.zip`: the 4.0.0.dev4 build (git-ignored; every build overwrites it). The v3.2.1 zip is the GitHub release asset of tag `v3.2.1`.
 - Installed PTT on Darklord: 4.0.0.dev4 at `C:\Users\huber\AppData\Local\Programs\ptt_dictate`, saving on. Its `app\debug_log.txt` logs every save and double-tap ("Saved clip", "Double-tap: flagged … as wrong"); installing clears it.
-- `C:\Users\huber\tools\ptt-v4-training\ptt-clips\darklord\2026-11\`: Kris's test clips and `flags.jsonl` (about 14 clips and 7 flags at 09:33, 2026-11-05, one with empty text from step 3); he deletes test clips by hand, so expect any number.
+- `C:\Users\huber\tools\ptt-v4-training\ptt-clips\darklord\2026-11\`: empty. Kris cleared his test clips at 09:47, 2026-11-05, after Darklord's steps 1–3; real collection starts from here.
 - `C:\Users\huber\tools\ptt-v4-training\ptt-train\`: `.venv`, `baseline\stock-large-v3-turbo-f16\` (+ `baseline\convert-stock.log`), empty `models\`, `runs\`, `reports\`. The Hugging Face cache also holds `openai/whisper-large-v3-turbo`.
 - `C:\Users\huber\tools\ptt-v4-training\ptt-spike-example\`: the spike's fake example clip, kept out of the clips folder so training never sees it. Kris may delete it.
 - `C:\Users\huber\Downloads\script-v4inc1.md`: a stale copy of `docs/script-v4inc1.md`; not updated any more.
