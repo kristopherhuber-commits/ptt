@@ -248,6 +248,13 @@ class QtTray(QObject):
 
         self._menu.addSeparator()
 
+        # v4 (FR-11). Increment 2's pause (FR-12) is this same switch.
+        self._act_save_clips = self._menu.addAction("Save clips for training")
+        self._act_save_clips.setCheckable(True)
+        self._act_save_clips.triggered.connect(self._toggle_save_clips)
+
+        self._menu.addSeparator()
+
         self._act_concierge = self._menu.addAction("Concierge…")
         self._act_concierge.triggered.connect(
             lambda _checked=False: self.concierge_requested.emit()
@@ -282,6 +289,7 @@ class QtTray(QObject):
         )
         self._act_gpu.setChecked(bool(self._settings.use_gpu))
         self._act_cpu.setChecked(not self._settings.use_gpu)
+        self._act_save_clips.setChecked(bool(self._settings.save_clips))
 
     @Slot()
     def _set_device_gpu(self):
@@ -295,6 +303,12 @@ class QtTray(QObject):
         if self._settings.use_gpu:
             self._settings.set("use_gpu", False)
             self._engine.request_model_reload()
+        self.refresh_menu()
+
+    @Slot()
+    def _toggle_save_clips(self):
+        """No reload: the engine reads `save_clips` at each dictation."""
+        self._settings.set("save_clips", not self._settings.save_clips)
         self.refresh_menu()
 
     @Slot()

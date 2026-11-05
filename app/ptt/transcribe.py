@@ -379,6 +379,80 @@ def clean_text(text):
     return re.sub(r'\.{2,}', '', text.strip()).strip()
 
 
+class Transcript(NamedTuple):
+    """
+    One dictation's text, and what a saved clip needs to know about it (FR-11).
+
+    `raw_text` is the model's own output, before `clean_text` and the rules:
+    the model's real errors. `text` is what gets pasted. `segments` holds one
+    dict per decoding window -- start, end, avg_logprob, no_speech_prob,
+    compression_ratio -- which is how sure the model was.
+    """
+    raw_text: str
+    text: str
+    rules_fired: tuple = ()
+    segments: tuple = ()
+
+
+def _segment_scores(s):
+    return {
+        "start": round(float(s.start), 2),
+        "end": round(float(s.end), 2),
+        "avg_logprob": round(float(s.avg_logprob), 3),
+        "no_speech_prob": round(float(s.no_speech_prob), 4),
+        "compression_ratio": round(float(s.compression_ratio), 2),
+    }
+
+
+def transcribe_clip(model, audio, rules=()):
+    """
+    `transcribe_audio`, keeping everything a saved clip records.
+
+    The dictation path calls this one; `transcribe_audio` is the same call
+    reduced to the pasted text, for the benchmark.
+    """
+    segments, _ = model.transcribe(
+        audio,
+        language=LANGUAGE,
+        beam_size=BEAM_SIZE,
+        vad_filter=VAD_FILTER,
+        condition_on_previous_text=False
+    )
+    segments = list(segments)
+    raw_text = "".join(s.text for s in segments)
+    text, fired = vocabulary_mod.apply_rules_traced(clean_text(raw_text), rules)
+    return Transcript(raw_text, text, fired, tuple(_segment_scores(s) for s in segments))
+
+
+def model_identity(model_size):
+    """
+    `(model, revision)` naming the weights `model_size` resolves to, for a saved
+    clip's record: the text depends on them, so a change mid-collection must be
+    visible (training-data-plan.md section 3).
+
+    A bundled directory is named by its tier with no revision. Otherwise it is
+    the Hugging Face repository faster-whisper fetches the tier from, at the
+    commit its cache's `main` points to. Never raises: an unknown answer is
+    `(model_size, "")`, logged.
+    """
+    if os.path.isdir(paths.local_model_dir(model_size)):
+        return model_size, ""
+    try:
+        ensure_cuda_dll_dirs()
+        from faster_whisper.utils import _MODELS        # deliberately not at module scope
+        from huggingface_hub import scan_cache_dir
+        repo_id = _MODELS.get(model_size, model_size)
+        for repo in scan_cache_dir().repos:
+            if repo.repo_type == "model" and repo.repo_id == repo_id:
+                for revision in repo.revisions:
+                    if "main" in revision.refs:
+                        return repo_id, revision.commit_hash
+        return repo_id, ""
+    except Exception as e:
+        log_debug(f"Could not identify the weights for {model_size}: {e}")
+        return model_size, ""
+
+
 def transcribe_audio(model, audio, rules=()):
     """
     Run inference over a float32 mono buffer and return the text to paste.
@@ -398,13 +472,4 @@ def transcribe_audio(model, audio, rules=()):
     Defaults to no rules so the benchmark path, which measures inference rather
     than dictation, is unaffected by the user's vocabulary.
     """
-    segments, _ = model.transcribe(
-        audio,
-        language=LANGUAGE,
-        beam_size=BEAM_SIZE,
-        vad_filter=VAD_FILTER,
-        condition_on_previous_text=False
-    )
-    return vocabulary_mod.apply_rules(
-        clean_text("".join(s.text for s in segments)), rules
-    )
+    return transcribe_clip(model, audio, rules).text

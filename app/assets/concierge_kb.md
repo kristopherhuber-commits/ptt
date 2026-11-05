@@ -98,6 +98,24 @@ These are the complete settings this application has. There are no others. A nam
 - **When to change it:** Edited on the Vocabulary tab. When ~/agent-configs/vocabulary.json exists it is the only store of the rules and the tab edits that file, which is re-read whenever it changes; config.json then holds the fallback copy. Editing rules is out of scope for the Concierge, which is why this key is not in its write allowlist.
 - **What can go wrong:** One pass, so a replacement is never itself replaced; the longest phrase wins where two could match; ties go in list order. An unrecognised scope drops the rule rather than widening it.
 
+### `save_clips`
+
+- **Type:** true or false
+- **Default:** `False`
+- **The Concierge may change it:** no
+- **What it does:** Save every dictation for training PTT's model on your speech (v4, FR-11): the audio, what the model typed, what was pasted and the settings in force, in clips_folder.
+- **When to change it:** Switched on and off from the tray item Save clips for training. Turn it off before dictating anything you don't want kept on disk.
+- **What can go wrong:** The clips hold whatever was dictated, so they stay on this machine (CON-6). Saving runs on a background thread and never delays a paste; a clip that fails to save is logged and dropped.
+
+### `clips_folder`
+
+- **Type:** text
+- **Default:** `%USERPROFILE%\tools\ptt-clips`
+- **The Concierge may change it:** no
+- **What it does:** Where saved dictations go. Each machine writes its own <machine> subfolder, one <yyyy-mm> folder per month. %USERPROFILE% and ~ are expanded when it is used.
+- **When to change it:** Change it only to move the clips to another local disk.
+- **What can go wrong:** Never inside this repo (it is public), the install folder (the uninstaller deletes it), or anything synced to a cloud (CON-6).
+
 ### `concierge.opt_in`
 
 - **Type:** one of `unset`, `accepted`, `declined`

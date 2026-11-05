@@ -10,8 +10,11 @@ Nothing here sleeps for a fixed period and hopes. `wait_for` polls a condition
 with a deadline, so a slow machine makes the tests slower rather than flaky.
 """
 
+import json
+import os
 import threading
 import time
+import wave
 
 import numpy as np
 import pytest
@@ -100,8 +103,18 @@ def harness(monkeypatch, tmp_path):
         state["rules"].append(tuple(rules))
         return "hello there"
 
+    def fake_transcribe_clip(model, audio, rules=()):
+        state["rules"].append(tuple(rules))
+        return transcribe.Transcript(
+            " hello there", "hello there", ("helo -> hello",),
+            ({"start": 0.0, "end": 1.0, "avg_logprob": -0.2,
+              "no_speech_prob": 0.01, "compression_ratio": 1.1},))
+
     monkeypatch.setattr(transcribe, "load_model_with_fallback", fake_load)
     monkeypatch.setattr(transcribe, "transcribe_audio", fake_transcribe)
+    monkeypatch.setattr(transcribe, "transcribe_clip", fake_transcribe_clip)
+    monkeypatch.setattr(transcribe, "model_identity",
+                        lambda name: (f"repo/{name}", "abc123"))
     monkeypatch.setattr(transcribe, "load_benchmark_clip",
                         lambda: np.zeros(16_000, np.float32))
     monkeypatch.setattr(audio_mod, "get_idle_duration", lambda: 0.0)
@@ -407,6 +420,83 @@ def test_the_vocabulary_is_read_from_settings_at_transcription_time(harness):
     wait_for(lambda: harness["rules"], what="a transcription")
 
     assert harness["rules"][-1] == rules
+
+
+# -- saving clips for training (v4, FR-11) -----------------------------------
+
+def _dictate(harness):
+    before = len(harness.get("pasted", []))
+    harness["down"].add("rctrl")
+    wait_for(lambda: harness["recorder"].recording, what="recording to start")
+    harness["down"].clear()
+    wait_for(lambda: len(harness.get("pasted", [])) > before, what="a paste")
+    wait_for(lambda: harness["states"][-1][0] == "idle", what="a return to idle")
+
+
+def _saved(root):
+    """Every (record, wav path) under a clips folder."""
+    found = []
+    for folder, _dirs, files in os.walk(root):
+        if "recordings.jsonl" in files:
+            with open(os.path.join(folder, "recordings.jsonl"), encoding="utf-8") as f:
+                for line in f:
+                    record = json.loads(line)
+                    found.append((record, os.path.join(folder, record["id"] + ".wav")))
+    return found
+
+
+def test_nothing_is_saved_while_saving_is_off(harness, tmp_path):
+    root = tmp_path / "clips"
+    harness["settings"].clips_folder = str(root)
+    _dictate(harness)
+    harness["engine"]._clip_saver.flush()
+    assert not root.exists()
+
+
+def test_every_dictation_is_saved_while_saving_is_on(harness, tmp_path, monkeypatch):
+    """FR-11's test, in small: each dictation gives one WAV and one record."""
+    monkeypatch.setenv("COMPUTERNAME", "TESTBOX")
+    root = tmp_path / "clips"
+    harness["settings"].clips_folder = str(root)
+    harness["settings"].save_clips = True
+    harness["recorder"]._samples = np.full(16_000, 0.25, np.float32)
+
+    for _ in range(3):
+        _dictate(harness)
+    harness["engine"]._clip_saver.flush()
+
+    saved = _saved(root)
+    assert len(saved) == 3
+    assert len({record["id"] for record, _ in saved}) == 3
+    for record, wav_path in saved:
+        assert record["pasted_text"] == "hello there"
+        assert record["raw_text"] == " hello there"
+        assert record["rules_fired"] == ["helo -> hello"]
+        assert record["machine"] == "testbox"
+        assert record["id"].startswith("testbox-")
+        assert record["model"] == f"repo/{harness['settings'].model}"
+        assert record["model_revision"] == "abc123"
+        assert record["compute_type"] == transcribe.CPU_COMPUTE_TYPE
+        assert record["duration_s"] == 1.0
+        assert record["segments"][0]["avg_logprob"] == -0.2
+        with wave.open(wav_path, "rb") as f:
+            assert (f.getnchannels(), f.getsampwidth(), f.getframerate()) == (1, 2, 16_000)
+            assert f.getnframes() == 16_000
+
+
+def test_a_clip_that_cannot_be_saved_is_logged_and_dictation_goes_on(
+        harness, tmp_path, log_lines):
+    """OBS-1: a clips folder that cannot be written loses the clip, not the paste."""
+    blocker = tmp_path / "not-a-folder"
+    blocker.write_text("a file where the folder should be", encoding="utf-8")
+    harness["settings"].clips_folder = str(blocker)
+    harness["settings"].save_clips = True
+
+    _dictate(harness)
+    harness["engine"]._clip_saver.flush()
+
+    assert harness["pasted"] == ["hello there"]
+    assert any("not saved" in line for line in log_lines())
 
 
 # -- what the diagnostics panel reads ----------------------------------------

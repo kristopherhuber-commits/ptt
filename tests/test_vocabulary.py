@@ -203,3 +203,23 @@ def test_a_broken_rule_returns_the_transcript_rather_than_losing_it():
         heard = property(lambda self: 1 / 0)
 
     assert vocabulary.apply_rules("still here", (Exploding(),)) == "still here"
+
+
+# -- which rules fired (v4: a saved clip records it) ---------------------------
+
+def test_the_traced_form_reports_each_rule_that_fired_in_order():
+    rules = (vocabulary.Rule("w s l", "WSL"), vocabulary.Rule("cloud code", "Claude Code"))
+    text, fired = vocabulary.apply_rules_traced("cloud code in w s l, w s l", rules)
+    assert text == "Claude Code in WSL, WSL"
+    assert fired == ("cloud code -> Claude Code", "w s l -> WSL", "w s l -> WSL")
+
+
+def test_nothing_fired_is_an_empty_tuple():
+    rules = (vocabulary.Rule("w s l", "WSL"),)
+    assert vocabulary.apply_rules_traced("nothing here", rules) == ("nothing here", ())
+    assert vocabulary.apply_rules_traced("", rules) == ("", ())
+
+
+def test_the_longer_phrase_is_the_one_reported():
+    rules = (vocabulary.Rule("w s l", "WSL"), vocabulary.Rule("w s l two", "WSL2"))
+    assert vocabulary.apply_rules_traced("w s l two", rules) == ("WSL2", ("w s l two -> WSL2",))

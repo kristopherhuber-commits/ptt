@@ -50,7 +50,7 @@ CONFIG_VERSION = 1
 _KNOWN_KEYS = (
     "version", "use_gpu", "hotkey", "model", "benchmarks",
     "audio_device", "keep_stream_warm", "ignore_short_holds", "start_click",
-    "vocabulary", "concierge",
+    "vocabulary", "concierge", "save_clips", "clips_folder",
 )
 
 #: Serialises writers of config.json. See `Settings.save`.
@@ -232,6 +232,19 @@ def _parse_vocabulary(raw, note="config.json", strict=False):
             continue
         kept.append(rule)
     return tuple(kept), None
+
+
+def _parse_folder(raw, note="config.json", strict=False):
+    """
+    A folder, stored as typed: `%USERPROFILE%` and `~` are expanded only when it
+    is used (`paths.user_folder`). Empty is refused, because it would resolve
+    to whatever the working directory happens to be.
+    """
+    if not isinstance(raw, str):
+        return None, f"is not a string ({raw!r})"
+    if not raw.strip():
+        return None, "is empty"
+    return raw.strip(), None
 
 
 # -- the shared vocabulary file (FR-10) ---------------------------------------
@@ -452,6 +465,27 @@ FIELDS = {
              "phrase wins where two could match; ties go in list order. An "
              "unrecognised scope drops the rule rather than widening it.",
     ),
+    "save_clips": Field(
+        "bool", False, agent_writable=False,
+        does="Save every dictation for training PTT's model on your speech "
+             "(v4, FR-11): the audio, what the model typed, what was pasted and "
+             "the settings in force, in clips_folder.",
+        when="Switched on and off from the tray item Save clips for training. Turn it off "
+             "before dictating anything you don't want kept on disk.",
+        risk="The clips hold whatever was dictated, so they stay on this machine "
+             "(CON-6). Saving runs on a background thread and never delays a "
+             "paste; a clip that fails to save is logged and dropped.",
+    ),
+    "clips_folder": Field(
+        "parsed", paths.DEFAULT_CLIPS_FOLDER, parse=_parse_folder,
+        json_type="string", agent_writable=False,
+        does="Where saved dictations go. Each machine writes its own "
+             "<machine> subfolder, one <yyyy-mm> folder per month. "
+             "%USERPROFILE% and ~ are expanded when it is used.",
+        when="Change it only to move the clips to another local disk.",
+        risk="Never inside this repo (it is public), the install folder (the "
+             "uninstaller deletes it), or anything synced to a cloud (CON-6).",
+    ),
     "concierge.opt_in": Field(
         "str", "unset", choices=OPT_IN_STATES, agent_writable=False,
         does="Whether the first-run Concierge card has been answered: unset, "
@@ -649,6 +683,8 @@ class Settings:
     start_click: bool = False
     vocabulary: tuple = ()
     concierge: ConciergeSettings = field(default_factory=ConciergeSettings)
+    save_clips: bool = False
+    clips_folder: str = paths.DEFAULT_CLIPS_FOLDER
 
     version: int = CONFIG_VERSION
     extra: dict = field(default_factory=dict, repr=False)
@@ -864,6 +900,8 @@ class Settings:
             "start_click": bool(self.start_click),
             "vocabulary": vocabulary_mod.to_json(self.vocabulary),
             "concierge": self.concierge.to_dict(),
+            "save_clips": bool(self.save_clips),
+            "clips_folder": str(self.clips_folder),
         }
 
     def save(self):
@@ -988,6 +1026,7 @@ def _load_config(path):
         f"audio_device={s.audio_device}, keep_stream_warm={s.keep_stream_warm}, "
         f"ignore_short_holds={s.ignore_short_holds}, start_click={s.start_click}, "
         f"vocabulary={len(s.vocabulary)}, "
+        f"save_clips={s.save_clips}, clips_folder={s.clips_folder}, "
         f"concierge={s.concierge.opt_in}/{s.concierge.model}, "
         f"version={s.version}, unknown_keys={sorted(s.extra)}"
     )

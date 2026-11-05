@@ -149,6 +149,16 @@ def _phrase_pattern(heard):
     return rf"(?<!\w)({words})(?!\w)"
 
 
+def _ordered(rules):
+    """
+    The rules in matching order: longest phrase first, ties by position.
+
+    `sorted` is stable, which is the whole of the tie-break: two phrases of the
+    same length come out in the order they were written.
+    """
+    return sorted(rules, key=lambda rule: -len(rule.heard))
+
+
 def compile_rules(rules):
     """
     One compiled pattern for every rule, and the replacements it selects between.
@@ -157,17 +167,19 @@ def compile_rules(rules):
     to match. Split out from `apply_rules` so the ordering -- longest phrase
     first, ties by position in the list -- is inspectable by a test rather than
     only observable through its effect on a sentence.
-
-    `sorted` is stable, which is the whole of the tie-break: two phrases of the
-    same length come out in the order they were written.
     """
-    ordered = sorted(rules, key=lambda rule: -len(rule.heard))
+    ordered = _ordered(rules)
     if not ordered:
         return None, ()
     pattern = re.compile(
         "|".join(_phrase_pattern(rule.heard) for rule in ordered), re.IGNORECASE
     )
     return pattern, tuple(rule.typed for rule in ordered)
+
+
+def describe(rule):
+    """One rule as a saved clip records it: `heard -> typed`."""
+    return f"{rule.heard} -> {rule.typed}"
 
 
 def apply_rules(text, rules):
@@ -178,13 +190,26 @@ def apply_rules(text, rules):
     clipboard even if a rule is nonsense, so a failure here returns the
     unmodified text rather than losing it.
     """
+    return apply_rules_traced(text, rules)[0]
+
+
+def apply_rules_traced(text, rules):
+    """
+    `apply_rules`, also returning which rules fired: ``(text, fired)``.
+
+    `fired` holds `describe(rule)` once per match, in the order they occur in
+    the text. A saved clip records it (v4, FR-11), which counts the model's
+    errors the rules corrected with no labelling at all.
+    """
     if not text or not rules:
-        return text
+        return text, ()
 
     try:
-        pattern, replacements = compile_rules(tuple(rules))
+        ordered = _ordered(tuple(rules))
+        pattern, replacements = compile_rules(ordered)
         if pattern is None:
-            return text
+            return text, ()
+        fired = []
 
         def replace(match):
             # `groups()` is one entry per alternative and exactly one of them is
@@ -192,9 +217,10 @@ def apply_rules(text, rules):
             # says which rule fired without a second scan of the text.
             for index, matched in enumerate(match.groups()):
                 if matched is not None:
+                    fired.append(describe(ordered[index]))
                     return replacements[index]
             return match.group(0)
 
-        return pattern.sub(replace, text)
+        return pattern.sub(replace, text), tuple(fired)
     except Exception:
-        return text
+        return text, ()

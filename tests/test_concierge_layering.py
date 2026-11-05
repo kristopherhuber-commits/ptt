@@ -720,6 +720,7 @@ def test_the_version_is_read_without_importing_the_package():
 
     version = build_portable.read_version(
         os.path.join(REPO, "app", "ptt", "__init__.py"))
-    assert version.count(".") == 2
+    # Three numbers, plus `.devN` on a v4 increment build (N = the increment).
+    assert re.fullmatch(r"\d+\.\d+\.\d+(\.dev\d+)?", version), version
     from ptt import __version__
     assert version == __version__

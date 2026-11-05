@@ -66,6 +66,38 @@ def local_model_dir(model_size):
     return os.path.join(APP_DIR, "models", model_size)
 
 
+# -- training (v4) -----------------------------------------------------------
+#
+# Folders outside the application, because the uninstaller deletes the install
+# folder and this repo is public (CON-6). The defaults are stored in config.json
+# unexpanded, so the generated knowledge pack -- which is in the public repo --
+# names no machine's paths, and one config.json means the same on every machine.
+
+#: Where saved dictations go (FR-11): `<this>\<machine>\<yyyy-mm>\`.
+DEFAULT_CLIPS_FOLDER = r"%USERPROFILE%\tools\ptt-clips"
+
+
+def user_folder(setting):
+    """
+    A folder setting as an absolute path, with `%VARS%` and `~` expanded.
+
+    The setting is stored as typed; this is the one place it becomes a path.
+    """
+    return os.path.abspath(os.path.expandvars(os.path.expanduser(setting)))
+
+
+def machine_name():
+    """
+    This machine's name, lower case: `darklord`, `nightlord`.
+
+    Each machine writes only its own clips folder, so moving Nightlord's clips
+    to Darklord never collides (training-data-plan.md section 3).
+    """
+    import socket
+    name = os.environ.get("COMPUTERNAME") or socket.gethostname()
+    return name.strip().lower() or "unknown"
+
+
 # -- the Concierge (v3.0) ----------------------------------------------------
 #
 # Six per-machine artifacts and one shipped one. The five that live beside

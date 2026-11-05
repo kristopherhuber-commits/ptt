@@ -36,9 +36,11 @@ import threading
 import time
 import traceback
 
+import ptt
 from ptt import audio as audio_mod
+from ptt import clips
 from ptt import hotkey as hotkey_mod
-from ptt import inject, transcribe
+from ptt import inject, paths, transcribe
 from ptt.logging_setup import log_debug
 
 #: Hotkey polling interval. GetAsyncKeyState is cheap; 20 ms is imperceptible.
@@ -144,6 +146,14 @@ class Engine:
         self._latencies = ()
         self.last_paste_target = ""
         self.last_summary = ""
+
+        # Saving for training (v4, FR-11). The saver writes on its own thread,
+        # so a slow disk never delays a paste (NFR-14). `_identity` is the
+        # resident model's `(model, revision)`, looked up on the first save
+        # after each load rather than at load time, so a machine that never
+        # saves never scans the Hugging Face cache.
+        self._clip_saver = clips.ClipSaver()
+        self._identity = None
 
     # -- public API ---------------------------------------------------------
 
@@ -254,6 +264,7 @@ class Engine:
         # from the settings object here, not cached, so the Model panel's
         # selection takes effect on the next reload with no restart.
         requested = self._settings.model
+        self._identity = None
         self._model, self.current_device, status_text = transcribe.load_model_with_fallback(
             requested, self._settings.use_gpu, self.cuda_supported,
             on_fallback=self._persist_cpu_fallback,
@@ -309,6 +320,34 @@ class Engine:
     def _ready_text(self):
         return f"Ready ({self.current_device.upper()})"
 
+    def _save_clip(self, started, samples, transcript, latency_s, mic):
+        """
+        Queue one dictation for saving, if saving is on (FR-11). Never raises.
+
+        `save_clips` is re-read here on every dictation, like the chord, so the
+        tray's Save clips item applies to the next thing said.
+        """
+        if not self._settings.save_clips:
+            return
+        try:
+            if self._identity is None:
+                self._identity = transcribe.model_identity(self.current_model)
+            model, revision = self._identity
+            record = clips.build_record(
+                machine=paths.machine_name(), started=started, samples=samples,
+                transcript=transcript, latency_s=latency_s, mic=mic,
+                app_version=ptt.__version__, model=model, model_revision=revision,
+                compute_type=(transcribe.CUDA_COMPUTE_TYPE
+                              if self.current_device == "cuda"
+                              else transcribe.CPU_COMPUTE_TYPE),
+                beam_size=transcribe.BEAM_SIZE, vad=transcribe.VAD_FILTER,
+            )
+            self._clip_saver.submit(
+                paths.user_folder(self._settings.clips_folder), record, samples)
+        except Exception as e:
+            log_debug(f"ERROR: the clip was not saved: {str(e)}")
+            log_debug(traceback.format_exc())
+
     def _record_transcription(self, seconds, text):
         """
         Remember what the last dictation cost, for the two UI surfaces that
@@ -347,6 +386,7 @@ class Engine:
         self._recorder = rec
         recording = False
         stream_open = False
+        started = None
 
         try:
             while self._running:
@@ -439,6 +479,7 @@ class Engine:
 
                         if held and not recording:
                             recording = True
+                            started = clips.utc_now()
                             # Break up the Alt press now, while it is still held: once the
                             # user releases it the menu has already taken focus.
                             inject.suppress_alt_menu()
@@ -480,8 +521,12 @@ class Engine:
                             # is checked first, so an edit made outside the
                             # application applies here too.
                             self._settings.refresh_vocabulary()
-                            text = transcribe.transcribe_audio(
+                            # Read before transcribing: the stream can close
+                            # while the model runs, and its name with it.
+                            mic = rec.device_name
+                            transcript = transcribe.transcribe_clip(
                                 self._model, samples, self._settings.vocabulary)
+                            text = transcript.text
                             t1 = time.time()
                             log_debug(f"Transcription finished in {t1-t0:.2f}s. Result: '{text}'")
                             self._record_transcription(t1 - t0, text)
@@ -493,6 +538,10 @@ class Engine:
                                 inject.paste_text(text)
                                 self.last_paste_target = inject.foreground_window_class()
                                 log_debug(f"Pasted {len(text)} chars into '{self.last_paste_target}'.")
+                            # After the paste, so saving never delays it. An
+                            # empty result is saved too: speech the model
+                            # missed is an error worth labelling.
+                            self._save_clip(started, samples, transcript, t1 - t0, mic)
                             self._emit("idle", self._ready_text())
 
                     except Exception as e:
@@ -517,4 +566,6 @@ class Engine:
             if recording:
                 rec.stop()
             rec.close_stream()
+            # Give clips still queued a moment to reach the disk.
+            self._clip_saver.flush(timeout=2.0)
             log_debug("Transcription background loop finished.")

@@ -192,10 +192,15 @@ def test_installed_sizes_reports_nothing_when_no_model_is_present(monkeypatch, t
 # -- transcribe_audio: where the vocabulary is applied ------------------------
 
 class FakeSegment:
-    """One segment of a model's output. `transcribe_audio` reads only `.text`."""
+    """One segment of a model's output: its text, and the scores a clip saves."""
 
-    def __init__(self, text):
+    def __init__(self, text, start=0.0, end=1.0):
         self.text = text
+        self.start = start
+        self.end = end
+        self.avg_logprob = -0.25
+        self.no_speech_prob = 0.0125
+        self.compression_ratio = 1.5
 
 
 class FakeModel:
@@ -296,3 +301,29 @@ def test_an_unimportable_faster_whisper_reports_cpu_when_cpu_was_asked_for(
     _model, device, _status = transcribe.load_model_with_fallback(
         "large-v3", use_gpu=False, cuda_supported=True)
     assert device == "cpu"
+
+
+# -- transcribe_clip: what a saved clip records (v4, FR-11) --------------------
+
+def test_transcribe_clip_keeps_the_raw_text_the_rules_and_the_scores():
+    model = FakeModel(" run it in w s l", " now.......")
+    rules = (vocabulary.Rule("w s l", "WSL"),)
+    result = transcribe.transcribe_clip(model, None, rules)
+    assert result.raw_text == " run it in w s l now......."
+    assert result.text == "run it in WSL now"
+    assert result.rules_fired == ("w s l -> WSL",)
+    assert len(result.segments) == 2
+    assert result.segments[0] == {"start": 0.0, "end": 1.0, "avg_logprob": -0.25,
+                                  "no_speech_prob": 0.0125, "compression_ratio": 1.5}
+
+
+def test_transcribe_audio_is_transcribe_clip_reduced_to_the_pasted_text():
+    rules = (vocabulary.Rule("w s l", "WSL"),)
+    assert transcribe.transcribe_audio(FakeModel("w s l"), None, rules) ==         transcribe.transcribe_clip(FakeModel("w s l"), None, rules).text
+
+
+def test_a_bundled_model_is_identified_by_its_tier(monkeypatch, tmp_path):
+    (tmp_path / "tiny.en").mkdir()
+    monkeypatch.setattr(transcribe.paths, "local_model_dir",
+                        lambda name: str(tmp_path / name))
+    assert transcribe.model_identity("tiny.en") == ("tiny.en", "")
