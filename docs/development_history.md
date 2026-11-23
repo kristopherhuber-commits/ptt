@@ -447,6 +447,11 @@ When packaging using PyInstaller (`--onedir` mode):
 * **Fix:** the uninstaller also removes every shared file whose `.refs` names only `faster-whisper` repositories, with its `.refs` and its emptied fan-out folder, and keeps any file another repository also uses. Tested on a scratch cache holding a Whisper-only, a mixed and an unrelated file; then run against the real cache, freeing the 704 MB.
 * **Note:** the 3.2.0 uninstaller was tested against a hand-built cache in the layout the code expected, so it could not find a layout nobody had looked at. What found it was a person uninstalling for real and asking whether the disk space came back.
 
+### 67. The Shortcut Could Not Be Pinned (v3.2.2)
+* **Symptom:** the Desktop shortcut had no **Pin to taskbar**, so PTT could not be started from the taskbar. Pinning `ptt_dictate.exe` instead is no answer: it is the renamed `pythonw.exe`, and on its own it starts Python with no script.
+* **Cause:** the shortcut targeted `_internal\run_tray.bat`. Windows offers Pin to taskbar only for a shortcut whose target is an executable.
+* **Fix:** `install.ps1` writes the Desktop shortcut with `cmd.exe` as its target and `/c "…\_internal\run_tray.bat"` as its arguments. Icon, working directory and the run-as-administrator byte are unchanged. The Startup shortcut is left as it was, since nobody pins it. Tried first by hand on Darklord (the same edit in the shortcut's Properties), then installed from a rebuilt archive on Nightlord and pinned.
+
 
 ## 🛠️ Maintenance & Execution Protocols
 

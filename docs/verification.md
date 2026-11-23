@@ -657,6 +657,16 @@ parameters exist for that — and then against the real machine.
 Not run: an uninstall started from **Settings > Apps** on a real installation, which
 is the path that elevates for itself (§7).
 
+### 5.7 v3.2.2 — a Desktop shortcut that can be pinned · 2026-11-23
+
+| ID | Test | Result |
+|---|---|---|
+| `V-M-107` | **The new shortcut code against a scratch shortcut**, run under `powershell.exe` 5.1 | ✅ pass. Target `C:\Windows\System32\cmd.exe`, arguments `/c "…\_internal\run_tray.bat"`, the microphone icon, and the run-as-administrator byte set |
+| `V-M-108` | **The same edit made by hand on Darklord**, in the installed shortcut's Properties, then **Pin to taskbar** | ✅ reported working by the user; not separately checked |
+| `V-M-109` | **A rebuilt archive installed on Nightlord**, then the Desktop shortcut pinned | ✅ pass. The installer wrote the shortcut with the `cmd.exe` target; the user pinned it and it works. The archive predates the version bump, so that installation reports 3.2.1 |
+
+Not checked: whether a reinstall over a pinned shortcut keeps the pin working. Windows appears to keep its own copy of a pinned shortcut, which would make the Desktop copy irrelevant to it.
+
 
 ---
 
@@ -786,6 +796,7 @@ question. If any of them is a box, the fix is a text label.
 
 | Date | Commit | Change |
 |---|---|---|
+| 2026-11-23 | `ec4f8a0` | **v3.2.2: the Desktop shortcut can be pinned to the taskbar.** `install.ps1` targets `cmd.exe /c "…\_internal\run_tray.bat"` rather than the batch file. `V-M-107` … `V-M-109`, `development_history.md` #67 |
 | 2026-10-20 | `955268b` | **v3.2.1: uninstall frees the shared blob store.** The Whisper weights in `hub\blobs` whose `.refs` name only `faster-whisper` repositories are removed too. `V-M-104` … `V-M-106`, `development_history.md` #66 |
 | 2026-10-20 | `5984cff` | **v3.2.0: uninstall**, from the Advanced tab and from Settings > Apps. `_internal/uninstall.ps1`, its registration in `install.ps1`, §3.4 and the `V-IN` prefix added; `V-IN-02` … `V-IN-04`, `V-M-100` … `V-M-103`; `development_history.md` #64, #65. Suite 877 → 881 |
 | 2026-10-20 | `90c69ad`, `088b961` | **v3.1.1.** The installer keeps `config.json` across an upgrade or stops (`V-IN-01`, #63); the settings window's title shows the version (`V-M-99`). Release notes rewritten as four steps (#62) |
