@@ -452,6 +452,11 @@ When packaging using PyInstaller (`--onedir` mode):
 * **Cause:** the shortcut targeted `_internal\run_tray.bat`. Windows offers Pin to taskbar only for a shortcut whose target is an executable.
 * **Fix:** `install.ps1` writes the Desktop shortcut with `cmd.exe` as its target and `/c "…\_internal\run_tray.bat"` as its arguments. Icon, working directory and the run-as-administrator byte are unchanged. The Startup shortcut is left as it was, since nobody pins it. Tried first by hand on Darklord (the same edit in the shortcut's Properties), then installed from a rebuilt archive on Nightlord and pinned.
 
+### 68. The Shortcuts Stopped Starting PTT (4.0.0.dev5)
+* **Symptom:** on Darklord (4.0.0.dev4, Windows Insider build 26300), after a reboot on 2026-11-24, neither the Startup nor the Desktop shortcut started PTT. The UAC prompt came, Yes was clicked, and nothing happened: no window, no new `debug_log.txt`. It had worked for months.
+* **Cause, as far as it was found:** Windows did not run `_internal\run_tray.bat` as the target of an elevated shortcut. Traced step by step: the `powershell` line of `run_tray.bat` never ran (Windows PowerShell logs every engine start, and none appeared); an elevated command prompt opened by hand worked; a copy of the Desktop shortcut pointed at a batch file in Downloads ran elevated; the real `run_tray.bat`, called from that elevated batch file, started PTT; and `ptt_dictate.exe app\ptt_tray.py` elevated directly started PTT. Only the combination of an elevated shortcut and `run_tray.bat` as its target failed. Why Windows began refusing it was not found; nothing in the event logs names it.
+* **Fix:** `install.ps1` writes both shortcuts with `ptt_dictate.exe` as target, `app\ptt_tray.py` as argument, the install folder as working directory and the run-as-administrator byte (`V-IN-05`). That takes the batch file and `cmd.exe` out of the launch, and an executable target is pinnable, so #67's `cmd.exe` target is no longer needed. `run_tray.bat` is still installed, for starting PTT by hand. Darklord's two shortcuts were replaced by hand the same day.
+
 
 ## 🛠️ Maintenance & Execution Protocols
 

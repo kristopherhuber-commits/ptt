@@ -381,43 +381,42 @@ if (Test-Path "$SourceDir\.venv\Scripts") {
     }
 }
 
-# 5. Create Desktop Shortcut
+# 5-6. Desktop and Startup shortcuts.
+#
+# Both start the interpreter directly, as administrator, with the tray script as
+# its argument. They used to target run_tray.bat (the Desktop one through
+# cmd.exe /c since v3.2.2), and on Darklord in November 2026 Windows stopped
+# running that batch file from an elevated shortcut: the UAC prompt came, Yes
+# was clicked, and nothing ran (development_history.md #68). An executable
+# target also makes the shortcut pinnable to the taskbar, which is what the
+# cmd.exe target was for. run_tray.bat is still installed, for starting PTT by
+# hand.
+$PttExe = "$TargetDir\.venv\Scripts\ptt_dictate.exe"
+$WshShell = New-Object -ComObject WScript.Shell
+
+function New-PttShortcut([string]$Path) {
+    $link = $WshShell.CreateShortcut($Path)
+    $link.TargetPath = $PttExe
+    $link.Arguments = "app\ptt_tray.py"
+    $link.WorkingDirectory = "$TargetDir"
+    $link.IconLocation = "C:\Windows\System32\mmres.dll,-3014"
+    $link.Description = "Push-to-Talk Local GPU Dictation"
+    $link.Save()
+    # Run as administrator: bit 0x20 of the byte at 0x15 (SLDF_RUNAS_USER).
+    $bytes = [System.IO.File]::ReadAllBytes($Path)
+    $bytes[0x15] = $bytes[0x15] -bor 0x20
+    [System.IO.File]::WriteAllBytes($Path, $bytes)
+}
+
 $DesktopPath = [Environment]::GetFolderPath('Desktop')
 $ShortcutPath = "$DesktopPath\PTT Dictation.lnk"
 Write-Host "Creating Desktop shortcut..." -ForegroundColor Gray
+New-PttShortcut $ShortcutPath
 
-$WshShell = New-Object -ComObject WScript.Shell
-$Shortcut = $WshShell.CreateShortcut($ShortcutPath)
-# Target cmd.exe, not the batch file: Windows offers "Pin to taskbar" only for
-# a shortcut whose target is an executable.
-$Shortcut.TargetPath = "$env:SystemRoot\System32\cmd.exe"
-$Shortcut.Arguments = "/c `"$TargetDir\_internal\run_tray.bat`""
-$Shortcut.WorkingDirectory = "$TargetDir"
-$Shortcut.IconLocation = "C:\Windows\System32\mmres.dll,-3014"
-$Shortcut.Description = "Push-to-Talk Local GPU Dictation"
-$Shortcut.Save()
-
-# Configure Desktop shortcut to Run as Administrator
-$bytes = [System.IO.File]::ReadAllBytes($ShortcutPath)
-$bytes[0x15] = $bytes[0x15] -bor 0x20
-[System.IO.File]::WriteAllBytes($ShortcutPath, $bytes)
-
-# 6. Create Startup Shortcut
 $StartupPath = [Environment]::GetFolderPath('Startup')
 $StartupShortcutPath = "$StartupPath\PTT Dictation.lnk"
 Write-Host "Creating Startup shortcut (to run automatically on Windows login)..." -ForegroundColor Gray
-
-$StartupShortcut = $WshShell.CreateShortcut($StartupShortcutPath)
-$StartupShortcut.TargetPath = "$TargetDir\_internal\run_tray.bat"
-$StartupShortcut.WorkingDirectory = "$TargetDir"
-$StartupShortcut.IconLocation = "C:\Windows\System32\mmres.dll,-3014"
-$StartupShortcut.Description = "Push-to-Talk Local GPU Dictation"
-$StartupShortcut.Save()
-
-# Configure Startup shortcut to Run as Administrator
-$bytesStartup = [System.IO.File]::ReadAllBytes($StartupShortcutPath)
-$bytesStartup[0x15] = $bytesStartup[0x15] -bor 0x20
-[System.IO.File]::WriteAllBytes($StartupShortcutPath, $bytesStartup)
+New-PttShortcut $StartupShortcutPath
 
 # 7. List PTT in Settings > Apps > Installed apps.
 #

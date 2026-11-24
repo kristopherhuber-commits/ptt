@@ -487,10 +487,25 @@ def test_the_installer_and_launcher_reach_out_of_their_own_directory():
     entry = open(os.path.join(REPO, "install.bat"), encoding="utf-8").read()
     assert "_internal\\install.ps1" in entry
 
-    # And the shortcuts the installer writes have to point at the new location,
-    # or every Desktop icon on an upgraded machine targets a file that moved.
+    # The launcher is still installed in its new place, for starting PTT by
+    # hand. The shortcuts no longer use it (V-IN-05).
     text = installer_text()
-    assert text.count('$TargetDir\\_internal\\run_tray.bat') >= 3
+    assert '$TargetDir\\_internal\\run_tray.bat' in text
+
+
+def test_the_shortcuts_start_the_interpreter_directly():
+    """
+    **`V-IN-05`.** Both shortcuts target `ptt_dictate.exe` with the tray script
+    as argument, not `run_tray.bat`: Windows stopped running the batch file
+    from an elevated shortcut (`development_history.md` #68), and an
+    executable target is what makes the Desktop shortcut pinnable.
+    """
+    text = installer_text()
+    assert '$PttExe = "$TargetDir\\.venv\\Scripts\\ptt_dictate.exe"' in text
+    assert "$link.TargetPath = $PttExe" in text
+    assert '$link.Arguments = "app\\ptt_tray.py"' in text
+    assert text.count("New-PttShortcut $") == 2
+    assert "System32\\cmd.exe" not in text
 
 
 def test_cublas_is_not_shipped_twice():

@@ -258,6 +258,7 @@ No requirement or design section names these yet; the source column is the scrip
 | `V-IN-02` | `install.ps1` step 7 — **the uninstaller is installed and registered** | `uninstall.ps1` is copied into `_internal\`, and `HKCU\…\Uninstall\PTTDictation` carries an `UninstallString` naming it | `test_uninstall.py::test_the_installer_copies_the_uninstaller_and_registers_it` | — |
 | `V-IN-03` | `uninstall.ps1` — **removes what PTT wrote, keeps the vocabulary** | It removes the same registry entry, matches `models--*--faster-whisper-*` and reads `.refs` for the shared blob store (#66), and has no parameter reaching `agent-configs` | `test_uninstall.py::test_the_uninstaller_removes_the_same_entry_and_keeps_the_vocabulary` | — |
 | `V-IN-04` | `paths.is_installed_copy` — **Uninstall is offered only from the installation** | True for `%LOCALAPPDATA%\Programs\ptt_dictate\app`, false for a checkout; `uninstaller_path` is inside the installation | `test_uninstall.py::test_uninstall_is_offered_only_from_the_installed_copy`, `::test_the_uninstaller_path_is_inside_the_installation` | — |
+| `V-IN-05` | `install.ps1` steps 5–6 — **both shortcuts start the interpreter directly** | Desktop and Startup shortcuts target `.venv\Scripts\ptt_dictate.exe` with `app\ptt_tray.py` as argument and the run-as-administrator byte; no shortcut targets `run_tray.bat` or `cmd.exe`. Regression for `development_history.md` #68 | `test_concierge_layering.py::test_the_shortcuts_start_the_interpreter_directly` | — |
 
 The script's behaviour is §5.6's: it deletes files and stops processes, which the unit
 suite does not do.
@@ -308,7 +309,7 @@ added four for the uninstaller.
 | `tests/test_concierge_suite.py` | 42 | `V-CG-89` … `V-CG-100` |
 | `tests/test_concierge_agent.py` | 42 | `V-CG-30` … `V-CG-45` |
 | `tests/test_concierge_llm.py` | 41 | `V-CG-20` … `V-CG-29` |
-| `tests/test_concierge_layering.py` | 37 | `V-CG-79` … `V-CG-88`, `V-CG-134` … `V-CG-137`, `V-IN-01` |
+| `tests/test_concierge_layering.py` | 38 | `V-CG-79` … `V-CG-88`, `V-CG-134` … `V-CG-137`, `V-IN-01`, `V-IN-05` |
 | `tests/test_audio.py` | 32 | `V-AU-01` … `V-AU-07` |
 | `tests/test_transcribe.py` | 35 | `V-TR-01` … `V-TR-08`, `V-CL-04` |
 | `tests/test_vocabulary.py` | 34 | `V-VC-01` … `V-VC-04`, `V-CL-04` |
