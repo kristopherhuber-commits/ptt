@@ -1,4 +1,4 @@
-# v4 increment 1: the walking skeleton (build 4.0.0.dev4)
+# v4 increment 1: the walking skeleton (build 4.0.0.dev5)
 
 **Where things are:**
 - This file: `C:\Users\huber\git\ptt\docs\script-v4inc1.md`, in git (branch `feature/training`), so it is the same on both machines after a `git pull`.
@@ -10,16 +10,16 @@ Part A now; Part B once Darklord has a few dozen clips. 4.0.0.dev4 adds the flag
 
 # Part A: saving and the flag, on both machines
 
-## Step 1 — Darklord: install 4.0.0.dev4
+## Step 1 — Darklord: install 4.0.0.dev5
 
 ```powershell
 cd $env:USERPROFILE\Downloads
-mkdir ptt_v4dev4
-tar -xf C:\Users\huber\git\ptt\ptt_dictate_dist.zip -C ptt_v4dev4
-ptt_v4dev4\install.bat
+mkdir ptt_v4dev5
+tar -xf C:\Users\huber\git\ptt\ptt_dictate_dist.zip -C ptt_v4dev5
+ptt_v4dev5\install.bat
 ```
 
-Click Yes on the UAC prompt. The installer should say "Installing PTT Dictation 4.0.0.dev4". Saving stays on from dev3 (the tray item keeps its check mark). Clips now go to `C:\Users\huber\tools\ptt-v4-training\ptt-clips`.
+Click Yes on the UAC prompt. The installer should say "Installing PTT Dictation 4.0.0.dev5". Saving stays on from dev3 (the tray item keeps its check mark). Clips now go to `C:\Users\huber\tools\ptt-v4-training\ptt-clips`. The installer rewrites the Desktop and Startup shortcuts to start `ptt_dictate.exe` directly (dev5); double-click the Desktop one and click Yes to check it starts PTT, then right-click it → **Pin to taskbar**.
 
 ## Step 2 — Darklord: dictate, then flag
 
@@ -43,9 +43,9 @@ Press right Ctrl+C twice quickly in a terminal (release both keys between presse
 ```powershell
 scp darklord:C:/Users/huber/git/ptt/ptt_dictate_dist.zip $env:USERPROFILE\Downloads\
 cd $env:USERPROFILE\Downloads
-mkdir ptt_v4dev4
-tar -xf ptt_dictate_dist.zip -C ptt_v4dev4
-ptt_v4dev4\install.bat
+mkdir ptt_v4dev5
+tar -xf ptt_dictate_dist.zip -C ptt_v4dev5
+ptt_v4dev5\install.bat
 ```
 
 Then right-click the tray icon and switch on **Save clips for training** (it shows a check mark).
