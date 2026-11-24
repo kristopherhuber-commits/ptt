@@ -97,7 +97,7 @@ One download, one archive, one thing to double-click.
   does not block components of the installed application.
 * Terminate any running PTT Dictation processes to prevent file locks.
 * Copy the application files to `C:\Users\<Username>\AppData\Local\Programs\ptt_dictate\`.
-* Create a **PTT Dictation** shortcut on the Desktop, pre-configured to **Run as Administrator** (required to type into elevated Windows apps) and styled with the built-in Windows **microphone icon**.
+* Create a **PTT Dictation** shortcut on the Desktop, pre-configured to **Run as Administrator** (required to type into elevated Windows apps) and styled with the built-in Windows **microphone icon**. Since v3.2.2 you can right-click it and select **Pin to taskbar**.
 * Create a **PTT Dictation** shortcut in the Windows Startup folder. **This does not currently start the application at log-in** — see [Known limitation](#known-limitation-it-does-not-start-itself-after-a-reboot) below.
 * Keep `config.json` and the downloaded models across an upgrade. If `config.json` cannot be set aside — almost always because a running copy still has it open — the installer stops with nothing changed rather than installing over it.
 * List **PTT Dictation** in **Settings > Apps > Installed apps** (since v3.2.0), with an Uninstall button. See [3.3 Uninstalling](#33-uninstalling).

@@ -265,7 +265,7 @@ suite does not do.
 ### 3.5 v4 — training — `design.md` §11
 
 Increment 1 (the walking skeleton). The training tools under `training/` have no unit
-tests yet; §5.7's dry run is their evidence.
+tests yet; §5.8's dry run is their evidence.
 
 | ID | Element | What it guarantees | Verified by | Req. |
 |---|---|---|---|---|
@@ -683,30 +683,40 @@ parameters exist for that — and then against the real machine.
 Not run: an uninstall started from **Settings > Apps** on a real installation, which
 is the path that elevates for itself (§7).
 
-### 5.7 v4 increment 1 — the walking skeleton · 2026-11-04
-
-Run on Darklord by Claude before the user's try-out (`docs/script-v4inc1.md`), then the user's results as they come. The two
-unknowns `design.md` §11.3 names for this increment are `V-M-108` and `V-M-110`.
+### 5.7 v3.2.2 — a Desktop shortcut that can be pinned · 2026-11-23
 
 | ID | Test | Result |
 |---|---|---|
-| `V-M-107` | **A real dictation path saved**: the benchmark clip through `transcribe_clip` with the stock model on CUDA, then `clips.save` to a scratch folder | ✅ pass. WAV and record written; raw text, pasted text and segment scores filled. `model_identity` names `mobiuslabsgmbh/faster-whisper-large-v3-turbo` at `0a363e9` |
-| `V-M-108` | **PyTorch on the Blackwell card under Windows**: torch 2.14.1+cu130 on Python 3.14, a bfloat16 matrix product | ✅ pass. Compute capability (12, 0) |
-| `V-M-109` | **Stock converted locally**: `ct2-transformers-converter` (transformers 5.22.1) on `openai/whisper-large-v3-turbo`, float16, loaded with the app's own code and environment (CTranslate2 4.7.2) | ✅ pass. 1.62 GB; 128 mel bins; the benchmark clip typed identically to the app's model, 0.44 s warm |
-| `V-M-110` | **The chain, dry run**: 39 synthetic clips cut from the benchmark clip (33 trained, 6 held out), LoRA rank 32 on encoder and decoder attention, 2 epochs, merge, float16, report | ✅ after one fix. transformers 5 saves the processor as `processor_config.json`; the converter wants `preprocessor_config.json`, so `train.py` now writes it. Held-out loss 0.398 → 0.305; the report's three columns and per-clip table written |
-| `V-M-111` | **The Model panel with a trained model**, offscreen | ✅ pass. Seventh row, "turbo, trained", its real size, selected when it is the setting; the table refits to seven rows |
-| `V-M-112` | **The labeller** with scripted input and sound stubbed | ✅ pass. Enter accepted, `?` replayed, text replaced, `-` discarded, `q` stopped; three labels appended |
-| `V-M-113` | **The double-tap mark on the real desktop** (4.0.0.dev2; the same window in dev3): `TapMark.flash()` with Windows Terminal in front, then a screen grab | ✅ pass. Terminal owns no caret, so the mark sat at the window's centre: physical (971, 753) → logical (647, 502) at 150 %. A red asterisk with a white halo, drawn over the text; visible at 150 ms, gone by 650 ms; the foreground window unchanged throughout |
-| `V-M-114` | **The labeller puts flagged clips first** (4.0.0.dev3): three clips saved with the app's code, the newest flagged with `flag_last`, then `label.py` | ✅ pass. "3 to do, 1 of them flagged"; the newest clip shown first, marked FLAGGED |
-| `V-M-115` | **The dev3 archive** | ✅ pass. `build_portable.py`'s own archive audit passed; the zip (1,785,416,875 bytes) holds `__version__ = "4.0.0.dev3"`, `clips.flag_last` and no `delete_last`, and `paths.py` names `ptt-v4-training` |
-| `V-M-116` | **The flag on Darklord, by the user** (dev3 installed 2026-11-05 09:11) | ✅ pass. Three dictations, each double-tapped: `flags.jsonl` holds exactly their three ids, every WAV and record kept, the log says "flagged … as wrong" for each; the red asterisk seen, in the middle of Windows Terminal. Two double-taps before saving was switched on logged "saving is off" and flagged nothing |
-| `V-M-117` | **Both marks on the real desktop** (4.0.0.dev4): `TapMark.flash()` with Windows Terminal in front, then screen grabs | ✅ pass. UI Automation gave the terminal's cursor cell, 14 × 28 px, in 56 ms on the first lookup of a process and 2 ms after; the system caret gave none, as the spike found. The small asterisk (19 px logical at 150 %) sat on the prompt's cursor, the big one (44 px) at the window's centre; the foreground window unchanged; both gone by 800 ms. First try failed once: the thread that first imports comtypes is initialised by the import, so initialising it again was refused; now tolerated |
-| `V-M-118` | **The dev4 archive** | ✅ pass. The build's audit passed; the zip (1,785,465,679 bytes) holds `__version__ = "4.0.0.dev4"`, `ptt/caret.py`, and comtypes' generated UI Automation wrapper |
-| `V-M-119` | **Both marks and the step 2 check on Darklord, by the user** (dev4 installed 2026-11-05 09:29) | ✅ pass. The user saw both asterisks. Two dev4 dictations double-tapped; each flagged id was the dictation just before its double-tap; 10 WAVs and 10 records. The user's first run of the check printed nothing; Claude's run of the same lines printed the expected output (probably the pasted block waiting at the prompt for Enter) |
-| `V-M-120` | **Right Ctrl+C is not a flag, by the user** | ✅ pass. No asterisk, no new flag; the terminal received Ctrl+C as usual (PTT never blocks keys). Holding right Ctrl through both presses was one 2.3 s hold, so it was saved as an ordinary dictation with empty text, as designed |
+| `V-M-107` | **The new shortcut code against a scratch shortcut**, run under `powershell.exe` 5.1 | ✅ pass. Target `C:\Windows\System32\cmd.exe`, arguments `/c "…\_internal\run_tray.bat"`, the microphone icon, and the run-as-administrator byte set |
+| `V-M-108` | **The same edit made by hand on Darklord**, in the installed shortcut's Properties, then **Pin to taskbar** | ✅ reported working by the user; not separately checked |
+| `V-M-109` | **A rebuilt archive installed on Nightlord**, then the Desktop shortcut pinned | ✅ pass. The installer wrote the shortcut with the `cmd.exe` target; the user pinned it and it works. The archive predates the version bump, so that installation reports 3.2.1 |
+
+Not checked: whether a reinstall over a pinned shortcut keeps the pin working. Windows appears to keep its own copy of a pinned shortcut, which would make the Desktop copy irrelevant to it.
+
+### 5.8 v4 increment 1 — the walking skeleton · 2026-11-04
+
+Run on Darklord by Claude before the user's try-out (`docs/script-v4inc1.md`), then the user's results as they come. The two
+unknowns `design.md` §11.3 names for this increment are `V-M-111` and `V-M-113`.
+
+| ID | Test | Result |
+|---|---|---|
+| `V-M-110` | **A real dictation path saved**: the benchmark clip through `transcribe_clip` with the stock model on CUDA, then `clips.save` to a scratch folder | ✅ pass. WAV and record written; raw text, pasted text and segment scores filled. `model_identity` names `mobiuslabsgmbh/faster-whisper-large-v3-turbo` at `0a363e9` |
+| `V-M-111` | **PyTorch on the Blackwell card under Windows**: torch 2.14.1+cu130 on Python 3.14, a bfloat16 matrix product | ✅ pass. Compute capability (12, 0) |
+| `V-M-112` | **Stock converted locally**: `ct2-transformers-converter` (transformers 5.22.1) on `openai/whisper-large-v3-turbo`, float16, loaded with the app's own code and environment (CTranslate2 4.7.2) | ✅ pass. 1.62 GB; 128 mel bins; the benchmark clip typed identically to the app's model, 0.44 s warm |
+| `V-M-113` | **The chain, dry run**: 39 synthetic clips cut from the benchmark clip (33 trained, 6 held out), LoRA rank 32 on encoder and decoder attention, 2 epochs, merge, float16, report | ✅ after one fix. transformers 5 saves the processor as `processor_config.json`; the converter wants `preprocessor_config.json`, so `train.py` now writes it. Held-out loss 0.398 → 0.305; the report's three columns and per-clip table written |
+| `V-M-114` | **The Model panel with a trained model**, offscreen | ✅ pass. Seventh row, "turbo, trained", its real size, selected when it is the setting; the table refits to seven rows |
+| `V-M-115` | **The labeller** with scripted input and sound stubbed | ✅ pass. Enter accepted, `?` replayed, text replaced, `-` discarded, `q` stopped; three labels appended |
+| `V-M-116` | **The double-tap mark on the real desktop** (4.0.0.dev2; the same window in dev3): `TapMark.flash()` with Windows Terminal in front, then a screen grab | ✅ pass. Terminal owns no caret, so the mark sat at the window's centre: physical (971, 753) → logical (647, 502) at 150 %. A red asterisk with a white halo, drawn over the text; visible at 150 ms, gone by 650 ms; the foreground window unchanged throughout |
+| `V-M-117` | **The labeller puts flagged clips first** (4.0.0.dev3): three clips saved with the app's code, the newest flagged with `flag_last`, then `label.py` | ✅ pass. "3 to do, 1 of them flagged"; the newest clip shown first, marked FLAGGED |
+| `V-M-118` | **The dev3 archive** | ✅ pass. `build_portable.py`'s own archive audit passed; the zip (1,785,416,875 bytes) holds `__version__ = "4.0.0.dev3"`, `clips.flag_last` and no `delete_last`, and `paths.py` names `ptt-v4-training` |
+| `V-M-119` | **The flag on Darklord, by the user** (dev3 installed 2026-11-05 09:11) | ✅ pass. Three dictations, each double-tapped: `flags.jsonl` holds exactly their three ids, every WAV and record kept, the log says "flagged … as wrong" for each; the red asterisk seen, in the middle of Windows Terminal. Two double-taps before saving was switched on logged "saving is off" and flagged nothing |
+| `V-M-120` | **Both marks on the real desktop** (4.0.0.dev4): `TapMark.flash()` with Windows Terminal in front, then screen grabs | ✅ pass. UI Automation gave the terminal's cursor cell, 14 × 28 px, in 56 ms on the first lookup of a process and 2 ms after; the system caret gave none, as the spike found. The small asterisk (19 px logical at 150 %) sat on the prompt's cursor, the big one (44 px) at the window's centre; the foreground window unchanged; both gone by 800 ms. First try failed once: the thread that first imports comtypes is initialised by the import, so initialising it again was refused; now tolerated |
+| `V-M-121` | **The dev4 archive** | ✅ pass. The build's audit passed; the zip (1,785,465,679 bytes) holds `__version__ = "4.0.0.dev4"`, `ptt/caret.py`, and comtypes' generated UI Automation wrapper |
+| `V-M-122` | **Both marks and the step 2 check on Darklord, by the user** (dev4 installed 2026-11-05 09:29) | ✅ pass. The user saw both asterisks. Two dev4 dictations double-tapped; each flagged id was the dictation just before its double-tap; 10 WAVs and 10 records. The user's first run of the check printed nothing; Claude's run of the same lines printed the expected output (probably the pasted block waiting at the prompt for Enter) |
+| `V-M-123` | **Right Ctrl+C is not a flag, by the user** | ✅ pass. No asterisk, no new flag; the terminal received Ctrl+C as usual (PTT never blocks keys). Holding right Ctrl through both presses was one 2.3 s hold, so it was saved as an ordinary dictation with empty text, as designed |
 
 Not yet run, and the user's to run (§7): on Nightlord, `FR-11`'s counts and the double-tap
-(Darklord's passed: `V-M-119`, `V-M-120`); `FR-17` on both machines; the first report on real clips.
+(Darklord's passed: `V-M-122`, `V-M-123`); `FR-17` on both machines; the first report on real clips.
 
 
 ---
@@ -838,11 +848,12 @@ question. If any of them is a box, the fix is a text label.
 
 | Date | Commit | Change |
 |---|---|---|
-| 2026-11-05 | `1905668` | The user's Darklord steps 2–3 on dev4: §5.7 `V-M-119`, `V-M-120`. The try-out steps move into git as `docs/script-v4inc1.md` |
-| 2026-11-05 | `0a08e9e` | **4.0.0.dev4: a small asterisk at the text cursor as well as the big one**, at the user's request. `caret.py` (UI Automation, else the system caret); comtypes pinned in `requirements.txt`. §3.5 `V-CL-09`; §5.7 `V-M-115` … `V-M-118` (`V-M-115`, `V-M-116` in `832c15a`). Suite 934 → 940 |
-| 2026-11-05 | `4bfae4d` | **4.0.0.dev3: the double-tap flags the newest clip instead (`FR-13` as written)**, after the user reconsidered; a tap with another key pressed is no longer a tap; the labeller shows flagged clips first. `V-CL-06` and `V-CL-07` rewritten; §5.7 `V-M-114`. Suite 928 → 934 |
-| 2026-11-05 | `bbbc101` | **4.0.0.dev2: the double-tap deletes the newest clip**, at the user's request, ahead of increment 2. §3.5 gains `V-CL-06` … `V-CL-08`; §5.7 `V-M-113`. Suite 913 → 928 |
-| 2026-11-04 | `86d6ed3` … `c67dfad` | **v4 increment 1 (4.0.0.dev1): saving, trained models in the Model tab, the training tools.** §3.5 added with `V-CL-01` … `V-CL-05` and `V-TM-01` … `V-TM-03`; §5.7 with `V-M-107` … `V-M-112`. Suite 881 → 913 |
+| 2026-11-23 | `ec4f8a0` | **v3.2.2: the Desktop shortcut can be pinned to the taskbar.** `install.ps1` targets `cmd.exe /c "…\_internal\run_tray.bat"` rather than the batch file. `V-M-107` … `V-M-109`, `development_history.md` #67 |
+| 2026-11-05 | `1905668` | The user's Darklord steps 2–3 on dev4: §5.8 `V-M-122`, `V-M-123`. The try-out steps move into git as `docs/script-v4inc1.md` |
+| 2026-11-05 | `0a08e9e` | **4.0.0.dev4: a small asterisk at the text cursor as well as the big one**, at the user's request. `caret.py` (UI Automation, else the system caret); comtypes pinned in `requirements.txt`. §3.5 `V-CL-09`; §5.8 `V-M-118` … `V-M-121` (`V-M-118`, `V-M-119` in `832c15a`). Suite 934 → 940 |
+| 2026-11-05 | `4bfae4d` | **4.0.0.dev3: the double-tap flags the newest clip instead (`FR-13` as written)**, after the user reconsidered; a tap with another key pressed is no longer a tap; the labeller shows flagged clips first. `V-CL-06` and `V-CL-07` rewritten; §5.8 `V-M-117`. Suite 928 → 934 |
+| 2026-11-05 | `bbbc101` | **4.0.0.dev2: the double-tap deletes the newest clip**, at the user's request, ahead of increment 2. §3.5 gains `V-CL-06` … `V-CL-08`; §5.8 `V-M-116`. Suite 913 → 928 |
+| 2026-11-04 | `86d6ed3` … `c67dfad` | **v4 increment 1 (4.0.0.dev1): saving, trained models in the Model tab, the training tools.** §3.5 added with `V-CL-01` … `V-CL-05` and `V-TM-01` … `V-TM-03`; §5.8 with `V-M-110` … `V-M-115`. Suite 881 → 913 |
 | 2026-10-20 | `955268b` | **v3.2.1: uninstall frees the shared blob store.** The Whisper weights in `hub\blobs` whose `.refs` name only `faster-whisper` repositories are removed too. `V-M-104` … `V-M-106`, `development_history.md` #66 |
 | 2026-10-20 | `5984cff` | **v3.2.0: uninstall**, from the Advanced tab and from Settings > Apps. `_internal/uninstall.ps1`, its registration in `install.ps1`, §3.4 and the `V-IN` prefix added; `V-IN-02` … `V-IN-04`, `V-M-100` … `V-M-103`; `development_history.md` #64, #65. Suite 877 → 881 |
 | 2026-10-20 | `90c69ad`, `088b961` | **v3.1.1.** The installer keeps `config.json` across an upgrade or stops (`V-IN-01`, #63); the settings window's title shows the version (`V-M-99`). Release notes rewritten as four steps (#62) |

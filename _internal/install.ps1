@@ -388,7 +388,10 @@ Write-Host "Creating Desktop shortcut..." -ForegroundColor Gray
 
 $WshShell = New-Object -ComObject WScript.Shell
 $Shortcut = $WshShell.CreateShortcut($ShortcutPath)
-$Shortcut.TargetPath = "$TargetDir\_internal\run_tray.bat"
+# Target cmd.exe, not the batch file: Windows offers "Pin to taskbar" only for
+# a shortcut whose target is an executable.
+$Shortcut.TargetPath = "$env:SystemRoot\System32\cmd.exe"
+$Shortcut.Arguments = "/c `"$TargetDir\_internal\run_tray.bat`""
 $Shortcut.WorkingDirectory = "$TargetDir"
 $Shortcut.IconLocation = "C:\Windows\System32\mmres.dll,-3014"
 $Shortcut.Description = "Push-to-Talk Local GPU Dictation"
